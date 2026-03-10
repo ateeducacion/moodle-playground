@@ -1,0 +1,4 @@
+.env
+.dist/
+vendor/moodle.zip
+vendor/moodle/
