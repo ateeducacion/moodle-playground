@@ -1,5 +1,4 @@
-import { PhpCgiWorker } from "https://cdn.jsdelivr.net/npm/php-cgi-wasm@0.0.9-alpha-32/+esm";
-import { PGlite } from "https://cdn.jsdelivr.net/npm/@electric-sql/pglite/dist/index.js";
+import { PGlite, PhpCgiWorker } from "./lib/runtime-imports.js";
 import {
   CGI_MIME_TYPES,
   DEFAULT_BOOT_OPTIONS,
@@ -17,8 +16,7 @@ import {
 } from "./lib/config-template.js";
 import {
   ensureDir,
-  extractZipEntries,
-  fetchWithProgress,
+  fetchManifestEntries,
   writeEntriesToPhp,
 } from "./lib/moodle-loader.js";
 
@@ -27,6 +25,9 @@ const bootState = {
   ready: false,
   lastError: null,
   entryUrl: `${MOODLE_BASE_PATH}/install.php`,
+  lastStep: null,
+  moodleVersion: null,
+  resolvedScriptPath: null,
 };
 
 const textEncoder = new TextEncoder();
@@ -41,6 +42,7 @@ async function broadcast(message) {
 }
 
 function publishProgress(phase, detail, progress = null) {
+  bootState.lastStep = `${phase}: ${detail}`;
   return broadcast({
     kind: "bootstrap-progress",
     phase,
@@ -67,6 +69,7 @@ const php = new PhpCgiWorker({
   PGlite,
   prefix: MOODLE_BASE_PATH,
   docroot: DOCROOT,
+  locateFile: (path) => `/node_modules/php-cgi-wasm/${path}`,
   types: CGI_MIME_TYPES,
   rewrite: (pathname) => {
     if (pathname === MOODLE_BASE_PATH || pathname === `${MOODLE_BASE_PATH}/`) {
@@ -103,14 +106,17 @@ const php = new PhpCgiWorker({
       const options = { ...DEFAULT_BOOT_OPTIONS, ...rawOptions };
       const origin = options.origin || self.location.origin;
       const timezone = options.timezone || "UTC";
+      const entryScriptPath = `${DOCROOT}/install.php`;
 
       bootState.active = true;
       bootState.ready = false;
       bootState.lastError = null;
+      bootState.moodleVersion = options.moodleVersion || DEFAULT_BOOT_OPTIONS.moodleVersion;
+      bootState.resolvedScriptPath = entryScriptPath;
 
       try {
-        await publishProgress("runtime", "Refreshing php-cgi-wasm runtime.", 0.02);
-        await phpInstance.refresh();
+        await publishProgress("runtime", "Waiting for php-cgi-wasm runtime.", 0.02);
+        await phpInstance.binary;
 
         await publishProgress("filesystem", "Creating Moodle directories.", 0.06);
         await ensureDir(phpInstance, DOCROOT);
@@ -122,15 +128,18 @@ const php = new PhpCgiWorker({
         await ensureDir(phpInstance, TEMP_ROOT);
         await ensureDir(phpInstance, `${TEMP_ROOT}/sessions`);
 
-        await publishProgress("download", `Downloading Moodle from ${options.moodleZipUrl}`, 0.1);
-        const zipBytes = await fetchWithProgress(options.moodleZipUrl, ({ ratio }) =>
-          publishProgress("download", "Downloading Moodle ZIP.", 0.1 + ratio * 0.35),
+        await publishProgress("download", `Loading Moodle manifest from ${options.moodleManifestUrl}`, 0.1);
+        const { manifest, entries, bundleUrl } = await fetchManifestEntries(options.moodleManifestUrl, ({ ratio }) =>
+          publishProgress("download", `Fetching Moodle tar bundle ${options.moodleVersion || ""}`.trim(), 0.1 + ratio * 0.38),
         );
 
-        await publishProgress("archive", "Expanding Moodle ZIP into memory.", 0.48);
-        const entries = extractZipEntries(zipBytes);
+        await publishProgress("archive", `Extracting Moodle tar bundle from ${bundleUrl}`, 0.5);
 
-        await publishProgress("filesystem", `Writing ${entries.length} files to the PHP VFS.`, 0.52);
+        await publishProgress(
+          "filesystem",
+          `Writing ${entries.length} extracted files to the PHP VFS.`,
+          0.52,
+        );
         await writeEntriesToPhp(phpInstance, entries, MOODLE_ROOT, ({ ratio, path }) =>
           publishProgress("filesystem", `Writing ${path}`, 0.52 + ratio * 0.36),
         );
@@ -155,28 +164,53 @@ const php = new PhpCgiWorker({
           textEncoder.encode(createBootstrapNotice()),
         );
 
+        await publishProgress("verify", "Checking Moodle CGI entrypoint.", 0.97);
+        const entrypointStatus = await phpInstance.analyzePath(entryScriptPath);
+
+        if (!entrypointStatus?.exists || entrypointStatus.object?.isFolder) {
+          throw new Error(`Missing CGI entrypoint at ${entryScriptPath}`);
+        }
+
         bootState.active = false;
         bootState.ready = true;
-        bootState.entryUrl = `${MOODLE_BASE_PATH}/install.php?lang=en`;
+        bootState.entryUrl = `${MOODLE_BASE_PATH}/${manifest.entryUrl || "install.php"}?lang=en`;
+        bootState.lastStep = "ready";
 
         await publishProgress("ready", "Moodle Playground is ready.", 1);
         await broadcast({
           kind: "bootstrap-ready",
           entryUrl: bootState.entryUrl,
           notes: OPTIONAL_EXTENSION_NOTES,
+          lastStep: bootState.lastStep,
+          moodleVersion: bootState.moodleVersion,
+          moodleManifestUrl: options.moodleManifestUrl,
+          moodleBundleUrl: bundleUrl,
+          resolvedScriptPath: bootState.resolvedScriptPath,
           timestamp: nowIso(),
         });
 
         return {
           ok: true,
           entryUrl: bootState.entryUrl,
+          lastStep: bootState.lastStep,
+          moodleVersion: bootState.moodleVersion,
+          moodleManifestUrl: options.moodleManifestUrl,
+          moodleBundleUrl: bundleUrl,
+          resolvedScriptPath: bootState.resolvedScriptPath,
           notes: OPTIONAL_EXTENSION_NOTES,
           fileCount: entries.length,
         };
       } catch (error) {
         bootState.active = false;
         bootState.ready = false;
-        bootState.lastError = String(error?.stack || error?.message || error);
+        bootState.lastError = JSON.stringify({
+          name: error?.name || "Error",
+          message: error?.message || String(error),
+          errno: error?.errno,
+          code: error?.code,
+          step: bootState.lastStep,
+          stack: error?.stack || null,
+        });
 
         await broadcast({
           kind: "bootstrap-error",

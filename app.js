@@ -2,12 +2,10 @@ import {
   DEFAULT_BOOT_OPTIONS,
   MOODLE_BASE_PATH,
   OPTIONAL_EXTENSION_NOTES,
-  PHP_CGI_MSG_BUS_URL,
   SERVICE_WORKER_URL,
 } from "./lib/constants.js";
 import { createDirectProbe } from "./lib/php-runtime.js";
-
-const { onMessage, sendMessageFor } = await import(PHP_CGI_MSG_BUS_URL);
+import { onMessage, sendMessageFor } from "./lib/runtime-imports.js";
 
 const ENABLE_DIRECT_PHP_PROBE = false;
 
@@ -79,7 +77,9 @@ function handleWorkerMessage(event) {
     setPhase("ready", "Moodle bootstrap completed.");
     setProgress(1);
     setReady(data.entryUrl);
-    appendLog(`Bootstrap ready. Entry URL: ${data.entryUrl}`);
+    appendLog(
+      `Bootstrap ready. Entry URL: ${data.entryUrl} (version=${data.moodleVersion}, manifest=${data.moodleManifestUrl}, bundle=${data.moodleBundleUrl}, script=${data.resolvedScriptPath})`,
+    );
 
     for (const note of data.notes || OPTIONAL_EXTENSION_NOTES) {
       appendLog(note);
@@ -144,23 +144,28 @@ async function bootstrapMoodle() {
   setProgress(0.01);
   appendLog("Bootstrapping Moodle.");
 
-  const result = await sendMessage("bootstrapMoodle", {
-    ...DEFAULT_BOOT_OPTIONS,
-    origin,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  });
+  const result = await sendMessage("bootstrapMoodle", [
+    {
+      ...DEFAULT_BOOT_OPTIONS,
+      origin,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    },
+  ]);
 
   if (!result?.ok) {
     elements.startButton.disabled = false;
     throw new Error(result?.message || "Bootstrap failed.");
   }
 
+  appendLog(
+    `Worker resolved version=${result.moodleVersion} using ${result.moodleManifestUrl} and ${result.moodleBundleUrl} at ${result.resolvedScriptPath}`,
+  );
   setReady(result.entryUrl || `${MOODLE_BASE_PATH}/install.php`);
 }
 
 async function restoreWorkerState() {
   const sendMessage = sendMessageFor(SERVICE_WORKER_URL);
-  const state = await sendMessage("getBootState");
+  const state = await sendMessage("getBootState", []);
 
   if (state?.ready) {
     setPhase("ready", "Moodle was already bootstrapped in the active worker.");
