@@ -242,8 +242,8 @@
         <h1>Moodle Playground</h1>
         <p class="lede">
           PoC para arrancar Moodle 4.4 dentro del navegador, sin backend tradicional. El primer
-          arranque descarga el ZIP oficial, lo monta en el VFS de WebAssembly y deriva la navegación
-          PHP al Service Worker.
+          arranque exige un bundle de Moodle preparado offline, reutiliza caché local si existe y
+          deriva la navegación PHP al worker dedicado a través del Service Worker.
         </p>
 
         <div class="grid">
@@ -257,7 +257,7 @@
           </article>
           <article class="card">
             <strong>Moodle</strong>
-            <span>Bootstrap de Moodle 4.4 desde ZIP remoto</span>
+            <span>Bootstrap de Moodle desde manifest + bundle offline</span>
           </article>
         </div>
 

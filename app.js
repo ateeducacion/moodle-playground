@@ -2,14 +2,13 @@ import {
   DEFAULT_BOOT_OPTIONS,
   MOODLE_BASE_PATH,
   OPTIONAL_EXTENSION_NOTES,
-  PHP_CGI_MSG_BUS_URL,
+  PHP_WORKER_URL,
   SERVICE_WORKER_URL,
 } from "./lib/constants.js";
-import { createDirectProbe } from "./lib/php-runtime.js";
-
-const { onMessage, sendMessageFor } = await import(PHP_CGI_MSG_BUS_URL);
 
 const ENABLE_DIRECT_PHP_PROBE = false;
+const phpWorker = new Worker(new URL(PHP_WORKER_URL, window.location.href), { type: "module" });
+const pendingWorkerCalls = new Map();
 
 const elements = {
   log: document.querySelector("#log"),
@@ -33,6 +32,26 @@ function appendLog(message, level = "info") {
 
   elements.log.append(line);
   elements.log.scrollTop = elements.log.scrollHeight;
+}
+
+function formatError(error) {
+  if (!error) {
+    return "Unknown error";
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (error instanceof Error) {
+    return String(error.stack || error.message || error);
+  }
+
+  try {
+    return JSON.stringify(error, null, 2);
+  } catch {
+    return String(error);
+  }
 }
 
 function setPhase(phase, text) {
@@ -59,12 +78,43 @@ function setReady(entryUrl) {
   setRuntimePill("Ready");
 }
 
-function handleWorkerMessage(event) {
-  onMessage(event);
+function monitorWorker(registration) {
+  const worker = registration.installing || registration.waiting || registration.active;
 
+  if (!worker) {
+    appendLog("Service Worker registered without an installing worker yet.");
+    return;
+  }
+
+  appendLog(`Service Worker state: ${worker.state}`);
+  worker.addEventListener("statechange", () => {
+    appendLog(`Service Worker state: ${worker.state}`);
+
+    if (worker.state === "redundant") {
+      setRuntimePill("Error", true);
+      setPhase("error", "Service Worker became redundant.");
+    }
+  });
+}
+
+function handleWorkerMessage(event) {
   const { data } = event;
 
   if (!data || typeof data !== "object") {
+    return;
+  }
+
+  if (data.kind === "rpc-result" && pendingWorkerCalls.has(data.id)) {
+    const { resolve } = pendingWorkerCalls.get(data.id);
+    pendingWorkerCalls.delete(data.id);
+    resolve(data.result);
+    return;
+  }
+
+  if (data.kind === "rpc-error" && pendingWorkerCalls.has(data.id)) {
+    const { reject } = pendingWorkerCalls.get(data.id);
+    pendingWorkerCalls.delete(data.id);
+    reject(new Error(formatError(data.error)));
     return;
   }
 
@@ -80,6 +130,11 @@ function handleWorkerMessage(event) {
     setProgress(1);
     setReady(data.entryUrl);
     appendLog(`Bootstrap ready. Entry URL: ${data.entryUrl}`);
+    if (data.manifest?.release) {
+      appendLog(`Resolved Moodle release ${data.manifest.release} from ${data.sourceKind}.`);
+    } else {
+      appendLog(`Bootstrap source: ${data.sourceKind || "unknown"}.`);
+    }
 
     for (const note of data.notes || OPTIONAL_EXTENSION_NOTES) {
       appendLog(note);
@@ -96,27 +151,56 @@ function handleWorkerMessage(event) {
   }
 }
 
+phpWorker.addEventListener("message", handleWorkerMessage);
+navigator.serviceWorker?.addEventListener("message", (event) => {
+  const data = event.data;
+
+  if (!data || data.kind !== "php-response-debug") {
+    return;
+  }
+
+  appendLog(`PHP response ${data.status} for ${data.url}`, data.status >= 500 ? "error" : "info");
+
+  if (data.body) {
+    appendLog(data.body.slice(0, 4000), data.status >= 500 ? "error" : "info");
+  }
+});
+
+function callPhpWorker(action, params = null) {
+  const id = window.crypto.randomUUID();
+
+  return new Promise((resolve, reject) => {
+    pendingWorkerCalls.set(id, { resolve, reject });
+    phpWorker.postMessage({ id, action, params });
+  });
+}
+
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     throw new Error("This browser does not support Service Workers.");
   }
 
-  navigator.serviceWorker.addEventListener("message", handleWorkerMessage);
-  navigator.serviceWorker.startMessages?.();
+  const registrations = await navigator.serviceWorker.getRegistrations();
 
-  const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL, {
-    scope: "./",
-    type: "module",
-  });
+  for (const existing of registrations) {
+    if (!existing.active?.scriptURL?.includes("/sw.js")) {
+      continue;
+    }
 
-  await navigator.serviceWorker.ready;
-
-  if (!navigator.serviceWorker.controller) {
-    await new Promise((resolve) => {
-      navigator.serviceWorker.addEventListener("controllerchange", () => resolve(), { once: true });
-    });
+    appendLog(`Unregistering previous Service Worker: ${existing.scope}`);
+    await existing.unregister();
   }
 
+  const swUrl = new URL(SERVICE_WORKER_URL, window.location.href);
+  swUrl.searchParams.set("ts", String(Date.now()));
+
+  const registration = await navigator.serviceWorker.register(swUrl, {
+    scope: "./",
+    type: "module",
+    updateViaCache: "none",
+  });
+
+  monitorWorker(registration);
   appendLog(`Service Worker ready: ${registration.scope}`);
   return registration;
 }
@@ -127,12 +211,12 @@ async function maybeRunProbe() {
   }
 
   appendLog("Running optional direct PhpWeb probe.");
+  const { createDirectProbe } = await import("./lib/php-runtime.js");
   const probe = await createDirectProbe();
   appendLog(probe.output.trim());
 }
 
 async function bootstrapMoodle() {
-  const sendMessage = sendMessageFor(SERVICE_WORKER_URL);
   const origin = window.location.origin;
 
   elements.startButton.disabled = true;
@@ -140,11 +224,11 @@ async function bootstrapMoodle() {
   elements.previewFrame.removeAttribute("src");
 
   setRuntimePill("Bootstrapping");
-  setPhase("bootstrap", "Requesting Moodle bootstrap in the Service Worker.");
+  setPhase("bootstrap", "Requesting Moodle bootstrap in the dedicated PHP worker.");
   setProgress(0.01);
   appendLog("Bootstrapping Moodle.");
 
-  const result = await sendMessage("bootstrapMoodle", {
+  const result = await callPhpWorker("bootstrapMoodle", {
     ...DEFAULT_BOOT_OPTIONS,
     origin,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -159,8 +243,7 @@ async function bootstrapMoodle() {
 }
 
 async function restoreWorkerState() {
-  const sendMessage = sendMessageFor(SERVICE_WORKER_URL);
-  const state = await sendMessage("getBootState");
+  const state = await callPhpWorker("getBootState");
 
   if (state?.ready) {
     setPhase("ready", "Moodle was already bootstrapped in the active worker.");
@@ -180,15 +263,12 @@ async function main() {
 
   await registerServiceWorker();
   await maybeRunProbe();
-
-  const restored = await restoreWorkerState();
-
-  if (!restored) {
-    setPhase("idle", "Ready to download Moodle and mount it into the PHP VFS.");
-    setProgress(0);
-    setRuntimePill("Idle");
-    appendLog("Click Bootstrap Moodle to start the first install.");
-  }
+  setPhase("idle", "Ready to resolve the Moodle manifest and mount the cached bundle into the PHP VFS.");
+  setProgress(0);
+  setRuntimePill("Idle");
+  appendLog("Service Worker re-registered for this session.");
+  appendLog("PHP runtime moved to a dedicated worker for compatibility.");
+  appendLog("Click Bootstrap Moodle to fetch the manifest and mount the Moodle bundle.");
 
   elements.startButton.addEventListener("click", async () => {
     try {
@@ -197,7 +277,7 @@ async function main() {
       elements.startButton.disabled = false;
       setRuntimePill("Error", true);
       setPhase("error", "Bootstrap failed.");
-      appendLog(String(error?.stack || error?.message || error), "error");
+      appendLog(formatError(error), "error");
     }
   });
 }
@@ -205,5 +285,5 @@ async function main() {
 main().catch((error) => {
   setRuntimePill("Fatal", true);
   setPhase("fatal", "The app failed to start.");
-  appendLog(String(error?.stack || error?.message || error), "error");
+  appendLog(formatError(error), "error");
 });
