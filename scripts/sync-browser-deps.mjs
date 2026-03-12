@@ -24,8 +24,21 @@ const extensionPackages = [
   "php-wasm-phar",
 ];
 
+const runtimeEntryCandidates = {
+  "php-wasm": ["PhpWorker.mjs", "PhpWorker.js", "PhpBase.mjs", "PhpBase.js"],
+  "php-cgi-wasm": ["PhpCgiBase.mjs", "PhpCgiBase.js", "PhpCgiWorker.mjs", "PhpCgiWorker.js"],
+};
+
 function ensureDir(path) {
   mkdirSync(path, { recursive: true });
+}
+
+function fileExists(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function copyTree(sourceDir, targetDir, transform = null) {
@@ -78,9 +91,10 @@ function transformPhpEsm(sourcePath, targetPath) {
 function copyPhpRuntime(packageName, targetName) {
   const sourceDir = resolvePhpRuntimeSourceDir(packageName);
   const targetDir = resolve(vendorDir, targetName);
+  const baseSourceDir = resolve(repoDir, "node_modules", packageName);
 
   rmSync(targetDir, { recursive: true, force: true });
-  copyTree(sourceDir, targetDir, (sourcePath, targetPath) => {
+  copyTree(baseSourceDir, targetDir, (sourcePath, targetPath) => {
     const extension = extname(sourcePath);
 
     if (extension === ".mjs") {
@@ -101,18 +115,76 @@ function copyPhpRuntime(packageName, targetName) {
     };
   });
 
+  if (sourceDir !== baseSourceDir) {
+    overlayCustomPhpRuntimeArtifacts(sourceDir, targetDir);
+  }
+
   for (const skipPath of readdirSync(targetDir, { recursive: true }).filter((entry) => entry.endsWith(".skip"))) {
     rmSync(join(targetDir, skipPath), { force: true });
   }
 
+  createPhpRuntimeCompatibilityAliases(targetName, targetDir);
+
   console.log(`Copied ${packageName} from ${relative(repoDir, sourceDir) || sourceDir}`);
+}
+
+function overlayCustomPhpRuntimeArtifacts(sourceDir, targetDir) {
+  for (const entry of readdirSync(sourceDir)) {
+    const sourcePath = join(sourceDir, entry);
+
+    if (!statSync(sourcePath).isFile()) {
+      continue;
+    }
+
+    const extension = extname(entry);
+    const isRuntimeBinaryAsset = extension === ".wasm" || extension === ".so";
+    const isVersionedRuntimeScript = /^php8\.\d+-/u.test(entry);
+
+    if (!isRuntimeBinaryAsset && !isVersionedRuntimeScript) {
+      continue;
+    }
+
+    if (extension === ".mjs") {
+      const contents = readFileSync(sourcePath, "utf8").replaceAll(".mjs", ".js");
+      writeFileSync(join(targetDir, entry.replace(/\.mjs$/u, ".js")), contents);
+      continue;
+    }
+
+    cpSync(sourcePath, join(targetDir, entry));
+  }
+}
+
+function createPhpRuntimeCompatibilityAliases(targetName, targetDir) {
+  if (targetName === "php-wasm") {
+    const versionedWorker = resolve(targetDir, "php8.3-worker.js");
+    const genericWorker = resolve(targetDir, "php-worker.js");
+    const versionedWorkerWasm = resolve(targetDir, "php8.3-worker.mjs.wasm");
+    const genericWorkerWasm = resolve(targetDir, "php8.3-worker.js.wasm");
+
+    if (fileExists(versionedWorker) && !fileExists(genericWorker)) {
+      cpSync(versionedWorker, genericWorker);
+    }
+
+    if (fileExists(versionedWorkerWasm) && !fileExists(genericWorkerWasm)) {
+      cpSync(versionedWorkerWasm, genericWorkerWasm);
+    }
+  }
+
+  if (targetName === "php-cgi-wasm") {
+    const versionedWorkerWasm = resolve(targetDir, "php8.3-cgi-worker.mjs.wasm");
+    const genericWorkerWasm = resolve(targetDir, "php8.3-cgi-worker.js.wasm");
+
+    if (fileExists(versionedWorkerWasm) && !fileExists(genericWorkerWasm)) {
+      cpSync(versionedWorkerWasm, genericWorkerWasm);
+    }
+  }
 }
 
 function resolvePhpRuntimeSourceDir(packageName) {
   const overrideDir = resolve(runtimeOverrideRoot, packageName);
 
   try {
-    if (statSync(overrideDir).isDirectory()) {
+    if (statSync(overrideDir).isDirectory() && runtimeOverrideLooksUsable(packageName, overrideDir)) {
       return overrideDir;
     }
   } catch {
@@ -122,9 +194,32 @@ function resolvePhpRuntimeSourceDir(packageName) {
   return resolve(repoDir, "node_modules", packageName);
 }
 
+function runtimeOverrideLooksUsable(packageName, overrideDir) {
+  const candidates = runtimeEntryCandidates[packageName] ?? [];
+
+  for (const candidate of candidates) {
+    try {
+      if (statSync(resolve(overrideDir, candidate)).isFile()) {
+        return true;
+      }
+    } catch {
+      // keep checking
+    }
+  }
+
+  return false;
+}
+
 function patchPhpCgiBase(targetDir) {
   const patchFile = (fileName) => {
     const filePath = resolve(targetDir, fileName);
+    try {
+      if (!statSync(filePath).isFile()) {
+        return;
+      }
+    } catch {
+      return;
+    }
     const original = readFileSync(filePath, "utf8");
     let patched = original.replace(
       "putEnv(php, 'HTTP_HOST', selfUrl.host);",
@@ -155,6 +250,7 @@ function patchPhpCgiBase(targetDir) {
   };
 
   patchFile("PhpCgiBase.js");
+  patchFile("PhpCgiBase.mjs");
 }
 
 function copyBrowserPackage(packageName) {

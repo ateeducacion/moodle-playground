@@ -1,16 +1,16 @@
+import { phpVersion } from './config.js';
+import { phpVersionFull } from './config.js';
 import { OutputBuffer } from './OutputBuffer.js';
 import { _Event } from './_Event.js';
 import { fsOps } from './fsOps.js';
 import { resolveDependencies } from './resolveDependencies.js';
-
-const importMeta = import.meta;
 
 const STR = 'string';
 const NUM = 'number';
 
 export class PhpBase extends EventTarget
 {
-	constructor(phpBinLoader, args = {}, sapi = 'embed')
+	constructor(PhpBinary, args = {}, sapi = 'embed')
 	{
 		super();
 
@@ -31,9 +31,6 @@ export class PhpBase extends EventTarget
 
 		this.autoTransaction = ('autoTransaction' in args) ? args.autoTransaction : true;
 		this.transactionStarted = false;
-
-		this.phpVersion = args.version;
-		this.phpVariant = args.variant;
 
 		this.shared = args.shared = ('shared' in args) ? args.shared : {};
 
@@ -57,37 +54,28 @@ export class PhpBase extends EventTarget
 
 		const files = args.files || [];
 
-		const {files: sharedLibFiles, libs: sharedlibs, urlLibs: sharedLibUrls} = resolveDependencies(args.sharedLibs, this);
-		const {files: dynamicLibFiles, libs: dynamiclibs, urlLibs: dyamicLibUrls} = resolveDependencies(args.dynamicLibs, this);
+		const {files: extraFiles, libs, urlLibs} = resolveDependencies(args.sharedLibs, this);
 
 		args.locateFile = (path, directory) => {
-			args.debug && console.error('Loading %s',  path);
 			let located = userLocateFile(path, directory);
 			if(located !== undefined)
 			{
 				return located;
 			}
-			if(sharedLibUrls[path])
+			if(urlLibs[path])
 			{
-				return sharedLibUrls[path];
-			}
-			if(dyamicLibUrls[path])
-			{
-				return dyamicLibUrls[path];
+				return urlLibs[path];
 			}
 		};
 
 		this.valueIndex = 0;
 
-		const phpArgs = Object.assign({}, defaults, phpSettings, args, fixed);
-
-		this.binary = phpBinLoader.then(({default: PHP}) => new PHP(phpArgs)).then(async php => {
-			await php.ccall(
+		this.binary = new PhpBinary(Object.assign({}, defaults, phpSettings, args, fixed)).then(async php => {
+			php.ccall(
 				'pib_storage_init'
 				, NUM
 				, []
 				, []
-				, {async: true}
 			);
 
 			if(!php.FS.analyzePath('/preload').exists)
@@ -95,41 +83,25 @@ export class PhpBase extends EventTarget
 				php.FS.mkdir('/preload');
 			}
 
-			const allFiles = files.concat(sharedLibFiles, dynamicLibFiles);
-
-			// Make sure folder structure exists before preloading files
-			allFiles.forEach(fileDef => {
-				const segments = fileDef.parent.split('/');
-				let currentPath = '';
-				for (const segment of segments) {
-					if (!segment) continue;
-
-					currentPath += segment + '/';
-					if (!php.FS.analyzePath(currentPath).exists) {
-						php.FS.mkdir(currentPath);
-					}
-				}
-			});
-
-			await Promise.all(allFiles.map(
+			await Promise.all(files.concat(extraFiles).map(
 				fileDef => new Promise(accept => php.FS.createPreloadedFile(
 					fileDef.parent,
 					fileDef.name,
-					fileDef.url instanceof URL ? fileDef.url.href : fileDef.url,
+					fileDef.url,
 					true,
 					false,
 					accept,
 				))
 			));
 
-			const iniLines = sharedlibs.map(lib => {
+			const iniLines = libs.map(lib => {
 				if(typeof lib === 'string' || lib instanceof URL)
 				{
 					return `extension=${lib}`;
 				}
 				else if(typeof lib === 'object' && lib.ini)
 				{
-					return `extension=${lib.name ?? String(lib.url).split('/').pop()}`;
+					return `extension=${String(lib.url).split('/').pop()}`;
 				}
 			});
 
@@ -219,17 +191,17 @@ export class PhpBase extends EventTarget
 		return this._enqueue(phpCode => this._run(phpCode), [phpCode]);
 	}
 
-	_run(phpCode)
+	async _run(phpCode)
 	{
-		return this.binary.then(php => {
-			return php.ccall(
-				'pib_run'
-				, NUM
-				, [STR]
-				, [`?>${phpCode}`]
-			);
-		})
-		.finally(() => this.flush())
+		const call = (await this.binary).ccall(
+			'pib_run'
+			, NUM
+			, [STR]
+			, [`?>${phpCode}`]
+			, {async: true}
+		);
+
+		return call.finally(() => this.flush());
 	}
 
 	exec(phpCode)
@@ -425,3 +397,6 @@ export class PhpBase extends EventTarget
 		return this._enqueue(fsOps.unlink, [this.binary, path]);
 	}
 }
+
+PhpBase.phpVersion = phpVersion;
+PhpBase.phpVersionFull = phpVersionFull;
