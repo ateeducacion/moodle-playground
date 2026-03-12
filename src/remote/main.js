@@ -241,10 +241,16 @@ function buildEntryUrl(scopeId, runtimeId, path) {
 function finalizeFrameReady(scopeId, runtimeId) {
   let path = activePath;
   let href = buildEntryUrl(scopeId, runtimeId, path).toString();
+  let frameDocument = null;
 
   try {
-    const currentHref = frameEl.contentWindow?.location?.href;
+    const frameWindow = frameEl.contentWindow;
+    const currentHref = frameWindow?.location?.href;
     if (!currentHref || currentHref === "about:blank") {
+      return false;
+    }
+    frameDocument = frameWindow?.document || null;
+    if (!frameDocument?.body || isFrameDocumentStalled()) {
       return false;
     }
     href = currentHref;
@@ -331,6 +337,7 @@ function navigateFrame(scopeId, runtimeId, path, { reload = false, force = false
   const entryHref = entryUrl.toString();
 
   clearFrameRecoveryTimer();
+  frameRecoveryAttempted = false;
   activePath = path;
   if (force) {
     lastAnnouncedFrameHref = "";
