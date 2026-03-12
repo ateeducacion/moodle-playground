@@ -1,0 +1,45 @@
+{
+  "$schema": "./blueprint-schema.json",
+  "meta": {
+    "title": "Moodle Playground Blueprint",
+    "author": "moodle-playground",
+    "description": "Default Moodle Playground bootstrap blueprint."
+  },
+  "preferredVersions": {
+    "php": "8.3",
+    "moodle": "5.0.x"
+  },
+  "landingPage": "/install.php?lang=en",
+  "siteOptions": {
+    "fullname": "Moodle Playground",
+    "shortname": "Playground",
+    "locale": "en",
+    "timezone": "UTC"
+  },
+  "login": {
+    "username": "admin",
+    "password": "password",
+    "email": "admin@example.com"
+  },
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@example.com",
+      "password": "password",
+      "role": "manager"
+    }
+  ],
+  "categories": [
+    {
+      "name": "Playground Courses"
+    }
+  ],
+  "courses": [
+    {
+      "fullname": "Getting Started",
+      "shortname": "PLAY101",
+      "category": "Playground Courses",
+      "summary": "Default course provisioned from the Moodle Playground blueprint."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Moodle Playground Runtime Host</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./src/styles/app.css">
+  </head>
+  <body data-app="remote">
+    <div class="remote-boot">
+      <iframe id="remote-frame" title="Moodle Site Host"></iframe>
+      <div class="remote-boot__card">
+        <strong>Configuring Moodle Playground</strong>
+        <p id="remote-status">Loading playground runtime.</p>
+        <div class="remote-boot__progress">
+          <div class="loading-indicator" aria-hidden="true">
+            <span class="loading-spinner"></span>
+            <span class="loading-bar"></span>
+          </div>
+          <span class="loading-copy">Loading runtime…</span>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./src/remote/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "bundleVersion": "0.2.1",
+  "defaultBlueprintUrl": "./assets/blueprints/default.blueprint.json",
+  "siteTitle": "Moodle Playground",
+  "landingPath": "/install.php?lang=en",
+  "locale": "en",
+  "timezone": "UTC",
+  "autologin": false,
+  "resetOnVersionMismatch": true,
+  "admin": {
+    "username": "admin",
+    "password": "password",
+    "email": "admin@example.com"
+  },
+  "runtimes": [
+    {
+      "id": "php83-cgi",
+      "label": "PHP 8.3 CGI",
+      "phpVersionLabel": "8.3",
+      "assetBase": "./vendor",
+      "cgiWasmPath": "./vendor/php-cgi-wasm",
+      "mountStrategy": "readonly-vfs",
+      "sharedLibs": [
+        "dom",
+        "iconv",
+        "intl",
+        "libxml",
+        "simplexml",
+        "xml",
+        "zlib",
+        "zip",
+        "mbstring",
+        "openssl",
+        "phar"
+      ],
+      "missingExtensions": [
+        "xmlreader",
+        "xmlwriter",
+        "gd",
+        "curl",
+        "fileinfo",
+        "sodium"
+      ],
+      "default": true
+    }
+  ]
+}

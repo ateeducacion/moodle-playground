@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ateeducacion.github.io/moodle-playground/assets/blueprints/blueprint-schema.json",
+  "title": "Moodle Playground Blueprint",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "preferredVersions": {
+      "type": "object",
+      "properties": {
+        "php": { "type": "string" },
+        "moodle": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "landingPage": {
+      "type": "string"
+    },
+    "siteOptions": {
+      "type": "object",
+      "properties": {
+        "fullname": { "type": "string" },
+        "shortname": { "type": "string" },
+        "locale": { "type": "string" },
+        "timezone": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "login": {
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string" },
+          "password": { "type": "string" },
+          "role": { "type": "string" }
+        },
+        "required": ["username", "email", "password"]
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      }
+    },
+    "courses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fullname": { "type": "string" },
+          "shortname": { "type": "string" },
+          "category": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "required": ["fullname", "shortname"]
+      }
+    }
+  },
+  "additionalProperties": true
+}
