@@ -1,4 +1,4 @@
-PORT ?= 8080
+PORT ?= 8093
 CHANNEL ?= stable500
 
 .PHONY: deps sync prepare-runtime bundle prepare serve up clean reset

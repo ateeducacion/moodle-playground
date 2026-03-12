@@ -24,12 +24,60 @@ const LIBS = {
   zlib: PhpWasmZlib,
 };
 
+function buildPhpModuleFilename(runtime, extension) {
+  const version = String(runtime?.phpVersionLabel || "8.3").trim();
+  return `php${version}-${extension}.so`;
+}
+
+function createManualXmlLibDefs(runtime) {
+  return [
+    {
+      name: "libxml2.so",
+      url: new URL("../../vendor/php-wasm-libxml/libxml2.so", import.meta.url),
+      ini: false,
+    },
+    {
+      name: buildPhpModuleFilename(runtime, "xml"),
+      url: new URL(`../../vendor/php-wasm-xml/${buildPhpModuleFilename(runtime, "xml")}`, import.meta.url),
+      ini: true,
+    },
+    {
+      name: buildPhpModuleFilename(runtime, "dom"),
+      url: new URL(`../../vendor/php-wasm-dom/${buildPhpModuleFilename(runtime, "dom")}`, import.meta.url),
+      ini: true,
+    },
+    {
+      name: buildPhpModuleFilename(runtime, "simplexml"),
+      url: new URL(`../../vendor/php-wasm-simplexml/${buildPhpModuleFilename(runtime, "simplexml")}`, import.meta.url),
+      ini: true,
+    },
+  ];
+}
+
 export function resolveSharedLibs(runtime) {
-  return (runtime.sharedLibs || []).map((name) => {
+  const requested = new Set(runtime.sharedLibs || []);
+  const resolved = [];
+
+  // Load the libxml/xml family in a fixed order instead of relying on module shorthand.
+  if (requested.has("libxml") || requested.has("xml") || requested.has("dom") || requested.has("simplexml")) {
+    resolved.push(...createManualXmlLibDefs(runtime));
+    requested.delete("libxml");
+    requested.delete("xml");
+    requested.delete("dom");
+    requested.delete("simplexml");
+  }
+
+  for (const name of runtime.sharedLibs || []) {
+    if (!requested.has(name)) {
+      continue;
+    }
+
     const lib = LIBS[name];
     if (!lib) {
       throw new Error(`Unknown PHP shared library '${name}' in runtime config.`);
     }
-    return lib;
-  });
+    resolved.push(lib);
+  }
+
+  return resolved;
 }

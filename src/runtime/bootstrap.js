@@ -10,7 +10,6 @@ import {
 } from "./config-template.js";
 import { buildManifestState } from "./manifest.js";
 import {
-  ensureDir,
   readJsonFile,
   resolveBootstrapArchive,
   writeJsonFile,
@@ -26,7 +25,7 @@ const AUTOLOAD_CHECK_PATH = `${MOODLE_ROOT}/__autoload_check.php`;
 const INSTALL_CHECK_PATH = `${MOODLE_ROOT}/__install_check.php`;
 const INSTALL_RUNNER_PATH = `${MOODLE_ROOT}/__install_database.php`;
 const PDO_PROBE_PATH = `${MOODLE_ROOT}/__pdo_probe.php`;
-const PDO_DDL_PROBE_PATH = `${MOODLE_ROOT}/__pdo_ddl_probe.php`;
+const XML_SMOKE_PATH = `${MOODLE_ROOT}/__xml_smoke.php`;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
   const INTERNAL_RUNTIME_FILES = [
@@ -35,7 +34,7 @@ const textDecoder = new TextDecoder();
   INSTALL_CHECK_PATH,
   INSTALL_RUNNER_PATH,
   PDO_PROBE_PATH,
-  PDO_DDL_PROBE_PATH,
+  XML_SMOKE_PATH,
 ];
 
 function nowIso() {
@@ -73,6 +72,26 @@ function buildInstallStatePath(scopeId, runtimeId) {
   return `${CONFIG_ROOT}/moodle-playground-install-${scope}-${runtime}.json`;
 }
 
+function ensureDirInBinary(binary, path) {
+  const parts = path.split("/").filter(Boolean);
+  let current = "";
+
+  for (const part of parts) {
+    current += `/${part}`;
+    const about = binary.FS.analyzePath(current);
+
+    if (about?.exists) {
+      if (about.object && binary.FS.isDir(about.object.mode)) {
+        continue;
+      }
+
+      throw new Error(`Cannot create directory ${current}: path exists and is not a directory.`);
+    }
+
+    binary.FS.mkdir(current);
+  }
+}
+
 function manifestStateMatches(savedState, manifestState) {
   return savedState?.runtimeId === manifestState.runtimeId
     && savedState?.bundleVersion === manifestState.bundleVersion
@@ -84,6 +103,41 @@ function installStateMatches(savedState, manifestState, dbName) {
   return manifestStateMatches(savedState, manifestState)
     && savedState?.dbName === dbName
     && savedState?.installed === true;
+}
+
+function createPublishGate(publish) {
+  let lastKey = "";
+  let lastProgress = -1;
+  let lastTime = 0;
+
+  return (detail, progress, key = detail) => {
+    const now = Date.now();
+    const progressChanged = lastProgress < 0 || Math.abs(progress - lastProgress) >= 0.025 || progress >= 0.999;
+    const keyChanged = key !== lastKey;
+    const timeElapsed = now - lastTime >= 200;
+
+    if (!keyChanged && !progressChanged && !timeElapsed) {
+      return;
+    }
+
+    lastKey = key;
+    lastProgress = progress;
+    lastTime = now;
+    publish(detail, progress);
+  };
+}
+
+async function readJsonFileBestEffort(php, path, timeoutMs = 750) {
+  try {
+    return await Promise.race([
+      readJsonFile(php, path),
+      new Promise((resolve) => {
+        setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  }
 }
 
 function createAutoloadCheckPhp() {
@@ -497,7 +551,69 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-function createPdoDdlProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
+function createXmlSmokePhp() {
+  return `<?php
+header('content-type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+
+$result = [
+    'extensionLoaded' => extension_loaded('xml'),
+    'functions' => [
+        'xml_parser_create' => function_exists('xml_parser_create'),
+        'xml_parse' => function_exists('xml_parse'),
+        'xml_error_string' => function_exists('xml_error_string'),
+    ],
+    'steps' => [],
+];
+
+try {
+    if (!extension_loaded('xml')) {
+        throw new Exception('xml extension is not loaded');
+    }
+
+    if (!function_exists('xml_parser_create')) {
+        throw new Exception('xml_parser_create() is not available');
+    }
+
+    $result['steps'][] = 'extension';
+    $parser = xml_parser_create('UTF-8');
+    if (!$parser) {
+        throw new Exception('xml_parser_create() returned a falsy parser');
+    }
+
+    $result['steps'][] = 'parser-created';
+    $xml = '<root><item>alpha</item><item>beta</item></root>';
+    $ok = xml_parse($parser, $xml, true);
+    if (!$ok) {
+        $code = xml_get_error_code($parser);
+        throw new Exception('xml_parse() failed: ' . xml_error_string($code) . ' (code ' . $code . ')');
+    }
+
+    $result['steps'][] = 'parsed';
+    xml_parser_free($parser);
+    $result['parseOk'] = true;
+} catch (Throwable $error) {
+    $result['parseOk'] = false;
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+        'file' => $error->getFile(),
+        'line' => $error->getLine(),
+    ];
+}
+
+$buffer = ob_get_clean();
+if ($buffer !== '') {
+    $result['output'] = $buffer;
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+`;
+}
+
+function createPdoSmokeProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
   const candidates = [
     "pgsql:dbname=" + dbName,
     "pgsql:" + dbName,
@@ -524,31 +640,44 @@ $pass = '${escapePhpSingleQuoted(dbPassword)}';
 $candidates = json_decode('${encodedCandidates}', true);
 
 foreach ($candidates as $dsn) {
+    $candidate = [
+        'dsn' => $dsn,
+        'ok' => false,
+        'steps' => [],
+    ];
     try {
         $pdo = new PDO($dsn, $user, $pass);
+        $candidate['steps'][] = 'connect';
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $candidate['steps'][] = 'set-errmode';
         $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+        $candidate['steps'][] = 'drop';
         $pdo->exec('CREATE TABLE mdl_playground_probe (id BIGINT PRIMARY KEY, name VARCHAR(255) NOT NULL)');
-        $pdo->exec("INSERT INTO mdl_playground_probe (id, name) VALUES (1, 'ok')");
+        $candidate['steps'][] = 'create';
+        $stmt = $pdo->prepare('INSERT INTO mdl_playground_probe (id, name) VALUES (?, ?)');
+        $candidate['steps'][] = 'prepare';
+        $stmt->execute([1, 'alpha']);
+        $stmt->execute([2, 'beta']);
+        $candidate['steps'][] = 'insert';
         $rows = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => true,
-            'rows' => $rows,
-        ];
+        $candidate['steps'][] = 'select';
+        $candidate['ok'] = true;
+        $candidate['rows'] = $rows;
         $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+        $candidate['steps'][] = 'cleanup';
         $pdo = null;
+        $result['candidates'][] = $candidate;
+        break;
     } catch (Throwable $error) {
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => false,
-            'error' => [
-                'type' => get_class($error),
-                'message' => $error->getMessage(),
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
-            ],
+        $candidate['error'] = [
+            'type' => get_class($error),
+            'message' => $error->getMessage(),
+            'file' => $error->getFile(),
+            'line' => $error->getLine(),
         ];
+        $result['candidates'][] = $candidate;
+        continue;
+    } finally {
     }
 }
 
@@ -590,25 +719,25 @@ async function prepareMoodleRuntime({
   phpIni,
   installRunnerPhp,
   pdoProbePhp,
-  pdoDdlProbePhp,
   publish,
   allowDiagnostics = false,
 }) {
   const shouldMountArchive = !manifestStateMatches(savedManifestState, manifestState);
+  const binary = await php.binary;
 
-  await ensureDir(php, DOCROOT);
-  await ensureDir(php, MOODLE_ROOT);
-  await ensureDir(php, MOODLEDATA_ROOT);
-  await ensureDir(php, `${MOODLEDATA_ROOT}/cache`);
-  await ensureDir(php, `${MOODLEDATA_ROOT}/localcache`);
-  await ensureDir(php, `${MOODLEDATA_ROOT}/sessions`);
-  await ensureDir(php, TEMP_ROOT);
-  await ensureDir(php, `${TEMP_ROOT}/sessions`);
-  await ensureDir(php, CONFIG_ROOT);
+  publish("Preparing Moodle runtime directories.", 0.845);
+  ensureDirInBinary(binary, DOCROOT);
+  ensureDirInBinary(binary, MOODLE_ROOT);
+  ensureDirInBinary(binary, MOODLEDATA_ROOT);
+  ensureDirInBinary(binary, `${MOODLEDATA_ROOT}/cache`);
+  ensureDirInBinary(binary, `${MOODLEDATA_ROOT}/localcache`);
+  ensureDirInBinary(binary, `${MOODLEDATA_ROOT}/sessions`);
+  ensureDirInBinary(binary, TEMP_ROOT);
+  ensureDirInBinary(binary, `${TEMP_ROOT}/sessions`);
+  ensureDirInBinary(binary, CONFIG_ROOT);
 
   if (archive.kind === "vfs-image") {
     publish(shouldMountArchive ? "Mounting the readonly Moodle VFS image." : "Reusing the readonly Moodle VFS image.", 0.56);
-    const binary = await php.binary;
     mountReadonlyVfs(binary, {
       imageBytes: archive.bytes,
       entries: archive.image.entries || [],
@@ -623,13 +752,13 @@ async function prepareMoodleRuntime({
     });
   }
 
-  await php.writeFile(`${DOCROOT}/php.ini`, textEncoder.encode(phpIni));
-  await php.writeFile(`${MOODLE_ROOT}/config.php`, textEncoder.encode(configPhp));
-  await php.writeFile(AUTOLOAD_CHECK_PATH, textEncoder.encode(createAutoloadCheckPhp()));
-  await php.writeFile(INSTALL_CHECK_PATH, textEncoder.encode(createInstallCheckPhp()));
-  await php.writeFile(INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
-  await php.writeFile(PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
-  await php.writeFile(PDO_DDL_PROBE_PATH, textEncoder.encode(pdoDdlProbePhp));
+  binary.FS.writeFile(`${DOCROOT}/php.ini`, textEncoder.encode(phpIni));
+  binary.FS.writeFile(`${MOODLE_ROOT}/config.php`, textEncoder.encode(configPhp));
+  binary.FS.writeFile(AUTOLOAD_CHECK_PATH, textEncoder.encode(createAutoloadCheckPhp()));
+  binary.FS.writeFile(INSTALL_CHECK_PATH, textEncoder.encode(createInstallCheckPhp()));
+  binary.FS.writeFile(INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
+  binary.FS.writeFile(PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
+  binary.FS.writeFile(XML_SMOKE_PATH, textEncoder.encode(createXmlSmokePhp()));
 
   if (allowDiagnostics) {
     await writeJsonFile(php, MANIFEST_STATE_PATH, {
@@ -686,13 +815,16 @@ async function runPdoProbe(php, dbConfig) {
   };
 }
 
-async function runPdoDdlProbe(php) {
-  const output = await requestRuntimeScript(php, "/__pdo_ddl_probe.php");
+async function runXmlSmoke(php) {
+  const output = await requestRuntimeScript(php, "/__xml_smoke.php");
   const payload = output.trim();
   const jsonStart = payload.indexOf("{");
   const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
 
-  return jsonPayload ? JSON.parse(jsonPayload) : {};
+  return {
+    ...(jsonPayload ? JSON.parse(jsonPayload) : {}),
+    errorOutput: "",
+  };
 }
 
 async function requestRuntimeScript(php, path, searchParams) {
@@ -735,6 +867,7 @@ export async function bootstrapMoodle({
 }) {
   const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
   const effectiveConfig = buildEffectivePlaygroundConfig(config, blueprint);
+  const gatePublish = createPublishGate(publish);
   let archive = await resolveBootstrapArchive({
     manifestUrl: "./assets/manifests/latest.json",
   }, ({ ratio, cached, phase, detail }) => {
@@ -749,7 +882,7 @@ export async function bootstrapMoodle({
     }
 
     const progress = cached ? 0.44 : 0.2 + (typeof ratio === "number" ? ratio * 0.22 : 0.22);
-    publish(detail || "Downloading Moodle bundle.", progress);
+    gatePublish(detail || "Downloading Moodle bundle.", progress, phase || "bundle-download");
   });
 
   if (runtime.mountStrategy === "zip-extract" && archive.manifest?.bundle?.url) {
@@ -758,7 +891,7 @@ export async function bootstrapMoodle({
       archive.manifest,
       ({ ratio, cached }) => {
         const progress = cached ? 0.56 : 0.5 + (typeof ratio === "number" ? ratio * 0.12 : 0.12);
-        publish("Downloading writable Moodle ZIP bundle.", progress);
+        gatePublish("Downloading writable Moodle ZIP bundle.", progress, "zip-download");
       },
     );
 
@@ -771,12 +904,16 @@ export async function bootstrapMoodle({
   }
 
   const manifestState = buildManifestState(archive.manifest, runtimeId, config.bundleVersion);
-  const savedManifestState = await readJsonFile(php, MANIFEST_STATE_PATH);
+  publish("Reading persisted manifest state.", 0.81);
+  const savedManifestState = await readJsonFileBestEffort(php, MANIFEST_STATE_PATH);
+  publish("Persisted manifest state loaded.", 0.815);
 
   const wwwroot = buildPublicBase(origin, scopeId, runtimeId);
   const dbName = buildDatabaseName(scopeId, runtimeId);
   const installStatePath = buildInstallStatePath(scopeId, runtimeId);
-  const savedInstallState = await readJsonFile(php, installStatePath);
+  publish("Reading persisted install state.", 0.818);
+  const savedInstallState = await readJsonFileBestEffort(php, installStatePath);
+  publish("Persisted install state loaded.", 0.82);
   const dbConfig = {
     dbHost: "idb-storage",
     dbName,
@@ -787,7 +924,6 @@ export async function bootstrapMoodle({
   let shouldIgnoreComponentCache = false;
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
-  const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
   let configPhp = createMoodleConfigPhp({
     adminDirectory: ADMIN_DIRECTORY,
     componentCachePath: COMPONENT_CACHE_PATH,
@@ -796,6 +932,8 @@ export async function bootstrapMoodle({
     prefix: "mdl_",
     wwwroot,
   });
+
+  publish("Skipping standalone PDO smoke probe inside the worker to avoid nested-worker locks.", 0.835);
 
   publish("Writing Moodle runtime configuration.", 0.84);
   await prepareMoodleRuntime({
@@ -807,7 +945,6 @@ export async function bootstrapMoodle({
     phpIni,
     installRunnerPhp,
     pdoProbePhp,
-    pdoDdlProbePhp,
     publish,
     allowDiagnostics: true,
   });
@@ -829,7 +966,14 @@ export async function bootstrapMoodle({
     publish(`PDO probe failed: ${detail}`, 0.868);
   }
 
-  publish("Skipping standalone PDO DDL probe and continuing with Moodle bootstrap.", 0.869);
+  publish("Running XML parser smoke test.", 0.872);
+  const xmlSmoke = await runXmlSmoke(php);
+  if (xmlSmoke.parseOk) {
+    publish(`XML smoke test passed: ${xmlSmoke.steps?.join(" -> ") || "ok"}.`, 0.876);
+  } else {
+    const detail = xmlSmoke.error?.message || "Unknown XML parser failure.";
+    throw new Error(`XML smoke test failed: ${detail}`);
+  }
 
   let installState = null;
   const hasSavedInstallState = Boolean(savedInstallState?.installed);

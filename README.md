@@ -14,7 +14,7 @@ cd moodle-playground
 make up
 ```
 
-Open <http://localhost:8080>.
+Open <http://localhost:8093>.
 
 ### Prerequisites
 
@@ -30,7 +30,7 @@ Open <http://localhost:8080>.
 | `make up` | Install deps, prepare runtime assets, build the Moodle bundle, and serve locally |
 | `make prepare` | Install npm deps, sync browser runtime assets, and build the bundle |
 | `make bundle` | Build the Moodle bundle and manifest |
-| `make serve` | Start a static server on port 8080 |
+| `make serve` | Start a static server on port 8093 |
 | `make clean` | Remove generated bundle and manifest artifacts |
 | `make reset` | Clean generated bundle artifacts and the vendored runtime |
 
@@ -89,12 +89,28 @@ The browser runtime depends on vendored assets under `vendor/`, prepared via:
 npm run sync-browser-deps
 ```
 
+If you build a custom `php-wasm` / `php-cgi-wasm` for Moodle, place the built package folders under:
+
+```text
+.local-runtime/php-wasm
+.local-runtime/php-cgi-wasm
+```
+
+Then run:
+
+```bash
+npm run sync-browser-deps
+```
+
+The sync script will prefer those local runtime folders over `node_modules/`.
+
 The current runtime resolves these shared PHP libraries:
 
 - `dom`
 - `iconv`
 - `intl`
 - `libxml`
+- `xml`
 - `simplexml`
 - `zlib`
 - `zip`
@@ -102,7 +118,7 @@ The current runtime resolves these shared PHP libraries:
 - `openssl`
 - `phar`
 
-Some Moodle capabilities may still require additional extensions or a custom `php-wasm` build.
+The current bootstrap also runs a minimal XML smoke test before Moodle installation. If that test fails with a missing WASM import inside `php-cgi-wasm`, the current runtime binary is not sufficient and a custom `php-wasm` / `php-cgi-wasm` build is required.
 
 ## Deployment
 

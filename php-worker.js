@@ -93,7 +93,8 @@ async function getRuntimeState() {
       progress: 0.12,
     });
 
-    await php.refresh();
+    php.refresh();
+    await php.binary;
 
     const publish = (detail, progress) => {
       postShell({

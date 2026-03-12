@@ -48,6 +48,17 @@ make serve
 make up
 ```
 
+By default `make serve` uses port `8093` in this repo.
+
+If a custom `php-wasm` / `php-cgi-wasm` build is available locally, place it under:
+
+```text
+.local-runtime/php-wasm
+.local-runtime/php-cgi-wasm
+```
+
+`npm run sync-browser-deps` will prefer those folders over `node_modules/`.
+
 ### Generated Assets
 
 - `assets/moodle/`: readonly runtime bundle files (`.vfs.bin`, index, optional zip)
@@ -120,6 +131,7 @@ The runtime currently resolves these browser-side PHP shared libraries:
 - `iconv`
 - `intl`
 - `libxml`
+- `xml`
 - `simplexml`
 - `zlib`
 - `zip`
@@ -134,6 +146,8 @@ If Moodle fails due to missing requirements, check:
 - `scripts/sync-browser-deps.mjs`
 
 Do not add a library name to runtime config unless the browser asset is actually available in `vendor/` or the sync/build pipeline has been updated accordingly.
+
+The current bootstrap includes an explicit XML smoke test before Moodle installation. If it fails with a missing WASM import inside `php-cgi-wasm`, assume the vendored runtime binary is insufficient and switch to a custom runtime build instead of adding more Moodle-side patches.
 
 ## Blueprints
 

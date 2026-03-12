@@ -1,6 +1,6 @@
 import { PhpCgiWorker } from "../../vendor/php-cgi-wasm/PhpCgiWorker.js";
 import { PhpWorker } from "../../vendor/php-wasm/PhpWorker.js";
-import { PGlite, parse, protocol } from "../../vendor/pglite/index.js";
+import { PGlite } from "../../vendor/pglite/index.js";
 import { MOODLE_ROOT } from "./config-template.js";
 import { resolveSharedLibs } from "./runtime-registry.js";
 
@@ -56,14 +56,7 @@ class PGliteCompat extends PGlite {
   exec(query, options) {
     console.info("[pglite-compat] exec", query);
     this.__playgroundDirty = true;
-
-    if (!this.ready) {
-      return this.waitReady.then(() => this.exec(query, options));
-    }
-
-    const messages = this.#parseProtocolMessages(protocol.serialize.query(query));
-    console.info("[pglite-compat] exec:messages", messages.map((entry) => entry.name));
-    return parse.parseResults(messages, this.parsers, options, undefined);
+    return super.exec(query, options);
   }
 
   query(query, params = [], options) {
@@ -72,43 +65,7 @@ class PGliteCompat extends PGlite {
     if (isMutatingQuery) {
       this.__playgroundDirty = true;
     }
-
-    if (!this.ready) {
-      return this.waitReady.then(() => this.query(query, params, options));
-    }
-
-    if (!params.length) {
-      const result = this.exec(query, options)[0] ?? { rows: [], fields: [], affectedRows: 0 };
-      return isMutatingQuery ? (result.affectedRows ?? 0) : result;
-    }
-
-    const messages = [];
-    messages.push(...this.#parseProtocolMessages(protocol.serialize.parse({
-      text: query,
-      types: options?.paramTypes,
-    })));
-
-    const statementDescription = this.#parseProtocolMessages(protocol.serialize.describe({ type: "S" }));
-    messages.push(...statementDescription);
-
-    const dataTypeIds = parse.parseDescribeStatementResults(statementDescription);
-    const values = params.map((param, index) => {
-      const oid = dataTypeIds[index];
-      if (param === null || param === undefined) {
-        return null;
-      }
-
-      const serialize = options?.serializers?.[oid] ?? this.serializers[oid];
-      return serialize ? serialize(param) : String(param);
-    });
-
-    messages.push(...this.#parseProtocolMessages(protocol.serialize.bind({ values })));
-    messages.push(...this.#parseProtocolMessages(protocol.serialize.describe({ type: "P" })));
-    messages.push(...this.#parseProtocolMessages(protocol.serialize.execute({})));
-    messages.push(...this.#parseProtocolMessages(protocol.serialize.sync()));
-    console.info("[pglite-compat] query:messages", messages.map((entry) => entry.name));
-
-    return parse.parseResults(messages, this.parsers, options, undefined)[0];
+    return super.query(query, params, options);
   }
 
   async syncToFs() {
@@ -122,14 +79,6 @@ class PGliteCompat extends PGlite {
   async flushToFs() {
     this.__playgroundDirty = false;
     return PGlite.prototype.syncToFs.call(this);
-  }
-
-  #parseProtocolMessages(message) {
-    const raw = this.execProtocolRawSync(message);
-    const parser = new protocol.Parser();
-    const messages = [];
-    parser.parse(raw, (entry) => messages.push(entry));
-    return messages;
   }
 }
 

@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = resolve(scriptDir, "..");
 const vendorDir = resolve(repoDir, "vendor");
+const runtimeOverrideRoot = process.env.PHP_RUNTIME_OVERRIDE_DIR
+  ? resolve(repoDir, process.env.PHP_RUNTIME_OVERRIDE_DIR)
+  : resolve(repoDir, ".local-runtime");
 const extensionPackages = [
   "php-wasm-iconv",
   "php-wasm-intl",
@@ -73,7 +76,7 @@ function transformPhpEsm(sourcePath, targetPath) {
 }
 
 function copyPhpRuntime(packageName, targetName) {
-  const sourceDir = resolve(repoDir, "node_modules", packageName);
+  const sourceDir = resolvePhpRuntimeSourceDir(packageName);
   const targetDir = resolve(vendorDir, targetName);
 
   rmSync(targetDir, { recursive: true, force: true });
@@ -101,6 +104,22 @@ function copyPhpRuntime(packageName, targetName) {
   for (const skipPath of readdirSync(targetDir, { recursive: true }).filter((entry) => entry.endsWith(".skip"))) {
     rmSync(join(targetDir, skipPath), { force: true });
   }
+
+  console.log(`Copied ${packageName} from ${relative(repoDir, sourceDir) || sourceDir}`);
+}
+
+function resolvePhpRuntimeSourceDir(packageName) {
+  const overrideDir = resolve(runtimeOverrideRoot, packageName);
+
+  try {
+    if (statSync(overrideDir).isDirectory()) {
+      return overrideDir;
+    }
+  } catch {
+    // fall through to node_modules
+  }
+
+  return resolve(repoDir, "node_modules", packageName);
 }
 
 function patchPhpCgiBase(targetDir) {
