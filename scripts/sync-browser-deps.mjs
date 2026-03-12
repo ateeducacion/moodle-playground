@@ -165,7 +165,6 @@ function copyBrowserPackage(packageName) {
 
 rmSync(resolve(vendorDir, "php-wasm"), { recursive: true, force: true });
 rmSync(resolve(vendorDir, "php-cgi-wasm"), { recursive: true, force: true });
-rmSync(resolve(vendorDir, "pglite"), { recursive: true, force: true });
 rmSync(resolve(vendorDir, "fflate-browser.js"), { force: true });
 for (const packageName of extensionPackages) {
   rmSync(resolve(vendorDir, packageName), { recursive: true, force: true });
@@ -177,11 +176,6 @@ patchPhpCgiBase(resolve(vendorDir, "php-cgi-wasm"));
 for (const packageName of extensionPackages) {
   copyBrowserPackage(packageName);
 }
-cpSync(
-  resolve(repoDir, "node_modules", "@electric-sql", "pglite", "dist"),
-  resolve(vendorDir, "pglite"),
-  { recursive: true },
-);
 cpSync(
   resolve(repoDir, "node_modules", "fflate", "esm", "browser.js"),
   resolve(vendorDir, "fflate-browser.js"),

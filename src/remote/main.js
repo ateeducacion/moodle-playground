@@ -23,8 +23,6 @@ function buildRuntimeIndexedDbFragments(scopeId, runtimeId) {
 
   return new Set([
     dbNameFragment,
-    `idb://${dbNameFragment}`,
-    `/pglite/${dbNameFragment}`,
     `${scopeFragment}_${runtimeFragment}`,
   ]);
 }
@@ -105,10 +103,10 @@ async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOver
       continue;
     }
 
-    const isCurrentPgliteDb = [...dbNameFragments].some((fragment) => name.includes(fragment));
+    const isCurrentDb = [...dbNameFragments].some((fragment) => name.includes(fragment));
     const isPersistentOverlay = includePersistentOverlay && (name === "/persist" || name === "/config");
 
-    if (!isCurrentPgliteDb && !isPersistentOverlay) {
+    if (!isCurrentDb && !isPersistentOverlay) {
       continue;
     }
 

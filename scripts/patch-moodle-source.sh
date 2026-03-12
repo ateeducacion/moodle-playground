@@ -15,7 +15,9 @@ DMLLIB="$SOURCE_DIR/lib/dmllib.php"
 INSTALLPHP="$SOURCE_DIR/install.php"
 CACHEPHP="$SOURCE_DIR/cache/classes/cache.php"
 INSTALL_LANG_EN="$SOURCE_DIR/lang/en/install.php"
-PDO_PGSQL_DRIVER_PATCH="$PATCH_DIR/lib/dml/pgsql_pdo_moodle_database.php"
+SQLITE_DRIVER_PATCH="$PATCH_DIR/lib/dml/sqlite_pdo_moodle_database.php"
+TRANSLATING_PDO_PATCH="$PATCH_DIR/lib/dml/sqlite_translating_pdo.php"
+SQLITE_AST_DIR="$PATCH_DIR/lib/dml/sqlite-ast-driver"
 COMPONENTPHP="$SOURCE_DIR/lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/lib/setuplib.php"
 SETUPPHP="$SOURCE_DIR/lib/setup.php"
@@ -133,12 +135,14 @@ path.write_text(text.replace(needle, insert, 1), encoding="utf-8")
 PY
 fi
 
-if [ -f "$PDO_PGSQL_DRIVER_PATCH" ]; then
+if [ -f "$SQLITE_DRIVER_PATCH" ]; then
   mkdir -p "$SOURCE_DIR/lib/dml"
-  cp "$PDO_PGSQL_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/pgsql_pdo_moodle_database.php"
+  cp "$SQLITE_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/sqlite_pdo_moodle_database.php"
+  cp "$TRANSLATING_PDO_PATCH" "$SOURCE_DIR/lib/dml/sqlite_translating_pdo.php"
+  cp -r "$SQLITE_AST_DIR" "$SOURCE_DIR/lib/dml/sqlite-ast-driver/"
 fi
 
-if [ -f "$INSTALL_LANG_EN" ] && ! grep -q "pdopgsql" "$INSTALL_LANG_EN"; then
+if [ -f "$INSTALL_LANG_EN" ] && ! grep -q "pdosqlite" "$INSTALL_LANG_EN"; then
   python3 - "$INSTALL_LANG_EN" <<'PY'
 from pathlib import Path
 import sys
@@ -147,10 +151,10 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "$string['nativepgsqlhelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n<p>The database name, username, password and table prefix are required fields.</p>\n<p>The database must already exist and the user must have access to both read, and write to it.</p>';\n"
 insert = needle + (
-    "$string['pdopgsql'] = 'PostgreSQL (PDO/PGlite)';\n"
-    "$string['pdopgsqlhelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n"
-    "<p>This runtime uses the php-wasm PDO PostgreSQL driver backed by PGlite and persistent IndexedDB storage.</p>\n"
-    "<p>The database name and table prefix are required fields. Host, username and password are accepted for compatibility but are not used by the local playground runtime.</p>';\n"
+    "$string['pdosqlite'] = 'SQLite (PDO/AST Translator)';\n"
+    "$string['pdosqlitehelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n"
+    "<p>This runtime uses PDO SQLite with the WordPress sqlite-database-integration AST translator to run MySQL queries on SQLite.</p>\n"
+    "<p>The database is stored locally in the browser using IDBFS persistence.</p>';\n"
 )
 
 if needle not in text:

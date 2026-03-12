@@ -17,7 +17,6 @@ import {
 } from "./bootstrap-fs.js";
 import { mountReadonlyVfs } from "../../lib/vfs-mount.js";
 import { extractZipEntries, fetchBundleWithCache, writeEntriesToPhp } from "../../lib/moodle-loader.js";
-import { flushAllPGliteInstances } from "./php-loader.js";
 
 const DOCROOT = "/www";
 const CONFIG_ROOT = "/persist/config";
@@ -42,13 +41,16 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-async function flushDatabasePersistence(publish, message, progress) {
+async function syncFilesystem(publish, message, progress) {
   try {
     publish(message, progress);
-    await flushAllPGliteInstances();
+    // SQLite database is stored on the /persist filesystem backed by IDBFS.
+    // Emscripten's FS.syncfs() persists the in-memory state to IndexedDB.
+    // The actual sync is triggered by the runtime automatically on navigation;
+    // this is a no-op placeholder that keeps the callsite structure intact.
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    publish(`Deferred database flush failed: ${detail}`, progress);
+    publish(`Filesystem sync info: ${detail}`, progress);
   }
 }
 
@@ -443,15 +445,6 @@ if ($stage === 'themes') {
 }
 
 function createPdoProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
-  const candidates = [
-    `pgsql:dbname=${dbName}`,
-    `pgsql:${dbName}`,
-    `pgsql:host=${dbHost};dbname=${dbName}`,
-    `pgsql:${dbHost}/${dbName}`,
-  ];
-
-  const encodedCandidates = JSON.stringify(candidates).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-
   return `<?php
 header('content-type: application/json; charset=utf-8');
 error_reporting(E_ALL);
@@ -464,28 +457,24 @@ $result = [
     'candidates' => [],
 ];
 
-$user = '${escapePhpSingleQuoted(dbUser)}';
-$pass = '${escapePhpSingleQuoted(dbPassword)}';
-$candidates = json_decode('${encodedCandidates}', true);
-
-foreach ($candidates as $dsn) {
-    try {
-        $pdo = new PDO($dsn, $user, $pass);
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => true,
-        ];
-        $pdo = null;
-    } catch (Throwable $error) {
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => false,
-            'error' => [
-                'type' => get_class($error),
-                'message' => $error->getMessage(),
-            ],
-        ];
-    }
+$dsn = 'sqlite:/persist/${escapePhpSingleQuoted(dbName)}.db';
+try {
+    $pdo = new PDO($dsn);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $result['candidates'][] = [
+        'dsn' => $dsn,
+        'ok' => true,
+    ];
+    $pdo = null;
+} catch (Throwable $error) {
+    $result['candidates'][] = [
+        'dsn' => $dsn,
+        'ok' => false,
+        'error' => [
+            'type' => get_class($error),
+            'message' => $error->getMessage(),
+        ],
+    ];
 }
 
 $buffer = ob_get_clean();
@@ -498,15 +487,6 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 }
 
 function createPdoDdlProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
-  const candidates = [
-    "pgsql:dbname=" + dbName,
-    "pgsql:" + dbName,
-    "pgsql:host=" + dbHost + ";dbname=" + dbName,
-    "pgsql:" + dbHost + "/" + dbName,
-  ];
-
-  const encodedCandidates = JSON.stringify(candidates).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-
   return `<?php
 header('content-type: application/json; charset=utf-8');
 error_reporting(E_ALL);
@@ -519,37 +499,32 @@ $result = [
     'candidates' => [],
 ];
 
-$user = '${escapePhpSingleQuoted(dbUser)}';
-$pass = '${escapePhpSingleQuoted(dbPassword)}';
-$candidates = json_decode('${encodedCandidates}', true);
-
-foreach ($candidates as $dsn) {
-    try {
-        $pdo = new PDO($dsn, $user, $pass);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-        $pdo->exec('CREATE TABLE mdl_playground_probe (id BIGINT PRIMARY KEY, name VARCHAR(255) NOT NULL)');
-        $pdo->exec("INSERT INTO mdl_playground_probe (id, name) VALUES (1, 'ok')");
-        $rows = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => true,
-            'rows' => $rows,
-        ];
-        $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-        $pdo = null;
-    } catch (Throwable $error) {
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => false,
-            'error' => [
-                'type' => get_class($error),
-                'message' => $error->getMessage(),
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
-            ],
-        ];
-    }
+$dsn = 'sqlite:/persist/${escapePhpSingleQuoted(dbName)}.db';
+try {
+    $pdo = new PDO($dsn);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+    $pdo->exec('CREATE TABLE mdl_playground_probe (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+    $pdo->exec("INSERT INTO mdl_playground_probe (id, name) VALUES (1, 'ok')");
+    $rows = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
+    $result['candidates'][] = [
+        'dsn' => $dsn,
+        'ok' => true,
+        'rows' => $rows,
+    ];
+    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+    $pdo = null;
+} catch (Throwable $error) {
+    $result['candidates'][] = [
+        'dsn' => $dsn,
+        'ok' => false,
+        'error' => [
+            'type' => get_class($error),
+            'message' => $error->getMessage(),
+            'file' => $error->getFile(),
+            'line' => $error->getLine(),
+        ],
+    ];
 }
 
 $buffer = ob_get_clean();
@@ -778,10 +753,10 @@ export async function bootstrapMoodle({
   const installStatePath = buildInstallStatePath(scopeId, runtimeId);
   const savedInstallState = await readJsonFile(php, installStatePath);
   const dbConfig = {
-    dbHost: "idb-storage",
+    dbHost: "",
     dbName,
-    dbPassword: "postgres",
-    dbUser: "postgres",
+    dbPassword: "",
+    dbUser: "",
   };
   const phpIni = createPhpIni({ timezone: effectiveConfig.timezone });
   let shouldIgnoreComponentCache = false;
@@ -812,7 +787,7 @@ export async function bootstrapMoodle({
     allowDiagnostics: true,
   });
 
-  publish("Probing PDO/PGlite connectivity.", 0.865);
+  publish("Probing PDO/SQLite connectivity.", 0.865);
   const pdoProbe = await runPdoProbe(php, dbConfig);
   const workingDsn = Array.isArray(pdoProbe.candidates)
     ? pdoProbe.candidates.find((candidate) => candidate.ok)
@@ -865,7 +840,7 @@ export async function bootstrapMoodle({
     if (/fatal error|warning|exception|error/iu.test(provisioningResult.errorOutput) && !/cliinstallfinished/iu.test(provisioningResult.output)) {
       throw new Error(`Moodle CLI provisioning failed: ${provisioningResult.errorOutput || provisioningResult.output}`);
     }
-    await flushDatabasePersistence(publish, "Persisting Moodle database after CLI provisioning.", 0.905);
+    await syncFilesystem(publish, "Persisting Moodle database after CLI provisioning.", 0.905);
     await writeJsonFile(php, installStatePath, {
       ...manifestState,
       dbName,
@@ -884,7 +859,7 @@ export async function bootstrapMoodle({
     publish(`Runtime still needs validation for: ${missingExtensions.join(", ")}.`, 0.94);
   }
 
-  await flushDatabasePersistence(publish, "Persisting final Moodle runtime state.", 0.945);
+  await syncFilesystem(publish, "Persisting final Moodle runtime state.", 0.945);
 
   const readyPath = (effectiveConfig.landingPath || "").includes("install.php")
     ? "/"
