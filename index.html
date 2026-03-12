@@ -4,295 +4,117 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Moodle Playground</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #f4efe5;
-        --panel: rgba(255, 251, 245, 0.9);
-        --line: rgba(111, 86, 49, 0.18);
-        --ink: #24190d;
-        --muted: #6f5c43;
-        --accent: #005f73;
-        --accent-strong: #0a9396;
-        --danger: #9b2226;
-        --shadow: 0 24px 70px rgba(36, 25, 13, 0.12);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: "Iowan Old Style", "Palatino Linotype", serif;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at top left, rgba(238, 155, 0, 0.28), transparent 34%),
-          radial-gradient(circle at top right, rgba(10, 147, 150, 0.2), transparent 32%),
-          linear-gradient(180deg, #faf6f0 0%, var(--bg) 100%);
-      }
-
-      main {
-        width: min(1180px, calc(100vw - 32px));
-        margin: 24px auto;
-        display: grid;
-        gap: 20px;
-      }
-
-      .hero,
-      .preview {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        box-shadow: var(--shadow);
-        backdrop-filter: blur(14px);
-      }
-
-      .hero {
-        padding: 28px;
-        display: grid;
-        gap: 18px;
-      }
-
-      .eyebrow {
-        margin: 0;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        font: 600 0.78rem/1.2 ui-monospace, "SFMono-Regular", monospace;
-        color: var(--accent);
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(2.4rem, 6vw, 4.8rem);
-        line-height: 0.95;
-        letter-spacing: -0.05em;
-      }
-
-      .lede {
-        margin: 0;
-        max-width: 66ch;
-        color: var(--muted);
-        font-size: 1.05rem;
-      }
-
-      .grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      }
-
-      .card {
-        padding: 16px 18px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.48);
-      }
-
-      .card strong,
-      .status strong {
-        display: block;
-        margin-bottom: 6px;
-        font: 700 0.82rem/1.2 ui-monospace, "SFMono-Regular", monospace;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-
-      .status {
-        display: grid;
-        gap: 10px;
-        padding: 18px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.62);
-      }
-
-      progress {
-        width: 100%;
-        height: 12px;
-        appearance: none;
-      }
-
-      progress::-webkit-progress-bar {
-        background: rgba(111, 86, 49, 0.12);
-        border-radius: 999px;
-      }
-
-      progress::-webkit-progress-value {
-        background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-        border-radius: 999px;
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-      }
-
-      button,
-      a.button {
-        border: 0;
-        border-radius: 999px;
-        padding: 0.92rem 1.2rem;
-        font: 700 0.92rem/1 ui-monospace, "SFMono-Regular", monospace;
-        text-decoration: none;
-        cursor: pointer;
-        transition: transform 140ms ease, opacity 140ms ease;
-      }
-
-      button:hover,
-      a.button:hover {
-        transform: translateY(-1px);
-      }
-
-      button.primary,
-      a.button.primary {
-        color: white;
-        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      }
-
-      button.secondary,
-      a.button.secondary {
-        color: var(--ink);
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid var(--line);
-      }
-
-      button:disabled,
-      a.button[aria-disabled="true"] {
-        opacity: 0.42;
-        cursor: not-allowed;
-        pointer-events: none;
-      }
-
-      .log {
-        margin: 0;
-        padding: 16px 18px;
-        min-height: 160px;
-        max-height: 280px;
-        overflow: auto;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: #1f1a17;
-        color: #e8dfd0;
-        font: 0.84rem/1.5 ui-monospace, "SFMono-Regular", monospace;
-      }
-
-      .log .error {
-        color: #ffadad;
-      }
-
-      .preview {
-        overflow: hidden;
-      }
-
-      .preview header {
-        padding: 16px 18px;
-        border-bottom: 1px solid var(--line);
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        align-items: center;
-      }
-
-      .preview iframe {
-        width: 100%;
-        height: min(72vh, 880px);
-        border: 0;
-        background: white;
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 0.4rem 0.65rem;
-        border-radius: 999px;
-        background: rgba(10, 147, 150, 0.1);
-        color: var(--accent);
-        font: 700 0.78rem/1 ui-monospace, "SFMono-Regular", monospace;
-      }
-
-      .pill.error {
-        background: rgba(155, 34, 38, 0.1);
-        color: var(--danger);
-      }
-
-      @media (max-width: 720px) {
-        main {
-          width: min(100vw - 18px, 100%);
-          margin: 10px auto 24px;
-        }
-
-        .hero {
-          padding: 20px;
-        }
-
-        .preview iframe {
-          height: 60vh;
-        }
-      }
-    </style>
+    <meta
+      name="description"
+      content="Moodle running in your browser for learning, testing, and prototyping course experiences."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Moodle Playground">
+    <meta property="og:title" content="Moodle Playground">
+    <meta
+      property="og:description"
+      content="Moodle running in your browser for learning, testing, and prototyping course experiences."
+    >
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./src/styles/app.css">
   </head>
-  <body>
-    <main>
-      <section class="hero">
-        <p class="eyebrow">php-wasm + service worker + pglite</p>
-        <h1>Moodle Playground</h1>
-        <p class="lede">
-          PoC para arrancar Moodle 4.4 dentro del navegador, sin backend tradicional. El primer
-          arranque exige un bundle de Moodle preparado offline, reutiliza caché local si existe y
-          deriva la navegación PHP al worker dedicado a través del Service Worker.
-        </p>
-
-        <div class="grid">
-          <article class="card">
-            <strong>PHP</strong>
-            <span>php-wasm / php-cgi-wasm, objetivo PHP 8.3</span>
-          </article>
-          <article class="card">
-            <strong>Database</strong>
-            <span>PGlite in-browser a través de `pdo-pglite`</span>
-          </article>
-          <article class="card">
-            <strong>Moodle</strong>
-            <span>Bootstrap de Moodle desde manifest + bundle offline</span>
-          </article>
+  <body data-app="shell">
+    <div class="shell">
+      <header class="browser-toolbar" aria-label="Playground toolbar">
+        <div class="browser-toolbar__address">
+          <form id="address-form" class="address-form">
+            <div class="toolbar-brand" aria-label="Moodle Playground">
+              <span class="toolbar-brand__mark" aria-hidden="true">M</span>
+            </div>
+            <button type="button" id="refresh-button" class="icon-button" aria-label="Refresh page" title="Refresh page">
+              <span aria-hidden="true">↻</span>
+            </button>
+            <div class="address-form__input">
+              <input id="address-input" type="text" spellcheck="false" value="/" aria-label="URL inside the Moodle site">
+            </div>
+            <input type="submit" tabindex="-1" hidden>
+          </form>
         </div>
+        <div class="browser-toolbar__actions">
+          <button type="button" id="home-button" class="toolbar-link">Home</button>
+          <button type="button" id="admin-button" class="toolbar-link">Admin</button>
+          <button type="button" id="panel-toggle-button" class="icon-button" aria-label="Open settings panel" aria-expanded="false" title="Open settings panel">
+            <span aria-hidden="true">☰</span>
+          </button>
+        </div>
+      </header>
 
-        <section class="status">
-          <strong id="phase">Preparing runtime</strong>
-          <span id="status-text">Waiting for the Service Worker to take control.</span>
-          <progress id="progress" value="0" max="1"></progress>
-          <div class="actions">
-            <button id="start-button" class="primary">Bootstrap Moodle</button>
-            <a id="open-button" class="button secondary" href="./moodle/install.php" target="moodle-playground" aria-disabled="true">
-              Open in new tab
-            </a>
-          </div>
+      <div id="workspace" class="workspace is-panel-collapsed">
+        <section class="viewport">
+          <iframe id="site-frame" title="Moodle Playground" loading="eager"></iframe>
         </section>
 
-        <pre id="log" class="log" aria-live="polite"></pre>
-      </section>
-
-      <section class="preview">
-        <header>
-          <div>
-            <strong>Preview</strong>
-            <div id="preview-caption">The iframe will open `/moodle/install.php` when bootstrap finishes.</div>
+        <aside id="side-panel" class="side-panel is-collapsed" aria-label="Playground panel">
+          <div class="side-panel__header">
+            <div>
+              <strong>Moodle Playground</strong>
+              <span>Browser runtime controls</span>
+            </div>
           </div>
-          <div id="runtime-pill" class="pill">Starting</div>
-        </header>
-        <iframe
-          id="preview-frame"
-          title="Moodle Playground Preview"
-          name="moodle-playground"
-          loading="eager"
-        ></iframe>
-      </section>
-    </main>
 
-    <script type="module" src="./app.js"></script>
+          <div class="panel-tabs" role="tablist" aria-label="Playground panel tabs">
+            <button type="button" id="settings-tab" class="panel-tab is-active" role="tab" aria-selected="true" data-panel-tab="settings">Settings</button>
+            <button type="button" id="logs-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="logs">Logs</button>
+            <button type="button" id="blueprint-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="blueprint">Blueprint</button>
+          </div>
+
+          <section id="settings-panel" class="side-panel__content" role="tabpanel" aria-labelledby="settings-tab" data-panel-view="settings">
+            <label class="settings-field">
+              <span>PHP runtime</span>
+              <select id="runtime-select"></select>
+            </label>
+
+            <div class="settings-actions">
+              <button type="button" id="reset-button" class="danger">Reset</button>
+              <button type="button" id="export-button">Export</button>
+              <label class="import-button" for="import-input">Import</label>
+              <input id="import-input" type="file" accept="application/json" hidden>
+            </div>
+          </section>
+
+          <section id="logs-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="logs-tab" data-panel-view="logs">
+            <div class="panel__row">
+              <span>Runtime log</span>
+              <button type="button" id="clear-logs-button">Clear</button>
+            </div>
+            <pre id="log-panel" class="log-panel"></pre>
+          </section>
+
+          <section id="blueprint-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="blueprint-tab" data-panel-view="blueprint">
+            <div class="panel__row">
+              <span>Blueprint JSON</span>
+            </div>
+            <textarea id="blueprint-textarea" class="panel-textarea" spellcheck="false" readonly></textarea>
+          </section>
+
+          <footer class="side-panel__footer">
+            <p>Moodle Playground runtime for local browser testing.</p>
+            <a
+              class="side-panel__footer-link"
+              href="https://github.com/ateeducacion/moodle-playground"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="GitHub repository"
+              title="GitHub repository"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M8 0C3.58 0 0 3.67 0 8.2c0 3.63 2.29 6.71 5.47 7.8.4.08.55-.18.55-.4 0-.2-.01-.87-.01-1.58-2.01.38-2.53-.5-2.69-.96-.09-.24-.48-.97-.82-1.17-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.84.72 1.24 1.87.89 2.33.68.07-.54.28-.89.51-1.09-1.78-.21-3.64-.92-3.64-4.08 0-.9.31-1.64.82-2.22-.08-.21-.36-1.06.08-2.2 0 0 .67-.22 2.2.85a7.38 7.38 0 0 1 4 0c1.53-1.07 2.2-.85 2.2-.85.44 1.14.16 1.99.08 2.2.51.58.82 1.31.82 2.22 0 3.17-1.87 3.87-3.65 4.08.29.26.54.75.54 1.52 0 1.1-.01 1.99-.01 2.26 0 .22.15.49.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"
+                />
+              </svg>
+              <span>GitHub</span>
+            </a>
+          </footer>
+        </aside>
+      </div>
+    </div>
+
+    <script type="module" src="./src/shell/main.js"></script>
   </body>
 </html>

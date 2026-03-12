@@ -29,6 +29,11 @@ fi
 
 "$SCRIPT_DIR/patch-moodle-source.sh" "$MOODLE_DIR"
 
+COMPONENT_CACHE_DIR="$MOODLE_DIR/.playground"
+COMPONENT_CACHE_FILE="$COMPONENT_CACHE_DIR/core_component.php"
+mkdir -p "$COMPONENT_CACHE_DIR"
+php "$SCRIPT_DIR/generate-component-cache.php" "$MOODLE_DIR" "$COMPONENT_CACHE_FILE" "/www/moodle"
+
 RELEASE=$(sed -n "s/^[[:space:]]*\\\$release[[:space:]]*=[[:space:]]*'\\([^']*\\)'.*/\\1/p" "$MOODLE_DIR/version.php" | head -n 1)
 
 if [ -z "$RELEASE" ]; then

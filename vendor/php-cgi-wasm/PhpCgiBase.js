@@ -445,17 +445,8 @@ export class PhpCgiBase
 	async _afterRequest()
 	{}
 
-async request(request)
+	async request(request)
 	{
-		const debugHook = globalThis.__moodleDebugHook;
-		const debug = (detail) => {
-			if(typeof debugHook === 'function')
-			{
-				try { debugHook(detail); } catch {}
-			}
-		};
-
-		debug('PhpCgiBase.request: breakoutRequest:start');
 		const {
 			url
 			, method = 'GET'
@@ -463,15 +454,11 @@ async request(request)
 			, post
 			, contentType
 		} = await breakoutRequest(request);
-		debug(`PhpCgiBase.request: breakoutRequest:done ${method} ${url}`);
 
-		if(globalThis.caches && !globalThis.__moodleDisablePhpStaticCache)
+		if(globalThis.caches)
 		{
-			debug('PhpCgiBase.request: staticCache:open');
 			const cache = await caches.open('static-v1');
-			debug('PhpCgiBase.request: staticCache:opened');
 			const cached = await cache.match(url);
-			debug(`PhpCgiBase.request: staticCache:match ${cached ? 'hit' : 'miss'}`);
 
 			if(cached)
 			{
@@ -479,20 +466,15 @@ async request(request)
 
 				if(this.staticCacheTime > 0 && this.staticCacheTime > Date.now() - cacheTime)
 				{
-					debug('PhpCgiBase.request: staticCache:return');
 					this.onRequest(request, cached);
 					return cached;
 				}
 			}
 		}
 
-		debug('PhpCgiBase.request: binary:await');
 		const php = await this.binary;
-		debug('PhpCgiBase.request: binary:ready');
 
-		debug('PhpCgiBase.request: beforeRequest:start');
 		await this._beforeRequest();
-		debug('PhpCgiBase.request: beforeRequest:done');
 
 		let docroot = this.docroot;
 		let vHostEntrypoint, vHostPrefix = this.prefix;
@@ -525,7 +507,6 @@ async request(request)
 		}
 
 		const aboutPath = php.FS.analyzePath(path);
-		debug(`PhpCgiBase.request: path ${path} exists=${aboutPath.exists}`);
 
 		if(vHostEntrypoint)
 		{
@@ -584,7 +565,6 @@ async request(request)
 		// path may have changed, so re-check it:
 		if(!php.FS.analyzePath(path).exists)
 		{
-			debug(`PhpCgiBase.request: notFound ${path}`);
 			const rawResponse = this.notFound
 				? this.notFound(request)
 				: '404 - Not Found.';
@@ -625,8 +605,11 @@ async request(request)
 		putEnv(php, 'HTTPS', protocol === 'https' ? 'on' : 'off');
 
 		putEnv(php, 'DOCUMENT_ROOT', docroot);
+		const docrootScriptName = path.startsWith(docroot)
+					? path.substring(docroot.length) || '/'
+					: scriptName;
 		putEnv(php, 'REQUEST_URI', originalPath);
-		putEnv(php, 'SCRIPT_NAME', rewrite);
+		putEnv(php, 'SCRIPT_NAME', docrootScriptName.startsWith('/') ? docrootScriptName : `/${docrootScriptName}`);
 		putEnv(php, 'SCRIPT_FILENAME', path);
 		putEnv(php, 'PATH_TRANSLATED', path);
 
@@ -635,13 +618,11 @@ async request(request)
 		putEnv(php, 'REDIRECT_STATUS', '200');
 		putEnv(php, 'CONTENT_TYPE', contentType);
 		putEnv(php, 'CONTENT_LENGTH', String(this.input.length));
-		debug(`PhpCgiBase.request: envReady script=${path} query=${get}`);
 
 		let exitCode = -1;
 
 		try
 		{
-			debug('PhpCgiBase.request: ccall:main:start');
 			exitCode = await php.ccall(
 				'main'
 				, 'number'
@@ -649,13 +630,10 @@ async request(request)
 				, []
 				, {async: true}
 			);
-			debug(`PhpCgiBase.request: ccall:main:done exit=${exitCode}`);
 
 			++this.count;
 
-			debug('PhpCgiBase.request: parseResponse:start');
 			const parsedResponse = parseResponse(this.output);
-			debug('PhpCgiBase.request: parseResponse:done');
 
 			let status = 200;
 
@@ -691,7 +669,6 @@ async request(request)
 			}
 
 			const response = new Response(parsedResponse.body || '', { status, headers, url });
-			debug(`PhpCgiBase.request: response:ready status=${status}`);
 
 			this.onRequest(request, response);
 
@@ -699,7 +676,6 @@ async request(request)
 		}
 		catch (error)
 		{
-			debug(`PhpCgiBase.request: catch ${error && (error.stack || error.message || error)}`);
 			console.error(error);
 
 			const response = new Response(
@@ -722,12 +698,9 @@ async request(request)
 		}
 		finally
 		{
-			debug(`PhpCgiBase.request: finally exit=${exitCode}`);
 			if(exitCode === 0)
 			{
-				debug('PhpCgiBase.request: afterRequest:start');
 				this._afterRequest();
-				debug('PhpCgiBase.request: afterRequest:done');
 			}
 			else
 			{

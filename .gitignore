@@ -1,5 +1,8 @@
 .cache/
 dist/
 node_modules/
+.DS_Store
+.env
+vendor/moodle/
 assets/moodle/
 assets/manifests/latest.json

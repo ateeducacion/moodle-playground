@@ -84,6 +84,7 @@ if (args.imageData && args.imageIndex) {
 
   manifest.vfs = {
     format: args.imageFormat || "moodle-vfs-image-v1",
+    mountMode: "readonly-vfs-overlay-v1",
     data: {
       path: relative(resolve(manifestPath, ".."), imageDataPath).replaceAll("\\", "/"),
       fileName: basename(imageDataPath),

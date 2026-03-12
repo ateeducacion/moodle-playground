@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync-browser-deps": "node ./scripts/sync-browser-deps.mjs"
+    "prepare-runtime": "node ./scripts/sync-browser-deps.mjs",
+    "sync-browser-deps": "node ./scripts/sync-browser-deps.mjs",
+    "bundle": "./scripts/build-moodle-bundle.sh"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
@@ -19,6 +21,7 @@
     "php-wasm-openssl": "^0.0.9-k",
     "php-wasm-phar": "^0.0.9-f",
     "php-wasm-simplexml": "^0.0.0-j",
+    "php-wasm-xml": "^0.0.0-l",
     "php-wasm-zlib": "^0.0.9-h"
   }
 }

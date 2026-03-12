@@ -19,12 +19,6 @@ export class PhpCgiWebBase extends PhpCgiBase
 
 	async _beforeRequest()
 	{
-		if(globalThis.__moodleDisablePhpSyncfs)
-		{
-			this.initialized = true;
-			return;
-		}
-
 		if(!this.initialized)
 		{
 			const php = await this.binary;
@@ -42,10 +36,6 @@ export class PhpCgiWebBase extends PhpCgiBase
 
 	async _afterRequest()
 	{
-		if(globalThis.__moodleDisablePhpSyncfs)
-		{
-			return;
-		}
 
 		if(this.phpArgs.staticFS)
 		{

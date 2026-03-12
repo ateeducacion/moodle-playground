@@ -13,6 +13,7 @@ const extensionPackages = [
   "php-wasm-libxml",
   "php-wasm-dom",
   "php-wasm-simplexml",
+  "php-wasm-xml",
   "php-wasm-libzip",
   "php-wasm-mbstring",
   "php-wasm-openssl",
@@ -117,8 +118,18 @@ function patchPhpCgiBase(targetDir) {
     );
 
     patched = patched.replace(
+      "putEnv(php, 'DOCUMENT_ROOT', docroot);",
+      [
+        "putEnv(php, 'DOCUMENT_ROOT', docroot);",
+        "const docrootScriptName = path.startsWith(docroot)",
+        "\t\t\t? path.substring(docroot.length) || '/'",
+        "\t\t\t: scriptName;",
+      ].join("\n\t\t"),
+    );
+
+    patched = patched.replace(
       "putEnv(php, 'SCRIPT_NAME', scriptName);",
-      "putEnv(php, 'SCRIPT_NAME', rewrite);",
+      "putEnv(php, 'SCRIPT_NAME', docrootScriptName.startsWith('/') ? docrootScriptName : `/${docrootScriptName}`);",
     );
 
     writeFileSync(filePath, patched, "utf8");
