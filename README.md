@@ -105,6 +105,7 @@ The current runtime resolves these shared PHP libraries:
 Some Moodle capabilities may still require additional extensions or a custom `php-wasm` build.
 
 Migration and prototype hardening notes for the current SQLite-based runtime are documented in [`docs/sqlite-wasm-migration-notes.md`](docs/sqlite-wasm-migration-notes.md).
+Fast symptom-oriented debugging notes are documented in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## Deployment
 
