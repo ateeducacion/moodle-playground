@@ -13,7 +13,7 @@ export function getOrCreateScopeId() {
     return existing;
   }
 
-  const next = globalThis.crypto.randomUUID();
+  const next = "main";
   window.sessionStorage.setItem(`${SCOPE_PREFIX}active`, next);
   return next;
 }

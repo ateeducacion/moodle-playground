@@ -594,6 +594,27 @@ export class PhpCgiBase
 
 		const protocol = selfUrl.protocol.substr(0, selfUrl.protocol.length - 1);
 
+		if(request.headers && request.headers.entries)
+		{
+			for(const [headerName, headerValue] of request.headers.entries())
+			{
+				if(headerValue == null || headerValue === '')
+				{
+					continue;
+				}
+
+				const normalizedName = headerName.toUpperCase().replace(/-/g, '_');
+
+				if(normalizedName === 'CONTENT_TYPE' || normalizedName === 'CONTENT_LENGTH')
+				{
+					putEnv(php, normalizedName, headerValue);
+					continue;
+				}
+
+				putEnv(php, `HTTP_${normalizedName}`, headerValue);
+			}
+		}
+
 		putEnv(php, 'SERVER_SOFTWARE', globalThis.navigator ? globalThis.navigator.userAgent : (globalThis.process ? 'Node ' + globalThis.process.version : 'Javascript - Unknown'));
 		putEnv(php, 'REQUEST_METHOD', method);
 		putEnv(php, 'REMOTE_ADDR', '127.0.0.1');

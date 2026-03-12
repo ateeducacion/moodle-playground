@@ -2,7 +2,7 @@
 
 > Moodle in the browser, powered by WebAssembly. No traditional backend required.
 
-Inspired by WordPress Playground and aligned with the product shape of `omeka-s-playground`, this project runs a Moodle site entirely in the browser using `php-wasm`, `php-cgi-wasm`, Service Workers and `@electric-sql/pglite`. The readonly Moodle core is served from a pre-built bundle while mutable state is kept in browser persistence.
+Inspired by WordPress Playground and aligned with the product shape of `omeka-s-playground`, this project runs a Moodle site entirely in the browser using `php-wasm`, `php-cgi-wasm`, Service Workers and a file-backed SQLite database. The readonly Moodle core is served from a pre-built bundle while mutable state is kept in browser persistence.
 
 ## Getting Started
 
@@ -43,7 +43,7 @@ index.html          Shell UI (toolbar, address bar, log panel, iframe viewport)
        └─ php-worker.js
             └─ php-cgi-wasm (WebAssembly)
                  ├─ Readonly Moodle core  (assets/moodle/*.vfs.*)
-                 └─ Writable overlay      (IndexedDB/PGlite, config, moodledata)
+                 └─ Writable overlay      (IndexedDB-backed wasm FS, config, moodledata)
 ```
 
 The runtime flow is deliberately similar to `omeka-s-playground`:

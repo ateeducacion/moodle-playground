@@ -15,7 +15,10 @@ DMLLIB="$SOURCE_DIR/lib/dmllib.php"
 INSTALLPHP="$SOURCE_DIR/install.php"
 CACHEPHP="$SOURCE_DIR/cache/classes/cache.php"
 INSTALL_LANG_EN="$SOURCE_DIR/lang/en/install.php"
-PDO_PGSQL_DRIVER_PATCH="$PATCH_DIR/lib/dml/pgsql_pdo_moodle_database.php"
+PDO_SQLITE_DRIVER_PATCH="$PATCH_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
+SQLITE_GENERATOR_PATCH="$PATCH_DIR/lib/ddl/sqlite_sql_generator.php"
+XMLIZE_PATCH="$PATCH_DIR/lib/xmlize.php"
+XMLDB_FILE_PATCH="$PATCH_DIR/lib/xmldb/xmldb_file.php"
 COMPONENTPHP="$SOURCE_DIR/lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/lib/setuplib.php"
 SETUPPHP="$SOURCE_DIR/lib/setup.php"
@@ -133,12 +136,27 @@ path.write_text(text.replace(needle, insert, 1), encoding="utf-8")
 PY
 fi
 
-if [ -f "$PDO_PGSQL_DRIVER_PATCH" ]; then
+if [ -f "$PDO_SQLITE_DRIVER_PATCH" ]; then
   mkdir -p "$SOURCE_DIR/lib/dml"
-  cp "$PDO_PGSQL_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/pgsql_pdo_moodle_database.php"
+  cp "$PDO_SQLITE_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
 fi
 
-if [ -f "$INSTALL_LANG_EN" ] && ! grep -q "pdopgsql" "$INSTALL_LANG_EN"; then
+if [ -f "$SQLITE_GENERATOR_PATCH" ]; then
+  mkdir -p "$SOURCE_DIR/lib/ddl"
+  cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/lib/ddl/sqlite_sql_generator.php"
+fi
+
+if [ -f "$XMLIZE_PATCH" ]; then
+  mkdir -p "$SOURCE_DIR/lib"
+  cp "$XMLIZE_PATCH" "$SOURCE_DIR/lib/xmlize.php"
+fi
+
+if [ -f "$XMLDB_FILE_PATCH" ]; then
+  mkdir -p "$SOURCE_DIR/lib/xmldb"
+  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/lib/xmldb/xmldb_file.php"
+fi
+
+if [ -f "$INSTALL_LANG_EN" ] && ! grep -q "pdosqlite" "$INSTALL_LANG_EN"; then
   python3 - "$INSTALL_LANG_EN" <<'PY'
 from pathlib import Path
 import sys
@@ -147,10 +165,10 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "$string['nativepgsqlhelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n<p>The database name, username, password and table prefix are required fields.</p>\n<p>The database must already exist and the user must have access to both read, and write to it.</p>';\n"
 insert = needle + (
-    "$string['pdopgsql'] = 'PostgreSQL (PDO/PGlite)';\n"
-    "$string['pdopgsqlhelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n"
-    "<p>This runtime uses the php-wasm PDO PostgreSQL driver backed by PGlite and persistent IndexedDB storage.</p>\n"
-    "<p>The database name and table prefix are required fields. Host, username and password are accepted for compatibility but are not used by the local playground runtime.</p>';\n"
+    "$string['pdosqlite'] = 'SQLite (PDO)';\n"
+    "$string['pdosqlitehelp'] = '<p>The database is where most of the Moodle settings and data are stored and must be configured here.</p>\n"
+    "<p>This runtime uses the deprecated Moodle SQLite PDO driver backed by a persistent SQLite file in the browser filesystem.</p>\n"
+    "<p>The database name and table prefix are required fields. The playground runtime sets the SQLite file path explicitly in config.php.</p>';\n"
 )
 
 if needle not in text:

@@ -99,7 +99,7 @@ function ensureBridge(scopeId) {
   return bridge;
 }
 
-function extractScopedRuntime(pathname) {
+function extractScopedRuntime(pathname, search = "") {
   const match = stripAppBasePath(pathname).match(/\/playground\/([^/]+)\/([^/]+)(\/.*)?$/u);
   if (!match) {
     return null;
@@ -108,13 +108,13 @@ function extractScopedRuntime(pathname) {
   return {
     scopeId: match[1],
     runtimeId: match[2],
-    requestPath: match[3] || "/",
+    requestPath: `${match[3] || "/"}${search}`,
   };
 }
 
 async function resolveScopedRequest(event, url) {
   const strippedPathname = stripAppBasePath(url.pathname);
-  const direct = extractScopedRuntime(url.pathname);
+  const direct = extractScopedRuntime(url.pathname, url.search);
   if (direct) {
     return direct;
   }
@@ -346,7 +346,7 @@ self.addEventListener("fetch", (event) => {
       clientContexts.set(event.clientId, { scopeId, runtimeId });
     }
 
-    const directScoped = extractScopedRuntime(url.pathname);
+    const directScoped = extractScopedRuntime(url.pathname, url.search);
     if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
       return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
     }

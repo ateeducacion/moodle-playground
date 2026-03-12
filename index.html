@@ -60,6 +60,7 @@
           <div class="panel-tabs" role="tablist" aria-label="Playground panel tabs">
             <button type="button" id="settings-tab" class="panel-tab is-active" role="tab" aria-selected="true" data-panel-tab="settings">Settings</button>
             <button type="button" id="logs-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="logs">Logs</button>
+            <button type="button" id="phpinfo-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="phpinfo">PHP Info</button>
             <button type="button" id="blueprint-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="blueprint">Blueprint</button>
           </div>
 
@@ -71,6 +72,7 @@
 
             <div class="settings-actions">
               <button type="button" id="reset-button" class="danger">Reset</button>
+              <button type="button" id="phpinfo-button">PHP Info</button>
               <button type="button" id="export-button">Export</button>
               <label class="import-button" for="import-input">Import</label>
               <input id="import-input" type="file" accept="application/json" hidden>
@@ -83,6 +85,14 @@
               <button type="button" id="clear-logs-button">Clear</button>
             </div>
             <pre id="log-panel" class="log-panel"></pre>
+          </section>
+
+          <section id="phpinfo-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="phpinfo-tab" data-panel-view="phpinfo">
+            <div class="panel__row">
+              <span>Runtime PHP Info</span>
+              <button type="button" id="refresh-phpinfo-button">Refresh</button>
+            </div>
+            <iframe id="phpinfo-frame" class="panel-frame" title="PHP Info diagnostics"></iframe>
           </section>
 
           <section id="blueprint-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="blueprint-tab" data-panel-view="blueprint">

@@ -11,22 +11,13 @@ const SW_RESET_KEY_PREFIX = "moodle-playground:sw-reset";
 const CONTROL_RELOAD_KEY_PREFIX = "moodle-playground:remote-sw-controlled";
 let phpWorker;
 let activePath = "/";
+let frameWatchTimer = 0;
+let lastAnnouncedFrameHref = "";
+let frameRecoveryTimer = 0;
+let frameRecoveryAttempted = false;
 
 function normalizeScopeFragment(value) {
   return String(value || "").replace(/[^A-Za-z0-9_]/gu, "_");
-}
-
-function buildRuntimeIndexedDbFragments(scopeId, runtimeId) {
-  const scopeFragment = normalizeScopeFragment(scopeId);
-  const runtimeFragment = normalizeScopeFragment(runtimeId);
-  const dbNameFragment = `moodle_${scopeFragment}_${runtimeFragment}`;
-
-  return new Set([
-    dbNameFragment,
-    `idb://${dbNameFragment}`,
-    `/pglite/${dbNameFragment}`,
-    `${scopeFragment}_${runtimeFragment}`,
-  ]);
 }
 
 function setOverlayVisible(isVisible) {
@@ -95,8 +86,13 @@ async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOver
     return false;
   }
 
+  const scopeFragment = normalizeScopeFragment(scopeId);
+  const runtimeFragment = normalizeScopeFragment(runtimeId);
+  const runtimeStorageMarkers = [
+    `moodle_${scopeFragment}_${runtimeFragment}`,
+    `${scopeFragment}_${runtimeFragment}`,
+  ];
   const dbs = await indexedDB.databases();
-  const dbNameFragments = buildRuntimeIndexedDbFragments(scopeId, runtimeId);
   let cleared = false;
 
   for (const db of dbs) {
@@ -105,10 +101,10 @@ async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOver
       continue;
     }
 
-    const isCurrentPgliteDb = [...dbNameFragments].some((fragment) => name.includes(fragment));
+    const isCurrentRuntimeDb = runtimeStorageMarkers.some((fragment) => name.includes(fragment));
     const isPersistentOverlay = includePersistentOverlay && (name === "/persist" || name === "/config");
 
-    if (!isCurrentPgliteDb && !isPersistentOverlay) {
+    if (!isCurrentRuntimeDb && !isPersistentOverlay) {
       continue;
     }
 
@@ -242,41 +238,125 @@ function buildEntryUrl(scopeId, runtimeId, path) {
   return new URL(buildScopedSitePath(scopeId, runtimeId, path), window.location.origin);
 }
 
-function navigateFrame(scopeId, runtimeId, path, { reload = false } = {}) {
-  const entryUrl = buildEntryUrl(scopeId, runtimeId, path);
+function finalizeFrameReady(scopeId, runtimeId) {
+  let path = activePath;
+  let href = buildEntryUrl(scopeId, runtimeId, path).toString();
+
+  try {
+    const currentHref = frameEl.contentWindow?.location?.href;
+    if (!currentHref || currentHref === "about:blank") {
+      return false;
+    }
+    href = currentHref;
+    path = extractUnscopedPath(href, scopeId, runtimeId);
+  } catch {
+    return false;
+  }
+
   activePath = path;
+  setOverlayVisible(false);
+
+  if (href !== lastAnnouncedFrameHref) {
+    lastAnnouncedFrameHref = href;
+    emit(scopeId, {
+      kind: "frame-ready",
+      detail: `Iframe loaded for ${runtimeId}.`,
+      path,
+    });
+    emitNavigation(scopeId, runtimeId, href);
+  }
+
+  return true;
+}
+
+function clearFrameRecoveryTimer() {
+  if (!frameRecoveryTimer) {
+    return;
+  }
+
+  window.clearTimeout(frameRecoveryTimer);
+  frameRecoveryTimer = 0;
+}
+
+function isFrameDocumentStalled() {
+  try {
+    const frameWindow = frameEl.contentWindow;
+    const frameDocument = frameWindow?.document;
+    if (!frameWindow || !frameDocument) {
+      return false;
+    }
+
+    if (!frameWindow.location.href || frameWindow.location.href === "about:blank") {
+      return false;
+    }
+
+    const bodyHtml = frameDocument.body?.innerHTML || "";
+    return frameDocument.readyState === "loading" && bodyHtml.trim() === "" && Boolean(frameDocument.title);
+  } catch {
+    return false;
+  }
+}
+
+function scheduleFrameRecovery(scopeId, runtimeId) {
+  clearFrameRecoveryTimer();
+  frameRecoveryTimer = window.setTimeout(() => {
+    frameRecoveryTimer = 0;
+
+    if (frameRecoveryAttempted || !isFrameDocumentStalled()) {
+      return;
+    }
+
+    frameRecoveryAttempted = true;
+    setRemoteProgress("Recovering a stalled Moodle page load.");
+    navigateFrame(scopeId, runtimeId, activePath || "/", { force: true });
+  }, 4000);
+}
+
+function startFrameWatch(scopeId, runtimeId) {
+  if (frameWatchTimer) {
+    window.clearInterval(frameWatchTimer);
+  }
+
+  scheduleFrameRecovery(scopeId, runtimeId);
+  frameWatchTimer = window.setInterval(() => {
+    if (finalizeFrameReady(scopeId, runtimeId)) {
+      window.clearInterval(frameWatchTimer);
+      frameWatchTimer = 0;
+    }
+  }, 150);
+}
+
+function navigateFrame(scopeId, runtimeId, path, { reload = false, force = false } = {}) {
+  const entryUrl = buildEntryUrl(scopeId, runtimeId, path);
+  const entryHref = entryUrl.toString();
+
+  clearFrameRecoveryTimer();
+  activePath = path;
+  if (force) {
+    lastAnnouncedFrameHref = "";
+  }
+  setOverlayVisible(true);
+  startFrameWatch(scopeId, runtimeId);
 
   if (reload && frameEl.contentWindow) {
     frameEl.contentWindow.location.reload();
     return;
   }
 
-  if (frameEl.src !== entryUrl.toString()) {
-    frameEl.src = entryUrl.toString();
+  if (!force && frameEl.src === entryHref) {
+    return;
+  }
+
+  if (frameEl.src !== entryHref) {
+    frameEl.src = entryHref;
   } else if (frameEl.contentWindow) {
-    frameEl.contentWindow.location.href = entryUrl.toString();
+    frameEl.contentWindow.location.href = entryHref;
   }
 }
 
 function bindFrameNavigation(scopeId, runtimeId) {
   frameEl.addEventListener("load", () => {
-    let path = activePath;
-    try {
-      if (frameEl.contentWindow?.location?.href) {
-        path = extractUnscopedPath(frameEl.contentWindow.location.href, scopeId, runtimeId);
-      }
-    } catch {
-      // Ignore transient about:blank/cross-context timing during iframe swaps.
-    }
-
-    activePath = path;
-    setOverlayVisible(false);
-    emit(scopeId, {
-      kind: "ready",
-      detail: `Iframe loaded for ${runtimeId}.`,
-      path,
-    });
-    emitNavigation(scopeId, runtimeId, frameEl.contentWindow?.location?.href || buildEntryUrl(scopeId, runtimeId, path).toString());
+    finalizeFrameReady(scopeId, runtimeId);
   });
 }
 
@@ -294,6 +374,15 @@ function bindShellCommands(scopeId, runtimeId) {
 
     if (message?.kind === "refresh-site") {
       navigateFrame(scopeId, runtimeId, activePath || "/", { reload: true });
+      return;
+    }
+
+    if (message?.kind === "capture-phpinfo") {
+      phpWorker?.postMessage({
+        kind: "capture-phpinfo",
+        scopeId,
+        runtimeId,
+      });
     }
   });
 }

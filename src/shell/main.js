@@ -8,6 +8,7 @@ import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
 import { resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
 import { clearScopeSession, getOrCreateScopeId, loadSessionState, saveSessionState } from "../shared/storage.js";
+import { createProvisioningRuntime } from "../runtime/php-loader.js";
 
 const els = {
   addressForm: document.querySelector("#address-form"),
@@ -25,6 +26,11 @@ const els = {
   logsPanel: document.querySelector("#logs-panel"),
   logsTab: document.querySelector("#logs-tab"),
   panelToggle: document.querySelector("#panel-toggle-button"),
+  phpInfoButton: document.querySelector("#phpinfo-button"),
+  phpInfoFrame: document.querySelector("#phpinfo-frame"),
+  phpInfoPanel: document.querySelector("#phpinfo-panel"),
+  phpInfoTab: document.querySelector("#phpinfo-tab"),
+  refreshPhpInfoButton: document.querySelector("#refresh-phpinfo-button"),
   refresh: document.querySelector("#refresh-button"),
   reset: document.querySelector("#reset-button"),
   runtime: document.querySelector("#runtime-select"),
@@ -45,6 +51,8 @@ let remoteFrameBooted = false;
 let uiLocked = true;
 let remoteReloadToken = 0;
 let pendingCleanBoot = false;
+let latestPhpInfoHtml = "";
+let phpInfoCapturePromise = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
 
 function isInternalRuntimePath(path) {
@@ -67,6 +75,8 @@ function setUiLocked(locked) {
   els.address.disabled = locked;
   els.homeButton.disabled = locked;
   els.adminButton.disabled = locked;
+  els.phpInfoButton.disabled = locked;
+  els.refreshPhpInfoButton.disabled = locked;
   els.runtime.disabled = locked;
   els.reset.disabled = locked;
   els.exportButton.disabled = locked;
@@ -179,8 +189,85 @@ function navigateAdmin() {
   navigateWithinRuntime("/admin/search.php");
 }
 
+function setPhpInfoContent(html = "") {
+  latestPhpInfoHtml = typeof html === "string" ? html : "";
+  if (!els.phpInfoFrame) {
+    return;
+  }
+
+  if (!latestPhpInfoHtml) {
+    els.phpInfoFrame.srcdoc = `<!doctype html><meta charset="utf-8"><style>
+      body{font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;color:#1f2937;background:#fff}
+      p{margin:0}
+    </style><p>No PHP diagnostics captured yet.</p>`;
+    return;
+  }
+
+  els.phpInfoFrame.srcdoc = latestPhpInfoHtml;
+}
+
+function requestPhpInfoCapture() {
+  setActivePanel("phpinfo");
+  void capturePhpInfoLocally("manual");
+}
+
+async function capturePhpInfoLocally(reason = "manual") {
+  if (!config) {
+    appendLog("Cannot capture PHP info before the playground configuration is loaded.", true);
+    return;
+  }
+
+  if (phpInfoCapturePromise) {
+    return phpInfoCapturePromise;
+  }
+
+  const runtime = config.runtimes.find((entry) => entry.id === currentRuntimeId) || getDefaultRuntime(config);
+  appendLog(`Capturing PHP runtime diagnostics for ${runtime.label} (${reason}).`);
+
+  phpInfoCapturePromise = (async () => {
+    const php = createProvisioningRuntime(runtime);
+    const output = [];
+    const errors = [];
+    const onOutput = (event) => output.push(String(event.detail ?? ""));
+    const onError = (event) => errors.push(String(event.detail ?? ""));
+
+    php.addEventListener("output", onOutput);
+    php.addEventListener("error", onError);
+
+    try {
+      await php.refresh();
+      await php.run(`<?php
+ob_start();
+phpinfo();
+$html = ob_get_clean();
+echo $html;
+`);
+
+      const html = output.join("");
+      if (!html.trim()) {
+        throw new Error("phpinfo() returned no HTML output.");
+      }
+
+      setPhpInfoContent(html);
+      appendLog(`Captured PHP runtime diagnostics for ${runtime.label}.`);
+    } catch (error) {
+      const detail = String(error?.stack || error?.message || error);
+      const stderr = errors.join("");
+      setPhpInfoContent(`<!doctype html><meta charset="utf-8"><pre>${detail}${stderr ? `\n\n${stderr}` : ""}</pre>`);
+      appendLog(`PHP info capture failed: ${detail}`, true);
+    } finally {
+      php.removeEventListener("output", onOutput);
+      php.removeEventListener("error", onError);
+      phpInfoCapturePromise = null;
+    }
+  })();
+
+  return phpInfoCapturePromise;
+}
+
 function setActivePanel(panel) {
   const panels = {
+    phpinfo: [els.phpInfoPanel, els.phpInfoTab],
     blueprint: [els.blueprintPanel, els.blueprintTab],
     logs: [els.logsPanel, els.logsTab],
     settings: [els.settingsPanel, els.settingsTab],
@@ -263,11 +350,24 @@ function bindShellChannel() {
         appendLog(`${message.title}: ${message.detail}`);
         break;
       case "ready":
-        remoteFrameBooted = true;
         setUiLocked(false);
-        currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || currentPath);
+        {
+          const previousPath = currentPath;
+          currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || currentPath);
+          if (remoteFrameBooted && currentPath !== previousPath) {
+            postToRemote({ kind: "navigate-site", path: currentPath });
+          }
+        }
         els.address.value = currentPath;
         saveState({ lastReadyAt: new Date().toISOString() });
+        break;
+      case "frame-ready":
+        remoteFrameBooted = true;
+        if (!uiLocked) {
+          currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || currentPath);
+          els.address.value = currentPath;
+          saveState();
+        }
         break;
       case "navigate":
         currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || "/");
@@ -278,6 +378,14 @@ function bindShellChannel() {
         remoteFrameBooted = false;
         setUiLocked(false);
         appendLog(message.detail, true);
+        if (!latestPhpInfoHtml) {
+          setActivePanel("phpinfo");
+          void capturePhpInfoLocally("bootstrap-error");
+        }
+        break;
+      case "phpinfo":
+        setPhpInfoContent(message.html || "");
+        appendLog(message.detail || "Captured PHP runtime diagnostics.");
         break;
       default:
         break;
@@ -320,6 +428,8 @@ async function main() {
 
   bindShellChannel();
   bindServiceWorkerMessages();
+  setPhpInfoContent("");
+  phpInfoCapturePromise = null;
   setUiLocked(true);
   await updateFrame();
 }
@@ -333,10 +443,13 @@ els.adminButton.addEventListener("click", navigateAdmin);
 els.panelToggle.addEventListener("click", toggleSidePanel);
 els.settingsTab.addEventListener("click", () => setActivePanel("settings"));
 els.logsTab.addEventListener("click", () => setActivePanel("logs"));
+els.phpInfoTab.addEventListener("click", () => setActivePanel("phpinfo"));
 els.blueprintTab.addEventListener("click", () => setActivePanel("blueprint"));
 els.clearLogs.addEventListener("click", () => {
   els.logPanel.textContent = "";
 });
+els.phpInfoButton.addEventListener("click", requestPhpInfoCapture);
+els.refreshPhpInfoButton.addEventListener("click", requestPhpInfoCapture);
 
 els.addressForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -352,6 +465,8 @@ els.runtime.addEventListener("change", () => {
   }
   currentRuntimeId = els.runtime.value;
   remoteFrameBooted = false;
+  setPhpInfoContent("");
+  phpInfoCapturePromise = null;
   appendLog(`Switching runtime to ${currentRuntimeId}`);
   saveState({ switchedAt: new Date().toISOString() });
   serviceWorkerReady = null;
@@ -382,6 +497,8 @@ els.reset.addEventListener("click", () => {
   pendingCleanBoot = true;
   remoteFrameBooted = false;
   serviceWorkerReady = null;
+  setPhpInfoContent("");
+  phpInfoCapturePromise = null;
   void updateFrame();
 });
 

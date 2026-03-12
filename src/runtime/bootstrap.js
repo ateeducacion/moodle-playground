@@ -17,7 +17,6 @@ import {
 } from "./bootstrap-fs.js";
 import { mountReadonlyVfs } from "../../lib/vfs-mount.js";
 import { extractZipEntries, fetchBundleWithCache, writeEntriesToPhp } from "../../lib/moodle-loader.js";
-import { flushAllPGliteInstances } from "./php-loader.js";
 
 const DOCROOT = "/www";
 const CONFIG_ROOT = "/persist/config";
@@ -27,44 +26,43 @@ const INSTALL_CHECK_PATH = `${MOODLE_ROOT}/__install_check.php`;
 const INSTALL_RUNNER_PATH = `${MOODLE_ROOT}/__install_database.php`;
 const PDO_PROBE_PATH = `${MOODLE_ROOT}/__pdo_probe.php`;
 const PDO_DDL_PROBE_PATH = `${MOODLE_ROOT}/__pdo_ddl_probe.php`;
+const CONFIG_NORMALIZER_PATH = `${MOODLE_ROOT}/__config_normalizer.php`;
+const CACHE_CONFIG_PATH = `${MOODLE_ROOT}/cache/classes/config.php`;
+const SQLITE_DRIVER_PATH = `${MOODLE_ROOT}/lib/dml/sqlite3_pdo_moodle_database.php`;
+const DATAPRIVACY_SETTINGS_PATH = `${MOODLE_ROOT}/admin/tool/dataprivacy/settings.php`;
+const LOG_SETTINGS_PATH = `${MOODLE_ROOT}/admin/tool/log/settings.php`;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-  const INTERNAL_RUNTIME_FILES = [
+const INTERNAL_RUNTIME_FILES = [
   `${MOODLE_ROOT}/config.php`,
   AUTOLOAD_CHECK_PATH,
   INSTALL_CHECK_PATH,
   INSTALL_RUNNER_PATH,
   PDO_PROBE_PATH,
   PDO_DDL_PROBE_PATH,
+  CONFIG_NORMALIZER_PATH,
+  CACHE_CONFIG_PATH,
+  SQLITE_DRIVER_PATH,
+  DATAPRIVACY_SETTINGS_PATH,
+  LOG_SETTINGS_PATH,
 ];
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-async function flushDatabasePersistence(publish, message, progress) {
-  try {
-    publish(message, progress);
-    await flushAllPGliteInstances();
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    publish(`Deferred database flush failed: ${detail}`, progress);
-  }
-}
-
-function buildScopedPath(scopeId, runtimeId, path) {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `/playground/${scopeId}/${runtimeId}${normalizedPath}`.replace(/\/{2,}/gu, "/");
-}
-
-function buildPublicBase(origin, scopeId, runtimeId) {
-  return new URL(buildScopedPath(scopeId, runtimeId, "/"), origin).toString().replace(/\/$/u, "");
+function buildPublicBase(appBaseUrl) {
+  return new URL("./", appBaseUrl).toString().replace(/\/$/u, "");
 }
 
 function buildDatabaseName(scopeId, runtimeId) {
   const scope = String(scopeId || "default").replace(/[^A-Za-z0-9_]/gu, "_");
   const runtime = String(runtimeId || "php").replace(/[^A-Za-z0-9_]/gu, "_");
   return `moodle_${scope}_${runtime}`;
+}
+
+function buildDatabaseFilePath(scopeId, runtimeId) {
+  return `${MOODLEDATA_ROOT}/${buildDatabaseName(scopeId, runtimeId)}.sq3.php`;
 }
 
 function buildInstallStatePath(scopeId, runtimeId) {
@@ -284,6 +282,9 @@ define('CLI_SCRIPT', true);
 if (!defined('CACHE_DISABLE_ALL')) {
     define('CACHE_DISABLE_ALL', true);
 }
+if (!defined('CACHE_DISABLE_STORES')) {
+    define('CACHE_DISABLE_STORES', true);
+}
 if (!defined('PLAYGROUND_SKIP_INITIALISE_CFG')) {
     define('PLAYGROUND_SKIP_INITIALISE_CFG', true);
 }
@@ -318,8 +319,59 @@ if (!empty($options['lang'])) {
 $CFG->early_install_lang = false;
 get_string_manager(true);
 require($CFG->dirroot.'/version.php');
+$CFG->version = $version;
+$CFG->release = $release;
+$CFG->branch = $branch;
 
-$runStage = static function(string $name) use (&$options, &$version, &$release, &$branch, &$CFG, &$DB): void {
+$playgroundDiagnostics = [
+    'extensions' => [
+        'libxml' => extension_loaded('libxml'),
+        'xml' => extension_loaded('xml'),
+        'dom' => extension_loaded('dom'),
+        'simplexml' => extension_loaded('simplexml'),
+        'pdo' => extension_loaded('pdo'),
+        'pdo_sqlite' => extension_loaded('pdo_sqlite'),
+        'sqlite3' => extension_loaded('sqlite3'),
+    ],
+    'classes' => [
+        'DOMDocument' => class_exists('DOMDocument', false),
+        'SimpleXMLElement' => class_exists('SimpleXMLElement', false),
+        'XMLReader' => class_exists('XMLReader', false),
+    ],
+    'paths' => [
+        'installxml' => "$CFG->libdir/db/install.xml",
+        'installxmlexists' => file_exists("$CFG->libdir/db/install.xml"),
+        'installxmlreadable' => is_readable("$CFG->libdir/db/install.xml"),
+    ],
+];
+
+if ($playgroundDiagnostics['paths']['installxmlexists'] && class_exists('DOMDocument', false)) {
+    try {
+        $dom = new DOMDocument();
+        $playgroundDiagnostics['xmlprobe'] = [
+            'domload' => @$dom->load($playgroundDiagnostics['paths']['installxml']),
+            'root' => $dom->documentElement ? $dom->documentElement->tagName : null,
+        ];
+    } catch (Throwable $diagnosticerror) {
+        $playgroundDiagnostics['xmlprobe'] = [
+            'error' => get_class($diagnosticerror) . ': ' . $diagnosticerror->getMessage(),
+        ];
+    }
+}
+
+echo '[playground] diagnostics:' . json_encode($playgroundDiagnostics, JSON_UNESCAPED_SLASHES) . PHP_EOL;
+flush();
+
+$syncCoreConfigIntoCfg = static function() use (&$CFG): void {
+    $localcfg = get_config('core');
+    if (is_array($localcfg) || is_object($localcfg)) {
+        foreach ($localcfg as $name => $value) {
+            $CFG->{\$name} = $value;
+        }
+    }
+};
+
+$runStage = static function(string $name) use (&$options, &$version, &$release, &$branch, &$CFG, &$DB, &$syncCoreConfigIntoCfg): void {
     switch ($name) {
         case 'core':
             echo "[playground] core:start\\n";
@@ -338,7 +390,33 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
             flush();
 
             core_php_time_limit::raise(600);
-            $DB->get_manager()->install_from_xmldb_file("$CFG->libdir/db/install.xml");
+            require_once($CFG->libdir.'/xmldb/xmldb_file.php');
+            $xmldbfile = new xmldb_file("$CFG->libdir/db/install.xml");
+            echo "[playground] core:schema-load:start\\n";
+            flush();
+            $loaded = $xmldbfile->loadXMLStructure();
+            echo "[playground] core:schema-load:done loaded=" . ($loaded ? '1' : '0') . "\\n";
+            flush();
+            if (!$loaded) {
+                $structure = $xmldbfile->getStructure();
+                $message = $structure && !empty($structure->errormsg) ? $structure->errormsg : 'Unknown XMLDB load failure';
+                cli_error('Unable to load install.xml: ' . $message);
+            }
+
+            $xmldbstructure = $xmldbfile->getStructure();
+            $tablecount = count($xmldbstructure->getTables());
+            echo "[playground] core:schema-structure:tables={$tablecount}\\n";
+            flush();
+
+            $sqlarr = $DB->get_manager()->generator->getCreateStructureSQL($xmldbstructure);
+            $sqlcount = is_array($sqlarr) ? count($sqlarr) : 0;
+            echo "[playground] core:schema-sql:count={$sqlcount}\\n";
+            if (!empty($sqlarr[0])) {
+                echo "[playground] core:schema-sql:first=" . substr(str_replace(["\\r", "\\n"], ' ', $sqlarr[0]), 0, 240) . "\\n";
+            }
+            flush();
+
+            $DB->get_manager()->install_from_xmldb_structure($xmldbstructure);
             echo "[playground] core:schema-installed\\n";
             flush();
 
@@ -347,12 +425,18 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
             echo "[playground] core:defaults-installed\\n";
             flush();
 
-            upgrade_main_savepoint(true, $version, false);
-            upgrade_component_updated('moodle', '', true);
-            echo "[playground] core:installed\\n";
-            flush();
+            $syncCoreConfigIntoCfg();
+            $installedversion = get_config('core', 'version');
+            if ($installedversion === false || $installedversion === null || $installedversion === '') {
+                set_config('version', $version);
+                $installedversion = $version;
+            }
             set_config('release', $release);
             set_config('branch', $branch);
+            $syncCoreConfigIntoCfg();
+            upgrade_component_updated('moodle', '', true);
+            echo "[playground] core:installed version={$installedversion}\\n";
+            flush();
             if (defined('PHPUNIT_TEST') && PHPUNIT_TEST) {
                 set_config('phpunittest', 'na');
             }
@@ -381,14 +465,11 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
         case 'finalize':
             echo "[playground] finalize:start\\n";
             flush();
+            $syncCoreConfigIntoCfg();
             $DB->set_field('user', 'password', hash_internal_user_password($options['adminpass']), ['username' => 'admin']);
 
             if (isset($options['adminemail'])) {
                 $DB->set_field('user', 'email', $options['adminemail'], ['username' => 'admin']);
-            }
-
-            if (isset($options['adminuser']) && $options['adminuser'] !== 'admin' && $options['adminuser'] !== 'guest') {
-                $DB->set_field('user', 'username', $options['adminuser'], ['username' => 'admin']);
             }
 
             if (!empty($options['supportemail'])) {
@@ -399,9 +480,51 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
 
             set_config('rolesactive', 1);
             upgrade_finished();
-            \\core\\session\\manager::set_user(get_admin());
-            admin_apply_default_settings(NULL, true);
+            $syncCoreConfigIntoCfg();
+
+            $siteadmins = get_config('core', 'siteadmins');
+            if ($siteadmins !== false && $siteadmins !== null && $siteadmins !== '') {
+                $CFG->siteadmins = (string)$siteadmins;
+            }
+
+            $adminuser = get_admin();
+            if (!$adminuser) {
+                $adminuser = $DB->get_record('user', [
+                    'username' => 'admin',
+                    'mnethostid' => $CFG->mnet_localhost_id,
+                    'deleted' => 0,
+                ]);
+            }
+            if (!$adminuser && !empty($options['adminuser']) && $options['adminuser'] !== 'guest') {
+                $adminuser = $DB->get_record('user', [
+                    'username' => $options['adminuser'],
+                    'mnethostid' => $CFG->mnet_localhost_id,
+                    'deleted' => 0,
+                ]);
+            }
+            if (!$adminuser) {
+                cli_error('Unable to resolve local admin user during finalize stage.');
+            }
+
+            if (empty($CFG->siteadmins) || strpos(',' . $CFG->siteadmins . ',', ',' . $adminuser->id . ',') === false) {
+                set_config('siteadmins', $adminuser->id);
+                $CFG->siteadmins = (string)$adminuser->id;
+            }
+
+            \\core\\session\\manager::set_user($adminuser);
+            try {
+                admin_apply_default_settings(NULL, true);
+                echo "[playground] finalize:defaults-applied\\n";
+            } catch (Throwable $finalizeerror) {
+                echo "[playground] finalize:defaults-skipped="
+                    . get_class($finalizeerror) . ': ' . $finalizeerror->getMessage() . "\\n";
+            }
+            flush();
             set_config('registerauth', '');
+
+            if (isset($options['adminuser']) && $options['adminuser'] !== 'admin' && $options['adminuser'] !== 'guest') {
+                $DB->set_field('user', 'username', $options['adminuser'], ['id' => $adminuser->id]);
+            }
 
             if (isset($options['shortname']) && $options['shortname'] !== '') {
                 $DB->set_field('course', 'shortname', $options['shortname'], ['format' => 'site']);
@@ -442,50 +565,64 @@ if ($stage === 'themes') {
 `;
 }
 
-function createPdoProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
-  const candidates = [
-    `pgsql:dbname=${dbName}`,
-    `pgsql:${dbName}`,
-    `pgsql:host=${dbHost};dbname=${dbName}`,
-    `pgsql:${dbHost}/${dbName}`,
-  ];
-
-  const encodedCandidates = JSON.stringify(candidates).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-
+function createConfigNormalizerPhp() {
   return `<?php
 header('content-type: application/json; charset=utf-8');
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 ob_start();
 
+unset($_SERVER['REMOTE_ADDR']);
+define('CLI_SCRIPT', true);
+if (!defined('CACHE_DISABLE_ALL')) {
+    define('CACHE_DISABLE_ALL', true);
+}
+if (!defined('CACHE_DISABLE_STORES')) {
+    define('CACHE_DISABLE_STORES', true);
+}
+
 $result = [
-    'pdoAvailable' => class_exists('PDO'),
-    'drivers' => class_exists('PDO') ? PDO::getAvailableDrivers() : [],
-    'candidates' => [],
+    'ok' => false,
+    'set' => [],
+    'kept' => [],
 ];
 
-$user = '${escapePhpSingleQuoted(dbUser)}';
-$pass = '${escapePhpSingleQuoted(dbPassword)}';
-$candidates = json_decode('${encodedCandidates}', true);
+try {
+    require_once('/www/moodle/config.php');
+    require_once($CFG->libdir . '/moodlelib.php');
 
-foreach ($candidates as $dsn) {
-    try {
-        $pdo = new PDO($dsn, $user, $pass);
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => true,
-        ];
-        $pdo = null;
-    } catch (Throwable $error) {
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => false,
-            'error' => [
-                'type' => get_class($error),
-                'message' => $error->getMessage(),
-            ],
-        ];
+    $defaults = [
+        'navcourselimit' => '10',
+        'enablecompletion' => '1',
+        'frontpage' => '6',
+        'frontpageloggedin' => '6',
+        'frontpagecourselimit' => '200',
+        'guestloginbutton' => '0',
+        'rememberusername' => '1',
+        'auth_instructions' => '',
+        'maintenance_enabled' => '0',
+    ];
+
+    foreach ($defaults as $name => $value) {
+        $current = get_config('core', $name);
+        if ($current === false || $current === null || $current === '') {
+            set_config($name, $value);
+            $result['set'][$name] = $value;
+            $CFG->{\$name} = $value;
+        } else {
+            $result['kept'][$name] = $current;
+            $CFG->{\$name} = $current;
+        }
     }
+
+    $result['ok'] = true;
+} catch (Throwable $error) {
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+        'file' => $error->getFile(),
+        'line' => $error->getLine(),
+    ];
 }
 
 $buffer = ob_get_clean();
@@ -497,15 +634,8 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-function createPdoDdlProbePhp({ dbHost, dbName, dbPassword, dbUser }) {
-  const candidates = [
-    "pgsql:dbname=" + dbName,
-    "pgsql:" + dbName,
-    "pgsql:host=" + dbHost + ";dbname=" + dbName,
-    "pgsql:" + dbHost + "/" + dbName,
-  ];
-
-  const encodedCandidates = JSON.stringify(candidates).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+function createPdoProbePhp({ dbFile }) {
+  const dsn = `sqlite:${dbFile}`;
 
   return `<?php
 header('content-type: application/json; charset=utf-8');
@@ -516,40 +646,22 @@ ob_start();
 $result = [
     'pdoAvailable' => class_exists('PDO'),
     'drivers' => class_exists('PDO') ? PDO::getAvailableDrivers() : [],
-    'candidates' => [],
+    'dsn' => '${escapePhpSingleQuoted(dsn)}',
+    'dbFile' => '${escapePhpSingleQuoted(dbFile)}',
+    'dbFileExistsBeforeConnect' => file_exists('${escapePhpSingleQuoted(dbFile)}'),
 ];
 
-$user = '${escapePhpSingleQuoted(dbUser)}';
-$pass = '${escapePhpSingleQuoted(dbPassword)}';
-$candidates = json_decode('${encodedCandidates}', true);
-
-foreach ($candidates as $dsn) {
-    try {
-        $pdo = new PDO($dsn, $user, $pass);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-        $pdo->exec('CREATE TABLE mdl_playground_probe (id BIGINT PRIMARY KEY, name VARCHAR(255) NOT NULL)');
-        $pdo->exec("INSERT INTO mdl_playground_probe (id, name) VALUES (1, 'ok')");
-        $rows = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => true,
-            'rows' => $rows,
-        ];
-        $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-        $pdo = null;
-    } catch (Throwable $error) {
-        $result['candidates'][] = [
-            'dsn' => $dsn,
-            'ok' => false,
-            'error' => [
-                'type' => get_class($error),
-                'message' => $error->getMessage(),
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
-            ],
-        ];
-    }
+try {
+    $pdo = new PDO('${escapePhpSingleQuoted(dsn)}');
+    $result['ok'] = true;
+    $result['dbFileExistsAfterConnect'] = file_exists('${escapePhpSingleQuoted(dbFile)}');
+    $pdo = null;
+} catch (Throwable $error) {
+    $result['ok'] = false;
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+    ];
 }
 
 $buffer = ob_get_clean();
@@ -559,6 +671,206 @@ if ($buffer !== '') {
 
 echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
+}
+
+function createPdoDdlProbePhp({ dbFile }) {
+  const dsn = `sqlite:${dbFile}`;
+
+  return `<?php
+header('content-type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+
+$result = [
+    'pdoAvailable' => class_exists('PDO'),
+    'drivers' => class_exists('PDO') ? PDO::getAvailableDrivers() : [],
+    'dsn' => '${escapePhpSingleQuoted(dsn)}',
+    'dbFile' => '${escapePhpSingleQuoted(dbFile)}',
+];
+
+try {
+    $pdo = new PDO('${escapePhpSingleQuoted(dsn)}');
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+    $pdo->exec('CREATE TABLE mdl_playground_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)');
+    $pdo->exec("INSERT INTO mdl_playground_probe (name) VALUES ('ok')");
+    $result['ok'] = true;
+    $result['rows'] = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
+    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
+    $pdo = null;
+} catch (Throwable $error) {
+    $result['ok'] = false;
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+        'file' => $error->getFile(),
+        'line' => $error->getLine(),
+    ];
+}
+
+$buffer = ob_get_clean();
+if ($buffer !== '') {
+    $result['output'] = $buffer;
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+`;
+}
+
+function createPatchedDataprivacySettingsPhp() {
+  return `<?php
+defined('MOODLE_INTERNAL') || die;
+
+if ($hassiteconfig) {
+    $privacysettings = $ADMIN->locate('privacysettings');
+
+    if ($privacysettings && $ADMIN->fulltree) {
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/contactdataprotectionofficer',
+                new lang_string('contactdataprotectionofficer', 'tool_dataprivacy'),
+                new lang_string('contactdataprotectionofficer_desc', 'tool_dataprivacy'), 0)
+        );
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/automaticdataexportapproval',
+                new lang_string('automaticdataexportapproval', 'tool_dataprivacy'),
+                new lang_string('automaticdataexportapproval_desc', 'tool_dataprivacy'), 0)
+        );
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/automaticdatadeletionapproval',
+                new lang_string('automaticdatadeletionapproval', 'tool_dataprivacy'),
+                new lang_string('automaticdatadeletionapproval_desc', 'tool_dataprivacy'), 0)
+        );
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/automaticdeletionrequests',
+                new lang_string('automaticdeletionrequests', 'tool_dataprivacy'),
+                new lang_string('automaticdeletionrequests_desc', 'tool_dataprivacy'), 1)
+        );
+
+        $privacysettings->add(new admin_setting_configduration('tool_dataprivacy/privacyrequestexpiry',
+                new lang_string('privacyrequestexpiry', 'tool_dataprivacy'),
+                new lang_string('privacyrequestexpiry_desc', 'tool_dataprivacy'),
+                WEEKSECS, 1));
+
+        $assignableroles = get_assignable_roles(context_system::instance());
+        $capableroles = get_roles_with_capability('tool/dataprivacy:managedatarequests');
+        $roles = [];
+        foreach ($capableroles as $key => $role) {
+            if (array_key_exists($key, $assignableroles)) {
+                $roles[$key] = $assignableroles[$key];
+            }
+        }
+        if (!empty($roles)) {
+            $privacysettings->add(new admin_setting_configmulticheckbox('tool_dataprivacy/dporoles',
+                    new lang_string('dporolemapping', 'tool_dataprivacy'),
+                    new lang_string('dporolemapping_desc', 'tool_dataprivacy'), null, $roles)
+            );
+        }
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/requireallenddatesforuserdeletion',
+                new lang_string('requireallenddatesforuserdeletion', 'tool_dataprivacy'),
+                new lang_string('requireallenddatesforuserdeletion_desc', 'tool_dataprivacy'),
+                1));
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/showdataretentionsummary',
+            new lang_string('showdataretentionsummary', 'tool_dataprivacy'),
+            new lang_string('showdataretentionsummary_desc', 'tool_dataprivacy'),
+            1));
+
+        $privacysettings->add(new admin_setting_configcheckbox('tool_dataprivacy/allowfiltering',
+            new lang_string('allowfiltering', 'tool_dataprivacy'),
+            new lang_string('allowfiltering_desc', 'tool_dataprivacy'),
+            0));
+        $privacysettings->hide_if('tool_dataprivacy/allowfiltering', 'tool_dataprivacy/automaticdataexportapproval', 'checked', 1);
+    }
+}
+
+if (tool_dataprivacy\\api::is_site_dpo($USER->id)) {
+    $ADMIN->add('privacy', new admin_externalpage('datarequests', get_string('datarequests', 'tool_dataprivacy'),
+        new moodle_url('/admin/tool/dataprivacy/datarequests.php'), 'tool/dataprivacy:managedatarequests')
+    );
+
+    $ADMIN->add('privacy', new admin_externalpage('dataregistry', get_string('dataregistry', 'tool_dataprivacy'),
+        new moodle_url('/admin/tool/dataprivacy/dataregistry.php'), 'tool/dataprivacy:managedataregistry')
+    );
+
+    $ADMIN->add('privacy', new admin_externalpage('datadeletion', get_string('datadeletion', 'tool_dataprivacy'),
+            new moodle_url('/admin/tool/dataprivacy/datadeletion.php'), 'tool/dataprivacy:managedataregistry')
+    );
+}
+`;
+}
+
+function createPatchedLogSettingsPhp() {
+  return `<?php
+defined('MOODLE_INTERNAL') || die();
+
+if ($hassiteconfig) {
+
+    $privacysettings = $ADMIN->locate('privacysettings');
+
+    if ($privacysettings && $ADMIN->fulltree) {
+        $privacysettings->add(new admin_setting_configcheckbox('tool_log/exportlog',
+                new lang_string('exportlog', 'tool_log'),
+                new lang_string('exportlogdetail', 'tool_log'), 1)
+        );
+    }
+
+    $ADMIN->add('modules', new admin_category('logging', new lang_string('logging', 'tool_log')));
+
+    $temp = new admin_settingpage('managelogging', new lang_string('managelogging', 'tool_log'));
+    $temp->add(new tool_log_setting_managestores());
+    $ADMIN->add('logging', $temp);
+
+    foreach (core_plugin_manager::instance()->get_plugins_of_type('logstore') as $plugin) {
+        $plugin->load_settings($ADMIN, 'logging', $hassiteconfig);
+    }
+}
+`;
+}
+
+async function patchRuntimePhpSources(php) {
+  const patchFile = async (path, replacers) => {
+    const current = textDecoder.decode(await php.readFile(path));
+    let next = current;
+    for (const [search, replace] of replacers) {
+      if (next.includes(search)) {
+        next = next.replace(search, replace);
+      }
+    }
+    if (next !== current) {
+      await php.writeFile(path, textEncoder.encode(next));
+    }
+  };
+
+  await patchFile(CACHE_CONFIG_PATH, [
+    [
+      "debugging('Invalid cache store in config. Missing name or plugin.', DEBUG_DEVELOPER);",
+      "if (!(defined('CACHE_DISABLE_ALL') && CACHE_DISABLE_ALL)) { debugging('Invalid cache store in config. Missing name or plugin.', DEBUG_DEVELOPER); }",
+    ],
+    [
+      "debugging('Invalid cache store in config. Not an available plugin.', DEBUG_DEVELOPER);",
+      "if (!(defined('CACHE_DISABLE_ALL') && CACHE_DISABLE_ALL)) { debugging('Invalid cache store in config. Not an available plugin.', DEBUG_DEVELOPER); }",
+    ],
+    [
+      "debugging('A cache mode mapping entry is invalid.', DEBUG_DEVELOPER);",
+      "if (!(defined('CACHE_DISABLE_ALL') && CACHE_DISABLE_ALL)) { debugging('A cache mode mapping entry is invalid.', DEBUG_DEVELOPER); }",
+    ],
+    [
+      "debugging('A cache mode mapping exists for a mode or store that does not exist.', DEBUG_DEVELOPER);",
+      "if (!(defined('CACHE_DISABLE_ALL') && CACHE_DISABLE_ALL)) { debugging('A cache mode mapping exists for a mode or store that does not exist.', DEBUG_DEVELOPER); }",
+    ],
+  ]);
+
+  await patchFile(SQLITE_DRIVER_PATH, [
+    [
+      "$key = reset($value);\n",
+      "$row = (array)$value;\n            $key = reset($row);\n",
+    ],
+    [
+      "$objects[$key] = (object)$value;\n",
+      "$objects[$key] = (object)$row;\n",
+    ],
+  ]);
 }
 
 async function runAutoloadCheck(php, { ignoreComponentCache = false } = {}) {
@@ -591,6 +903,7 @@ async function prepareMoodleRuntime({
   installRunnerPhp,
   pdoProbePhp,
   pdoDdlProbePhp,
+  configNormalizerPhp,
   publish,
   allowDiagnostics = false,
 }) {
@@ -630,6 +943,10 @@ async function prepareMoodleRuntime({
   await php.writeFile(INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
   await php.writeFile(PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
   await php.writeFile(PDO_DDL_PROBE_PATH, textEncoder.encode(pdoDdlProbePhp));
+  await php.writeFile(CONFIG_NORMALIZER_PATH, textEncoder.encode(configNormalizerPhp));
+  await php.writeFile(DATAPRIVACY_SETTINGS_PATH, textEncoder.encode(createPatchedDataprivacySettingsPhp()));
+  await php.writeFile(LOG_SETTINGS_PATH, textEncoder.encode(createPatchedLogSettingsPhp()));
+  await patchRuntimePhpSources(php);
 
   if (allowDiagnostics) {
     await writeJsonFile(php, MANIFEST_STATE_PATH, {
@@ -674,7 +991,7 @@ async function runCliProvisioning(php, publish) {
   };
 }
 
-async function runPdoProbe(php, dbConfig) {
+async function runPdoProbe(php) {
   const output = await requestRuntimeScript(php, "/__pdo_probe.php");
   const payload = output.trim();
   const jsonStart = payload.indexOf("{");
@@ -695,6 +1012,15 @@ async function runPdoDdlProbe(php) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
+async function runConfigNormalizer(php) {
+  const output = await requestRuntimeScript(php, "/__config_normalizer.php");
+  const payload = output.trim();
+  const jsonStart = payload.indexOf("{");
+  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
+
+  return jsonPayload ? JSON.parse(jsonPayload) : {};
+}
+
 async function requestRuntimeScript(php, path, searchParams) {
   const url = new URL(path, "https://bootstrap.local/");
 
@@ -706,18 +1032,20 @@ async function requestRuntimeScript(php, path, searchParams) {
     }
   }
 
+  const runtimePath = `${MOODLE_ROOT}${url.pathname}`;
+  const beforeRequest = await php.analyzePath(runtimePath);
   const response = await php.request(new Request(url));
   const body = textDecoder.decode(await response.arrayBuffer());
 
   if (!response.ok) {
-    const runtimePath = `${MOODLE_ROOT}${url.pathname}`;
-    const binary = await php.binary;
-    const analyzed = binary.FS.analyzePath(runtimePath);
-    const mode = analyzed?.exists && analyzed.object ? analyzed.object.mode : null;
+    const afterRequest = await php.analyzePath(runtimePath);
+    const beforeMode = beforeRequest?.exists && beforeRequest.object ? beforeRequest.object.mode : null;
+    const afterMode = afterRequest?.exists && afterRequest.object ? afterRequest.object.mode : null;
     throw new Error(
       `Runtime bootstrap request failed for ${url.pathname}: HTTP ${response.status}: ${body}\n`
       + `Resolved FS path: ${runtimePath}\n`
-      + `FS exists: ${Boolean(analyzed?.exists)}${mode != null ? ` mode=${mode}` : ""}`,
+      + `FS existed before request: ${Boolean(beforeRequest?.exists)}${beforeMode != null ? ` mode=${beforeMode}` : ""}\n`
+      + `FS exists after request: ${Boolean(afterRequest?.exists)}${afterMode != null ? ` mode=${afterMode}` : ""}`,
     );
   }
 
@@ -731,6 +1059,7 @@ export async function bootstrapMoodle({
   publish,
   runtimeId,
   scopeId,
+  appBaseUrl,
   origin,
 }) {
   const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
@@ -773,21 +1102,24 @@ export async function bootstrapMoodle({
   const manifestState = buildManifestState(archive.manifest, runtimeId, config.bundleVersion);
   const savedManifestState = await readJsonFile(php, MANIFEST_STATE_PATH);
 
-  const wwwroot = buildPublicBase(origin, scopeId, runtimeId);
+  const wwwroot = buildPublicBase(appBaseUrl || origin);
   const dbName = buildDatabaseName(scopeId, runtimeId);
+  const dbFile = buildDatabaseFilePath(scopeId, runtimeId);
   const installStatePath = buildInstallStatePath(scopeId, runtimeId);
   const savedInstallState = await readJsonFile(php, installStatePath);
   const dbConfig = {
-    dbHost: "idb-storage",
+    dbFile,
+    dbHost: "localhost",
     dbName,
-    dbPassword: "postgres",
-    dbUser: "postgres",
+    dbPassword: "",
+    dbUser: "",
   };
   const phpIni = createPhpIni({ timezone: effectiveConfig.timezone });
   let shouldIgnoreComponentCache = false;
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
   const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
+  const configNormalizerPhp = createConfigNormalizerPhp();
   let configPhp = createMoodleConfigPhp({
     adminDirectory: ADMIN_DIRECTORY,
     componentCachePath: COMPONENT_CACHE_PATH,
@@ -808,28 +1140,21 @@ export async function bootstrapMoodle({
     installRunnerPhp,
     pdoProbePhp,
     pdoDdlProbePhp,
+    configNormalizerPhp,
     publish,
     allowDiagnostics: true,
   });
 
-  publish("Probing PDO/PGlite connectivity.", 0.865);
-  const pdoProbe = await runPdoProbe(php, dbConfig);
-  const workingDsn = Array.isArray(pdoProbe.candidates)
-    ? pdoProbe.candidates.find((candidate) => candidate.ok)
-    : null;
-  if (workingDsn) {
-    publish(`PDO probe connected successfully with ${workingDsn.dsn}.`, 0.868);
+  publish("Probing PDO SQLite connectivity.", 0.865);
+  const pdoProbe = await runPdoProbe(php);
+  if (pdoProbe.ok) {
+    publish(`PDO SQLite probe connected successfully with ${pdoProbe.dsn}.`, 0.868);
   } else {
-    const firstFailure = Array.isArray(pdoProbe.candidates)
-      ? pdoProbe.candidates.find((candidate) => candidate.error?.message)
-      : null;
-    const detail = firstFailure
-      ? `${firstFailure.dsn}: ${firstFailure.error.message}`
-      : "No PDO DSN candidate connected successfully.";
-    publish(`PDO probe failed: ${detail}`, 0.868);
+    const detail = pdoProbe.error?.message || "SQLite PDO connection failed.";
+    publish(`PDO SQLite probe failed: ${detail}`, 0.868);
   }
 
-  publish("Skipping standalone PDO DDL probe and continuing with Moodle bootstrap.", 0.869);
+  publish("Skipping standalone SQLite DDL probe and continuing with Moodle bootstrap.", 0.869);
 
   let installState = null;
   const hasSavedInstallState = Boolean(savedInstallState?.installed);
@@ -865,7 +1190,6 @@ export async function bootstrapMoodle({
     if (/fatal error|warning|exception|error/iu.test(provisioningResult.errorOutput) && !/cliinstallfinished/iu.test(provisioningResult.output)) {
       throw new Error(`Moodle CLI provisioning failed: ${provisioningResult.errorOutput || provisioningResult.output}`);
     }
-    await flushDatabasePersistence(publish, "Persisting Moodle database after CLI provisioning.", 0.905);
     await writeJsonFile(php, installStatePath, {
       ...manifestState,
       dbName,
@@ -877,14 +1201,26 @@ export async function bootstrapMoodle({
     publish("Moodle database already installed, skipping CLI provisioning.", 0.89);
   }
 
+  publish("Normalizing persisted Moodle configuration defaults.", 0.915);
+  const configNormalizer = await runConfigNormalizer(php);
+  if (configNormalizer?.ok) {
+    const setKeys = Object.keys(configNormalizer.set || {});
+    publish(
+      setKeys.length > 0
+        ? `Seeded missing config defaults: ${setKeys.join(", ")}.`
+        : "Persisted config defaults already present.",
+      0.918,
+    );
+  } else if (configNormalizer?.error?.message) {
+    publish(`Config default normalization failed: ${configNormalizer.error.message}`, 0.918);
+  }
+
   publish("Skipping custom Moodle autoload diagnostics for the current runtime strategy.", 0.92);
 
   const missingExtensions = config.runtimes.find((entry) => entry.id === runtimeId)?.missingExtensions || [];
   if (missingExtensions.length > 0) {
     publish(`Runtime still needs validation for: ${missingExtensions.join(", ")}.`, 0.94);
   }
-
-  await flushDatabasePersistence(publish, "Persisting final Moodle runtime state.", 0.945);
 
   const readyPath = (effectiveConfig.landingPath || "").includes("install.php")
     ? "/"

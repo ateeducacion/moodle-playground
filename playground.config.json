@@ -31,7 +31,8 @@
         "zip",
         "mbstring",
         "openssl",
-        "phar"
+        "phar",
+        "sqlite"
       ],
       "missingExtensions": [
         "xmlreader",

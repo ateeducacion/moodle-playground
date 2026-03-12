@@ -7,6 +7,7 @@ import * as PhpWasmMbstring from "../../vendor/php-wasm-mbstring/index.js";
 import * as PhpWasmOpenssl from "../../vendor/php-wasm-openssl/index.js";
 import * as PhpWasmPhar from "../../vendor/php-wasm-phar/index.js";
 import * as PhpWasmSimplexml from "../../vendor/php-wasm-simplexml/index.js";
+import * as PhpWasmSqlite from "../../vendor/php-wasm-sqlite/index.js";
 import * as PhpWasmXml from "../../vendor/php-wasm-xml/index.js";
 import * as PhpWasmZlib from "../../vendor/php-wasm-zlib/index.js";
 
@@ -20,6 +21,7 @@ const LIBS = {
   openssl: PhpWasmOpenssl,
   phar: PhpWasmPhar,
   simplexml: PhpWasmSimplexml,
+  sqlite: PhpWasmSqlite,
   xml: PhpWasmXml,
   zlib: PhpWasmZlib,
 };
