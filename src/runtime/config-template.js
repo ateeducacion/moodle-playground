@@ -161,6 +161,7 @@ require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/setup.php');
 }
 
 export const CHDIR_FIX_PATH = `${MOODLE_ROOT}/__chdir_fix.php`;
+export const CHDIR_FIX_PRELOAD_PATH = "/internal/shared/preload/moodle_chdir.php";
 
 export function createChdirFixPhp() {
   return `<?php
@@ -213,23 +214,27 @@ if (!function_exists('playground_glob_polyfill_installed')) {
 `;
 }
 
-export function createPhpIni({ timezone = "UTC" } = {}) {
-  return `[PHP]
-date.timezone=${timezone}
-display_errors=0
-display_startup_errors=0
-error_reporting=E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
-html_errors=0
-log_errors=1
-max_execution_time=15
-max_input_vars=5000
-memory_limit=512M
-post_max_size=128M
-upload_max_filesize=128M
-sys_temp_dir=${TEMP_ROOT}
-upload_tmp_dir=${TEMP_ROOT}
-session.save_handler=files
-session.save_path=${TEMP_ROOT}/sessions
-auto_prepend_file=${CHDIR_FIX_PATH}
-`;
+/**
+ * Return php.ini entries as a Record<string, string> for use with
+ * setPhpIniEntries() from @php-wasm/universal.  WP Playground hardcodes
+ * /internal/shared/php.ini — writing a separate file has no effect.
+ */
+export function createPhpIniEntries({ timezone = "UTC" } = {}) {
+  return {
+    "date.timezone": timezone,
+    "display_errors": "0",
+    "display_startup_errors": "0",
+    "error_reporting": "32759", // E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
+    "html_errors": "0",
+    "log_errors": "1",
+    // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
+    "max_input_vars": "5000",
+    "memory_limit": "512M",
+    "post_max_size": "128M",
+    "upload_max_filesize": "128M",
+    "sys_temp_dir": TEMP_ROOT,
+    "upload_tmp_dir": TEMP_ROOT,
+    "session.save_handler": "files",
+    "session.save_path": `${TEMP_ROOT}/sessions`,
+  };
 }

@@ -1,11 +1,9 @@
 import { buildEffectivePlaygroundConfig } from "../shared/blueprint.js";
+import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   ADMIN_DIRECTORY,
-  CHDIR_FIX_PATH,
   COMPONENT_CACHE_PATH,
-  createChdirFixPhp,
   createMoodleConfigPhp,
-  createPhpIni,
   MOODLEDATA_ROOT,
   MOODLE_ROOT,
   TEMP_ROOT,
@@ -39,7 +37,6 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const INTERNAL_RUNTIME_FILES = [
   `${MOODLE_ROOT}/config.php`,
-  CHDIR_FIX_PATH,
   AUTOLOAD_CHECK_PATH,
   INSTALL_CHECK_PATH,
   INSTALL_RUNNER_PATH,
@@ -1013,7 +1010,6 @@ async function prepareMoodleRuntime({
   manifestState,
   savedManifestState,
   configPhp,
-  phpIni,
   installRunnerPhp,
   pdoProbePhp,
   pdoDdlProbePhp,
@@ -1055,9 +1051,7 @@ async function prepareMoodleRuntime({
   const mountMs = Math.round(performance.now() - tMount);
 
   const tFiles = performance.now();
-  await php.writeFile(`${DOCROOT}/php.ini`, textEncoder.encode(phpIni));
   await php.writeFile(`${MOODLE_ROOT}/config.php`, textEncoder.encode(configPhp));
-  await php.writeFile(CHDIR_FIX_PATH, textEncoder.encode(createChdirFixPhp()));
   await php.writeFile(AUTOLOAD_CHECK_PATH, textEncoder.encode(createAutoloadCheckPhp()));
   await php.writeFile(INSTALL_CHECK_PATH, textEncoder.encode(createInstallCheckPhp()));
   await php.writeFile(INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
@@ -1083,6 +1077,38 @@ async function prepareMoodleRuntime({
   }
 
   return { shouldMountArchive };
+}
+
+async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish }) {
+  const snapshotUrl = new URL("./assets/moodle/snapshot/install.sq3", appBaseUrl);
+  publish("Downloading pre-installed database snapshot.", 0.87);
+
+  let response;
+  try {
+    response = await fetch(snapshotUrl);
+  } catch {
+    publish("Snapshot fetch failed (network error), falling back to full install.", 0.875);
+    return false;
+  }
+
+  if (!response.ok) {
+    publish(`Snapshot not available (HTTP ${response.status}), falling back to full install.`, 0.875);
+    return false;
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length < 100) {
+    publish("Snapshot too small, falling back to full install.", 0.875);
+    return false;
+  }
+
+  await php.writeFile(dbFile, bytes);
+
+  // Note: $CFG->wwwroot comes from config.php (already written by
+  // prepareMoodleRuntime), not from mdl_config. No DB rewriting needed.
+
+  publish(`Pre-installed snapshot loaded (${bytes.length} bytes).`, 0.885);
+  return true;
 }
 
 async function runProvisioningCheck(php) {
@@ -1257,7 +1283,6 @@ export async function bootstrapMoodle({
     dbPassword: "",
     dbUser: "",
   };
-  const phpIni = createPhpIni({ timezone: effectiveConfig.timezone });
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
   const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
@@ -1278,7 +1303,6 @@ export async function bootstrapMoodle({
     manifestState,
     savedManifestState,
     configPhp,
-    phpIni,
     installRunnerPhp,
     pdoProbePhp,
     pdoDdlProbePhp,
@@ -1288,6 +1312,11 @@ export async function bootstrapMoodle({
   });
   const prepareMs = Math.round(performance.now() - tPrepare);
   publish(`Runtime preparation completed in ${prepareMs}ms.`, 0.86);
+
+  // Update timezone in php.ini if blueprint specifies a non-default timezone
+  if (effectiveConfig.timezone && effectiveConfig.timezone !== "UTC") {
+    await setPhpIniEntries(php._php, { "date.timezone": effectiveConfig.timezone });
+  }
 
   const tPdo = performance.now();
   publish("Probing PDO SQLite connectivity.", 0.865);
@@ -1344,43 +1373,65 @@ export async function bootstrapMoodle({
 
   if (!installMarkerMatches && !installState?.installed) {
     const tInstall = performance.now();
-    publish("Running Moodle installation inside the CGI runtime.", 0.89);
-    const provisioningResult = await runCliProvisioning(php, publish);
-    if (provisioningResult.errorOutput.trim()) {
-      publish(`CLI installer stderr: ${provisioningResult.errorOutput.slice(0, 400)}`, 0.9);
-    }
-    if (/fatal error|warning|exception|error/iu.test(provisioningResult.errorOutput) && !/cliinstallfinished/iu.test(provisioningResult.output)) {
-      throw new Error(`Moodle CLI provisioning failed: ${provisioningResult.errorOutput || provisioningResult.output}`);
-    }
-    await writeJsonFile(php, installStatePath, {
-      ...manifestState,
-      dbName,
-      installed: true,
-      updatedAt: nowIso(),
-    });
-    const installMs = Math.round(performance.now() - tInstall);
-    publish(`Moodle CLI provisioning finished in ${installMs}ms.`, 0.91);
 
-    // Verify database is accessible after install
-    try {
-      const verifyResult = await php.run(`<?php
-        error_reporting(0);
-        $dbFile = '${escapePhpSingleQuoted(dbFile)}';
-        $result = ['dbFileExists' => file_exists($dbFile), 'dbFileSize' => @filesize($dbFile)];
-        try {
-          $pdo = new PDO('sqlite:' . $dbFile);
-          $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-          $version = $pdo->query("SELECT value FROM mdl_config WHERE name = 'version'")->fetchColumn();
-          $result['version'] = $version;
-          $result['tableCount'] = $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")->fetchColumn();
-        } catch (Throwable $e) {
-          $result['error'] = $e->getMessage();
-        }
-        echo json_encode($result);
-      `);
-      publish(`Post-install DB verify: ${verifyResult.text}`, 0.915);
-    } catch (verifyError) {
-      publish(`Post-install DB verify failed: ${verifyError.message}`, 0.915);
+    // Try loading a pre-built install snapshot first (skips the 3-8s install)
+    const snapshotLoaded = await loadInstallSnapshot(php, {
+      dbFile,
+      appBaseUrl: appBaseUrl || origin,
+      publish,
+    });
+
+    if (snapshotLoaded) {
+      await writeJsonFile(php, installStatePath, {
+        ...manifestState,
+        dbName,
+        installed: true,
+        source: "snapshot",
+        updatedAt: nowIso(),
+      });
+      const snapshotMs = Math.round(performance.now() - tInstall);
+      publish(`Install snapshot loaded in ${snapshotMs}ms (skipped full install).`, 0.91);
+    } else {
+      // Fallback: run the full Moodle CLI installer
+      publish("Running Moodle installation inside the CGI runtime.", 0.89);
+      const provisioningResult = await runCliProvisioning(php, publish);
+      if (provisioningResult.errorOutput.trim()) {
+        publish(`CLI installer stderr: ${provisioningResult.errorOutput.slice(0, 400)}`, 0.9);
+      }
+      if (/fatal error|warning|exception|error/iu.test(provisioningResult.errorOutput) && !/cliinstallfinished/iu.test(provisioningResult.output)) {
+        throw new Error(`Moodle CLI provisioning failed: ${provisioningResult.errorOutput || provisioningResult.output}`);
+      }
+      await writeJsonFile(php, installStatePath, {
+        ...manifestState,
+        dbName,
+        installed: true,
+        source: "cli",
+        updatedAt: nowIso(),
+      });
+      const installMs = Math.round(performance.now() - tInstall);
+      publish(`Moodle CLI provisioning finished in ${installMs}ms.`, 0.91);
+
+      // Verify database is accessible after install
+      try {
+        const verifyResult = await php.run(`<?php
+          error_reporting(0);
+          $dbFile = '${escapePhpSingleQuoted(dbFile)}';
+          $result = ['dbFileExists' => file_exists($dbFile), 'dbFileSize' => @filesize($dbFile)];
+          try {
+            $pdo = new PDO('sqlite:' . $dbFile);
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $version = $pdo->query("SELECT value FROM mdl_config WHERE name = 'version'")->fetchColumn();
+            $result['version'] = $version;
+            $result['tableCount'] = $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")->fetchColumn();
+          } catch (Throwable $e) {
+            $result['error'] = $e->getMessage();
+          }
+          echo json_encode($result);
+        `);
+        publish(`Post-install DB verify: ${verifyResult.text}`, 0.915);
+      } catch (verifyError) {
+        publish(`Post-install DB verify failed: ${verifyError.message}`, 0.915);
+      }
     }
 
   } else {

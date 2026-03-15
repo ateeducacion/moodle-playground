@@ -37,6 +37,8 @@ const required = [
   "release",
 ];
 
+// Optional: --snapshot <path-to-install.sq3>
+
 for (const name of required) {
   if (!args[name]) {
     throw new Error(`Missing required argument --${name}`);
@@ -98,6 +100,18 @@ if (args.imageData && args.imageIndex) {
       sha256: sha256For(imageIndexPath),
     },
     fileCount: Number(args.fileCount || 0),
+  };
+}
+
+if (args.snapshot) {
+  const snapshotPath = resolve(args.snapshot);
+  const snapshotStats = statSync(snapshotPath);
+
+  manifest.snapshot = {
+    path: relative(resolve(manifestPath, ".."), snapshotPath).replaceAll("\\", "/"),
+    fileName: basename(snapshotPath),
+    size: snapshotStats.size,
+    sha256: sha256For(snapshotPath),
   };
 }
 

@@ -1,6 +1,6 @@
-import { PHP, __private__dont__use } from "@php-wasm/universal";
+import { PHP, __private__dont__use, setPhpIniEntries } from "@php-wasm/universal";
 import { loadWebRuntime } from "@php-wasm/web";
-import { MOODLE_ROOT } from "./config-template.js";
+import { MOODLE_ROOT, createPhpIniEntries, createChdirFixPhp, CHDIR_FIX_PRELOAD_PATH } from "./config-template.js";
 import { wrapPhpInstance } from "./php-compat.js";
 
 const PERSIST_ROOT = "/persist";
@@ -32,6 +32,13 @@ export function createPhpRuntime(_runtime, { appBaseUrl } = {}) {
       try { FS.mkdirTree(`${TEMP_ROOT}/sessions`); } catch { /* exists */ }
       try { FS.mkdirTree(MOODLE_ROOT); } catch { /* exists */ }
       try { FS.mkdirTree(PERSIST_ROOT); } catch { /* exists */ }
+
+      // Apply Moodle php.ini settings to /internal/shared/php.ini
+      await setPhpIniEntries(php, createPhpIniEntries());
+
+      // Write glob polyfill + chdir fix into WP Playground's preload dir
+      try { FS.mkdirTree("/internal/shared/preload"); } catch { /* exists */ }
+      php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(/\/$/u, "");
       wrapped = wrapPhpInstance(php, { syncFs: null, absoluteUrl });
@@ -79,6 +86,15 @@ export function createProvisioningRuntime(_runtime) {
         withIntl: true,
       });
       const php = new PHP(runtimeId);
+      const FS2 = php[__private__dont__use].FS;
+
+      // Apply Moodle php.ini settings so phpinfo reflects correct values
+      await setPhpIniEntries(php, createPhpIniEntries());
+
+      // Write glob polyfill + chdir fix into WP Playground's preload dir
+      try { FS2.mkdirTree("/internal/shared/preload"); } catch { /* exists */ }
+      php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
+
       wrapped = wrapPhpInstance(php);
 
       for (const key of Object.keys(wrapped)) {

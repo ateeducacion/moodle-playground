@@ -136,7 +136,8 @@ What it does now:
   - `/www/moodle/__config_normalizer.php`
   - SQLite probe scripts
 - patches a few Moodle PHP sources in-place at runtime
-- runs staged CLI-like provisioning
+- loads a pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) to skip CLI install
+- falls back to staged CLI-like provisioning if the snapshot is unavailable
 - normalizes persisted config values after install
 
 Important runtime-local overrides added during debugging:

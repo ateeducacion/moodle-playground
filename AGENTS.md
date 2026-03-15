@@ -52,6 +52,7 @@ make up
 ### Generated Assets
 
 - `assets/moodle/`: readonly runtime bundle files (`.vfs.bin`, index, optional zip)
+- `assets/moodle/snapshot/`: pre-built install snapshot (`install.sq3`)
 - `assets/manifests/`: generated bundle manifests
 - `dist/`: esbuild output (php-worker bundle, WASM files, ICU data)
 
@@ -96,7 +97,11 @@ Key files:
 
 The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
 `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`, `mbstring`, `openssl`, `intl`,
-`iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `sodium`, `xmlreader`, `xmlwriter`.
+`iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
+
+**Note:** `sodium` is NOT available in the WASM binary despite what earlier documentation
+claimed. The OpenSSL fallback patch in `patches/moodle/lib/classes/encryption.php` handles
+all encryption needs.
 
 ### Responsibilities
 
@@ -114,7 +119,8 @@ The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
 - `src/runtime/bootstrap.js`
   - Prepares storage
   - Mounts the readonly Moodle bundle
-  - Writes `config.php` and `php.ini`
+  - Writes `config.php`
+  - Loads a pre-built install snapshot (or falls back to full CLI install)
 
 ## Storage Model
 
@@ -155,6 +161,11 @@ Current database assumptions:
 - `config.php` is generated at boot and points at the MEMFS database file
 - SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
   `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
+- A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) is generated at
+  build time by `scripts/generate-install-snapshot.sh`. At runtime, `bootstrap.js` fetches
+  this snapshot and writes it directly into MEMFS, then updates `wwwroot` in `mdl_config`
+  to match the current deployment URL. This eliminates the 3-8s CLI install phase. If the
+  snapshot is unavailable, the full CLI install runs as a fallback.
 
 When touching the migration/runtime path, preserve these invariants:
 
@@ -178,6 +189,7 @@ Important files for this prototype:
 - `src/remote/main.js`
 - `lib/moodle-loader.js`
 - `scripts/patch-moodle-source.sh`
+- `scripts/generate-install-snapshot.sh`
 - `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
 - `patches/moodle/lib/ddl/sqlite_sql_generator.php`
 - `patches/moodle/lib/xmlize.php`
@@ -188,7 +200,7 @@ Prototype-specific defaults currently matter during first boot:
 
 - `rememberusername` is intentionally disabled by default
 - several Moodle config values are seeded manually during bootstrap
-- `sodium` is now available via the `@php-wasm/web` runtime, but the OpenSSL fallback patch is kept for compatibility
+- `sodium` is NOT available in the WASM binary; the OpenSSL fallback patch handles encryption
 - Debug is disabled (`$CFG->debug = 0`) for performance — this is a playground, not a dev environment
 - `CACHE_DISABLE_ALL = true` (still required — see invariant 7 above)
 - JS, template, and language string caches are enabled for navigation performance
@@ -239,6 +251,12 @@ Available extensions include: `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`
 
 These areas have repeatedly caused regressions during the SQLite migration:
 
+- **php.ini configuration**
+  - WP Playground hardcodes `/internal/shared/php.ini` via `PHP_INI_PATH` in `@php-wasm/universal`
+  - Writing a separate php.ini file (e.g., `/www/php.ini`) has NO effect — PHP never reads it
+  - All php.ini settings must be applied via `setPhpIniEntries()` from `@php-wasm/universal`
+  - Settings are applied in `src/runtime/php-loader.js` during runtime creation
+  - Blueprint timezone overrides are applied in `src/runtime/bootstrap.js` after provisioning
 - `sw.js`
   - query strings must survive scoped redirects
   - HTML rewriting must keep Moodle links/forms inside the scoped runtime

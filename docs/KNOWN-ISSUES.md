@@ -46,17 +46,22 @@ Notes:
 - this is not the same issue as CSS failing to load
 - several times the DOM URL/title were correct while the body stayed empty
 
-## 2. PHP extensions — resolved
+## 2. PHP extensions — mostly resolved
 
 Status:
 
-- resolved (migrated to `@php-wasm/web`)
+- mostly resolved (migrated to `@php-wasm/web`)
 
-The `@php-wasm/web` PHP 8.3 runtime includes all previously-missing extensions
-(`curl`, `gd`, `fileinfo`, `sodium`, `xmlreader`, `xmlwriter`) built into the WASM binary.
+The `@php-wasm/web` PHP 8.3 runtime includes most previously-missing extensions
+(`curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`) built into the WASM binary.
 
-The OpenSSL fallback patch for `sodium` is kept for compatibility but `sodium` is now
-natively available. The patch can be removed once verified in production.
+**sodium is NOT available** in the WASM binary. The OpenSSL fallback patch in
+`patches/moodle/lib/classes/encryption.php` handles all encryption needs. The
+Moodle environment check will show sodium as missing — this is cosmetic only.
+
+**OPcache cannot work** in the WASM SAPI. This is a PHP/Emscripten limitation,
+not something that can be fixed in this project. The environment check warning
+for OPcache is expected and harmless.
 
 ## 3. Runtime still relies on both build-time and boot-time patching
 
@@ -194,4 +199,4 @@ If continuing work from here, the next priority should be:
 2. keep the login/home route rendering without a manual second load
 3. verify all newly-available extensions work correctly with Moodle
 4. benchmark navigation performance with caching enabled vs disabled
-5. consider pre-building a post-install SQLite snapshot to skip CLI provisioning on boot
+5. ~~consider pre-building a post-install SQLite snapshot to skip CLI provisioning on boot~~ — **implemented**: `scripts/generate-install-snapshot.sh` creates a snapshot at build time; `bootstrap.js` loads it at runtime, falling back to the full CLI install if the snapshot is unavailable

@@ -34,6 +34,10 @@ COMPONENT_CACHE_FILE="$COMPONENT_CACHE_DIR/core_component.php"
 mkdir -p "$COMPONENT_CACHE_DIR"
 php "$SCRIPT_DIR/generate-component-cache.php" "$MOODLE_DIR" "$COMPONENT_CACHE_FILE" "/www/moodle"
 
+SNAPSHOT_DIR="$DIST_DIR/snapshot"
+echo "Generating install snapshot" >&2
+"$SCRIPT_DIR/generate-install-snapshot.sh" "$MOODLE_DIR" "$SNAPSHOT_DIR"
+
 RELEASE=$(sed -n "s/^[[:space:]]*\\\$release[[:space:]]*=[[:space:]]*'\\([^']*\\)'.*/\\1/p" "$MOODLE_DIR/version.php" | head -n 1)
 
 if [ -z "$RELEASE" ]; then
@@ -61,6 +65,11 @@ node "$SCRIPT_DIR/build-vfs-image.mjs" \
 FILE_COUNT=$(find "$MOODLE_DIR" -type f | wc -l | tr -d ' ')
 SOURCE_URL="https://download.moodle.org/download.php/direct/$CHANNEL/$(basename "$ARCHIVE_PATH")"
 
+SNAPSHOT_ARGS=""
+if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
+  SNAPSHOT_ARGS="--snapshot $SNAPSHOT_DIR/install.sq3"
+fi
+
 node "$SCRIPT_DIR/generate-manifest.mjs" \
   --bundle "$BUNDLE_PATH" \
   --channel "$CHANNEL" \
@@ -71,9 +80,13 @@ node "$SCRIPT_DIR/generate-manifest.mjs" \
   --runtimeVersion "$RUNTIME_VERSION" \
   --release "$RELEASE" \
   --fileCount "$FILE_COUNT" \
-  --sourceUrl "$SOURCE_URL"
+  --sourceUrl "$SOURCE_URL" \
+  $SNAPSHOT_ARGS
 
 echo "Bundle written to $BUNDLE_PATH" >&2
 echo "VFS data written to $VFS_DATA_PATH" >&2
 echo "VFS index written to $VFS_INDEX_PATH" >&2
+if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
+  echo "Snapshot written to $SNAPSHOT_DIR/install.sq3" >&2
+fi
 echo "Manifest written to $MANIFEST_PATH" >&2
