@@ -565,6 +565,16 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
                 ['enablecompletion', 1, null],
                 // message/classes/helper.php: $CFG->messagingdefaultpressenter
                 ['messagingdefaultpressenter', 1, null],
+                // admin/index.php: update notification settings
+                ['updatenotifybuilds', 0, null],
+                ['updateminmaturity', 200, null],
+                // blocks/myoverview: dashboard block settings
+                ['courselistshortnames', 0, null],
+                ['coursecreationguide', '', null],
+                ['docroot', 'https://docs.moodle.org', null],
+                ['doctonewwindow', 0, null],
+                // course/edit.php: auto-enrol admin in new courses
+                ['enroladminnewcourse', 1, null],
             ];
             foreach ($postinstalldefaults as [$key, $val, $plugin]) {
                 if (get_config($plugin ?? 'core', $key) === false) {
@@ -1425,9 +1435,40 @@ export async function bootstrapMoodle({
 
   publish("All PHP extensions are provided by the @php-wasm/web runtime.", 0.94);
 
-  // After fresh install, go to /login/index.php so Moodle can render the
-  // login page directly without a redirect chain through / or /admin/index.php.
-  const readyPath = "/login/index.php";
+  // Auto-login: create a Moodle session for the admin user so the playground
+  // opens directly to the dashboard, just like WordPress Playground does.
+  // We write a temporary PHP script and request it via HTTP so that Moodle's
+  // web session handler creates a proper session with Set-Cookie headers,
+  // which the cookie jar in php-compat.js captures automatically.
+  const AUTO_LOGIN_PATH = MOODLE_ROOT + "/__playground_autologin.php";
+  let readyPath = "/";
+  try {
+    publish("Creating admin session for auto-login.", 0.95);
+    const autoLoginPhp = [
+      "<?php",
+      "define('NO_OUTPUT_BUFFERING', true);",
+      "require(__DIR__ . '/config.php');",
+      "$admin = get_admin();",
+      "complete_user_login($admin);",
+      "echo json_encode(['ok' => true, 'user' => $admin->username]);",
+    ].join("\n");
+    await php.writeFile(AUTO_LOGIN_PATH, new TextEncoder().encode(autoLoginPhp));
+    const loginResponse = await php.request(new Request("http://localhost:8080/__playground_autologin.php"));
+    const loginText = await loginResponse.text();
+    if (loginResponse.status === 200 && loginText.includes('"ok"')) {
+      publish("Auto-login session created for admin user.", 0.96);
+    } else {
+      publish("Auto-login returned unexpected response, falling back to login page.", 0.96);
+      readyPath = "/login/index.php";
+    }
+  } catch (loginError) {
+    publish("Auto-login failed: " + loginError.message + ". Falling back to login page.", 0.96);
+    readyPath = "/login/index.php";
+  }
+  // Clean up the temporary auto-login script
+  try {
+    await php.run("<?php @unlink('" + AUTO_LOGIN_PATH + "');");
+  } catch { /* non-fatal */ }
 
   return {
     manifest: archive.manifest,

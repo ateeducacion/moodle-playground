@@ -302,6 +302,18 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       php.removeEventListener(type, handler);
     },
 
+    /**
+     * Inject a cookie into the internal cookie jar so that subsequent
+     * request() calls include it automatically.
+     */
+    setCookie(name, value) {
+      if (value === "" || value == null) {
+        cookies.delete(name);
+      } else {
+        cookies.set(name, value);
+      }
+    },
+
     get _php() {
       return php;
     },

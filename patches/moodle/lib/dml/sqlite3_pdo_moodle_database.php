@@ -250,7 +250,8 @@ class sqlite3_pdo_moodle_database extends pdo_moodle_database {
         }
         $result = array();
         foreach ($rs as $value) {
-            $result[] = reset($value);
+            $arr = (array)$value;
+            $result[] = reset($arr);
         }
         $rs->close();
         return $result;
