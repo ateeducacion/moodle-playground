@@ -21,7 +21,9 @@ It follows the same product shape as `omeka-s-playground`:
 3. Request routing: `sw.js` and `php-worker.js`
 4. PHP/Moodle runtime: `src/runtime/*` + generated assets under `assets/moodle/`
 
-The readonly Moodle core is loaded from a prebuilt VFS bundle while mutable state is kept in browser persistence.
+The readonly Moodle core is loaded from a prebuilt VFS bundle while mutable state lives
+in Emscripten MEMFS (in-memory). The runtime is fully ephemeral — all state is lost when
+the browser tab closes or the page is reloaded.
 
 ## Build System
 
@@ -116,18 +118,29 @@ The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
 
 ## Storage Model
 
-Current model:
+The runtime is **fully ephemeral**. All mutable state lives in Emscripten's MEMFS
+(JavaScript heap memory). Nothing is persisted to OPFS, IndexedDB, or any other
+durable browser storage during normal operation. Closing the tab destroys all state.
 
-- Readonly core: mounted in memory under `/www/moodle`
-- Mutable state: persisted under `/persist` via IDBFS
-- `moodledata`: `/persist/moodledata`
-- Config and manifest markers: `/persist/config`
+Current layout:
 
-Persistence uses OPFS (Origin Private File System) via WP Playground's
-`createDirectoryHandleMountHandler`. On boot, existing OPFS data is synced into
-MEMFS; during runtime, FS events are journaled back to OPFS in real-time.
+- Readonly core: custom VFS mount under `/www/moodle` (from prebuilt `.vfs.bin` image)
+- Mutable data: `/persist/moodledata` (MEMFS — the `/persist` name is legacy, not durable)
+- SQLite database: `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (MEMFS file)
+- Config and install markers: `/persist/config` (MEMFS)
+- Temp files and sessions: `/tmp/moodle` (MEMFS)
+
+The `syncFs` parameter in `php-compat.js` is set to `null` — no filesystem sync callback
+is registered. The `resetOpfsStorage()` function in `remote.html` exists only for cleanup
+of legacy data from earlier versions that did use OPFS.
+
+**Why not `:memory:` SQLite?** Each `php.run()` call resets PHP state and closes all PDO
+connections. A `:memory:` database would be empty on the next request. The MEMFS file
+approach is functionally equivalent to in-memory (the file exists only in the JS heap)
+but persists across PHP script executions within the same worker session.
 
 Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
+Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
 
 ## SQLite Prototype Invariants
 
@@ -136,18 +149,23 @@ This repo is no longer using the old active PGlite database path for the main ru
 Current database assumptions:
 
 - Moodle runs against the deprecated SQLite PDO driver
-- The SQLite database file is file-backed, not in-memory
-- The DB file lives under `/persist/moodledata`
-- The readonly Moodle core still lives under `/www/moodle`
-- `config.php` is generated at boot and must continue to point at the persistent SQLite file
+- The SQLite database file lives in MEMFS (pure memory, no durable storage)
+- The DB file path is `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
+- The readonly Moodle core lives under `/www/moodle` (custom VFS mount)
+- `config.php` is generated at boot and points at the MEMFS database file
+- SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
+  `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
 
 When touching the migration/runtime path, preserve these invariants:
 
 1. Do not reintroduce PGlite as the active DB path
-2. Do not move the DB out of the writable wasm filesystem
+2. Do not move the DB out of the writable MEMFS filesystem
 3. Do not turn the readonly core mount back into a full persistent copy of Moodle
 4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
-5. Keep the default scope stable unless there is a deliberate migration plan for persisted state
+5. Keep the default scope stable unless there is a deliberate migration plan
+6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
+7. CACHE_DISABLE_ALL must stay true until missing cache-store admin settings are seeded
+   in $postinstalldefaults — enabling it causes admin/index.php redirect loops
 
 Important files for this prototype:
 
@@ -171,6 +189,10 @@ Prototype-specific defaults currently matter during first boot:
 - `rememberusername` is intentionally disabled by default
 - several Moodle config values are seeded manually during bootstrap
 - `sodium` is now available via the `@php-wasm/web` runtime, but the OpenSSL fallback patch is kept for compatibility
+- Debug is disabled (`$CFG->debug = 0`) for performance — this is a playground, not a dev environment
+- `CACHE_DISABLE_ALL = true` (still required — see invariant 7 above)
+- JS, template, and language string caches are enabled for navigation performance
+- PHP `display_errors` is off; errors are still logged but not shown to the user
 
 If you change any of the above behavior, update:
 
@@ -189,6 +211,20 @@ When modifying `sw.js`, preserve all three behaviors:
 3. HTML response rewriting for Moodle-generated links and forms
 
 Moodle, like Omeka, may emit HTML-escaped URLs. If navigation works on first load but breaks after clicking inside the site, inspect the HTML response body first.
+
+### Base path propagation chain
+
+The URL base path must be consistent across the entire stack:
+
+1. `esbuild.worker.mjs` injects `__APP_ROOT__` = `new URL("../", import.meta.url).href`
+2. `php-worker.js` passes it as `appRootUrl` → `bootstrapMoodle({ appBaseUrl })` and
+   `createPhpRuntime(runtime, { appBaseUrl })`
+3. `bootstrap.js`: `buildPublicBase(appBaseUrl)` → `$CFG->wwwroot` in `config.php`
+4. `php-loader.js`: `absoluteUrl = appBaseUrl` → passed to `wrapPhpInstance()`
+5. `php-compat.js`: extracts `urlBasePath` from `absoluteUrl.pathname` → prepended to
+   `SCRIPT_NAME`, `PHP_SELF`, `REQUEST_URI` in `$_SERVER`
+
+If any link in this chain is broken, redirects on subpath deployments will loop.
 
 ## Extensions
 
@@ -210,14 +246,58 @@ These areas have repeatedly caused regressions during the SQLite migration:
   - CGI environment variables such as `HTTP_USER_AGENT`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` are critical
   - The Request-to-PHPRequest conversion must preserve headers, method, and body
   - The PHPResponse-to-Response conversion must preserve status codes and headers
+  - **PATH_INFO handling**: URLs like `/theme/styles.php/boost/123/all` contain PATH_INFO
+    after the `.php` segment. `resolveScriptPath()` splits these into the actual script path
+    and the PATH_INFO component. Without this, `isPhpScript()` fails (the URL doesn't end
+    in `.php`) and those requests return 404, breaking CSS/JS delivery.
+  - **URL base path in `$_SERVER`**: `SCRIPT_NAME`, `PHP_SELF`, and `REQUEST_URI` must include
+    the URL base path (e.g., `/moodle-playground` on GitHub Pages). Moodle's
+    `setup_get_remote_url()` in `lib/setuplib.php` constructs `$FULLME`/`$FULLSCRIPT` by
+    extracting **only the scheme+host** from `$CFG->wwwroot` and combining it with
+    `$_SERVER['SCRIPT_NAME']`. If SCRIPT_NAME lacks the base path, all redirect URLs lose
+    the subpath, causing infinite redirect loops on subpath deployments.
 - `src/remote/main.js`
   - the nested iframe can stall with a valid URL/title but an empty body
 - `lib/moodle-loader.js`
   - large readonly VFS downloads can trigger memory pressure if buffering is careless
 - `src/runtime/bootstrap.js`
   - many install-time compatibility shims live here and are easy to break accidentally
+  - **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets
+    loaded during install (e.g., via the hardcoded list in the adminlib.php patch), any
+    setting that has a dynamic default (computed from `$CFG->wwwroot` or similar) won't have
+    a stored value. `any_new_admin_settings()` returns true, and `admin/index.php` redirects
+    to `upgradesettings.php`. Fix: add the missing setting with a safe static default to the
+    `$postinstalldefaults` array. Known examples: `noreplyaddress`, `supportemail`.
+  - **Runtime patches vs `patches/` directory**: Patches applied via the `patches/` directory
+    (copied at VFS build time) should NOT also be applied at runtime via `patchFile()` in
+    `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
+    runtime `patchFile()` for files that are in the readonly VFS and need modification at
+    boot (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
 
 If a change touches any of these files, prefer validating in a real browser, not only with syntax checks.
+
+## Moodle URL Construction Internals
+
+Understanding how Moodle constructs URLs is critical for this project because we control
+the `$_SERVER` variables that Moodle reads.
+
+**Key mechanism** (`lib/setuplib.php`, `setup_get_remote_url()`):
+- `$hostandport` = scheme + host extracted from `$CFG->wwwroot` (path is IGNORED)
+- `$FULLSCRIPT` = `$hostandport` + `$_SERVER['SCRIPT_NAME']`
+- `$FULLME` = `$hostandport` + `$_SERVER['REQUEST_URI']`
+
+This means `$_SERVER['SCRIPT_NAME']` must carry the full URL path including any subpath
+prefix (e.g., `/moodle-playground/admin/index.php`, not just `/admin/index.php`).
+
+**Where URLs flow through the system**:
+1. Browser requests `/moodle-playground/playground/main/php83-cgi/admin/index.php`
+2. `sw.js` strips the scoped prefix → requestPath = `/admin/index.php`
+3. `php-compat.js` receives the stripped path and must re-add the URL base path to `$_SERVER`
+4. PHP generates redirect Location headers using `$FULLME` or `$CFG->wwwroot` + path
+5. `sw.js` rewrites Location headers to add the scoped prefix back
+
+On localhost (`http://localhost:8080`), the URL base path is empty, so this is invisible.
+On GitHub Pages (`https://host/moodle-playground`), the base path is `/moodle-playground`.
 
 ## Blueprints
 
@@ -257,10 +337,10 @@ node --check src/remote/main.js
 
 ### Manual validation areas
 
-- First boot install path
-- Reload with persisted state
-- Navigation inside Moodle
+- First boot install path (every page load is a fresh install)
+- Navigation inside Moodle (caching should make second page loads faster)
 - GitHub Pages subpath behavior
 - Service worker updates after redeploy
+- Cache file creation in `/persist/moodledata/cache` (verify Moodle cache system initializes)
 
 If a change touches routing or HTML rewriting, prefer checking real browser behavior, not only syntax.

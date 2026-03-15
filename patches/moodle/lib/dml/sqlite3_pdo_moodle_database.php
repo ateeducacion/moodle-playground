@@ -95,11 +95,20 @@ class sqlite3_pdo_moodle_database extends pdo_moodle_database {
     protected function configure_dbconnection() {
         // Try to protect database file against web access when moodledata is web accessible.
         $this->pdb->exec('CREATE TABLE IF NOT EXISTS "<?php die?>" (id int)');
+        // Tuned for in-memory (MEMFS) operation in the WASM runtime.
+        // The database file lives in Emscripten's MEMFS — there is no durable storage
+        // underneath, so durability pragmas (synchronous, journal persistence) are unnecessary.
         $this->pdb->exec('PRAGMA synchronous=OFF');
+        $this->pdb->exec('PRAGMA journal_mode=MEMORY');
+        $this->pdb->exec('PRAGMA temp_store=MEMORY');
+        $this->pdb->exec('PRAGMA cache_size=-8000');
         $this->pdb->exec('PRAGMA short_column_names=1');
         $this->pdb->exec('PRAGMA encoding="UTF-8"');
         $this->pdb->exec('PRAGMA case_sensitive_like=0');
-        $this->pdb->exec('PRAGMA locking_mode=NORMAL');
+        // EXCLUSIVE locking: single-process WASM environment, no concurrent readers.
+        // Eliminates lock acquisition overhead on every transaction.
+        $this->pdb->exec('PRAGMA locking_mode=EXCLUSIVE');
+        $this->pdb->exec('PRAGMA page_size=4096');
     }
 
     /**

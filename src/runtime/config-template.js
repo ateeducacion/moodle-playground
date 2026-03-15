@@ -50,13 +50,20 @@ $CFG->alternative_component_cache = '${escapePhpSingleQuoted(componentCachePath)
 $CFG->directorypermissions = 0777;
 $CFG->sslproxy = false;
 $CFG->reverseproxy = false;
-$CFG->debug = E_ALL;
-$CFG->debugdisplay = 1;
-$CFG->debugdeveloper = true;
-$CFG->showcrondebugging = true;
+// Ephemeral in-memory runtime: disable developer debugging for performance.
+// Errors are still logged via php.ini but not displayed to the user.
+$CFG->debug = 0;
+$CFG->debugdisplay = 0;
+$CFG->debugdeveloper = false;
+$CFG->showcrondebugging = false;
+// Enable all caching layers — the filesystem is MEMFS (pure memory) so file-backed
+// caches are fast and persist for the lifetime of the worker session.
+// cachejs must stay false: when enabled, Moodle rewrites JS module URLs to serve
+// combined bundles through javascript.php. The caching endpoint fails silently
+// in the WASM environment, causing "No define call for core/first" RequireJS errors.
 $CFG->cachejs = false;
-$CFG->cachetemplates = false;
-$CFG->langstringcache = false;
+$CFG->cachetemplates = true;
+$CFG->langstringcache = true;
 $CFG->themedesignermode = false;
 if (!property_exists($CFG, 'navcourselimit')) {
     $CFG->navcourselimit = 10;
@@ -96,7 +103,7 @@ if (!property_exists($CFG, 'langmenu')) {
 }
 
 if (!defined('NO_DEBUG_DISPLAY')) {
-    define('NO_DEBUG_DISPLAY', false);
+    define('NO_DEBUG_DISPLAY', true);
 }
 if (!defined('MOODLE_INTERNAL')) {
     define('MOODLE_INTERNAL', true);
@@ -104,6 +111,12 @@ if (!defined('MOODLE_INTERNAL')) {
 if (!defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE')) {
     define('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE', true);
 }
+// CACHE_DISABLE_ALL must stay true for now. When set to false, Moodle's admin tree
+// detects new cache-related settings that haven't been saved, causing admin/index.php
+// to redirect to ?cache=1 on every page load. This breaks admin section navigation.
+// TODO: seed the missing cache-store admin settings in $postinstalldefaults to allow
+// enabling the full MUC cache subsystem (which would make langstringcache and
+// cachetemplates effective across requests via file-based stores in MEMFS).
 if (!defined('CACHE_DISABLE_ALL')) {
     define('CACHE_DISABLE_ALL', true);
 }
@@ -203,9 +216,9 @@ if (!function_exists('playground_glob_polyfill_installed')) {
 export function createPhpIni({ timezone = "UTC" } = {}) {
   return `[PHP]
 date.timezone=${timezone}
-display_errors=1
-display_startup_errors=1
-error_reporting=E_ALL
+display_errors=0
+display_startup_errors=0
+error_reporting=E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
 html_errors=0
 log_errors=1
 max_execution_time=15

@@ -85,7 +85,7 @@ Main files involved:
 - `scripts/patch-moodle-source.sh`
 - `src/runtime/bootstrap.js`
 
-## 4. Cache-disable mode is still partly a compatibility shim
+## 4. CACHE_DISABLE_ALL must stay true (admin redirect loop)
 
 Status:
 
@@ -93,22 +93,27 @@ Status:
 
 Symptom:
 
-- Moodle cache config warnings may reappear if upstream code paths change
+- When `CACHE_DISABLE_ALL = false`, `admin/index.php` detects new unsaved cache-related
+  admin settings and redirects to `admin/index.php?cache=1` on every page load
+- Admin section navigation (e.g., clicking "Server") breaks because the redirect
+  interrupts the JavaScript admin tree initialization
 
 Impact:
 
-- medium
+- high (blocks admin navigation)
 
 Current mitigation:
 
-- cache is disabled intentionally in generated `config.php`
-- runtime patching suppresses several `debugging()` calls when `CACHE_DISABLE_ALL` is enabled
+- `CACHE_DISABLE_ALL = true` and `CACHE_DISABLE_STORES = true` remain enabled
+- `$CFG->cachetemplates = true` and `$CFG->langstringcache = true` are set but have
+  limited effect with MUC disabled (caching only works within a single PHP request)
 
 Where to continue:
 
-- `src/runtime/config-template.js`
-- `lib/config-template.js`
-- `src/runtime/bootstrap.js`
+- Identify which cache-related admin settings appear when `CACHE_DISABLE_ALL = false`
+- Add those settings to `$postinstalldefaults` in `bootstrap.js`
+- Once seeded, re-enable `CACHE_DISABLE_ALL = false` for full MUC caching in MEMFS
+- The `PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE` constant is still needed
 
 ## 5. Large readonly bundle still puts pressure on browser memory
 
@@ -188,3 +193,5 @@ If continuing work from here, the next priority should be:
 1. make the first render of the inner Moodle iframe deterministic
 2. keep the login/home route rendering without a manual second load
 3. verify all newly-available extensions work correctly with Moodle
+4. benchmark navigation performance with caching enabled vs disabled
+5. consider pre-building a post-install SQLite snapshot to skip CLI provisioning on boot
