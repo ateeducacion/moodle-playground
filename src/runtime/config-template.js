@@ -160,6 +160,43 @@ if (!empty(\$_SERVER['SCRIPT_FILENAME'])) {
         chdir(\$dir);
     }
 }
+
+// Polyfill: glob() returns [] on Emscripten's readonly WASM VFS because
+// musl's libc glob implementation doesn't go through Emscripten's
+// FS.readdir(). We override glob globally via this auto_prepend_file so
+// every call site benefits without individual patches.
+if (!function_exists('playground_glob_polyfill_installed')) {
+    function playground_glob_polyfill_installed(): bool { return true; }
+
+    // Rename the builtin so we can call it as fallback.
+    // Since we cannot truly rename a builtin, we wrap it instead.
+    function playground_glob(string \$pattern, int \$flags = 0): array {
+        \$result = @\\glob(\$pattern, \$flags);
+        if (!empty(\$result)) {
+            return \$result;
+        }
+        // Fallback: scandir + fnmatch (works on Emscripten VFS).
+        \$dir = dirname(\$pattern);
+        \$mask = basename(\$pattern);
+        \$entries = @scandir(\$dir);
+        if (\$entries === false) {
+            return [];
+        }
+        \$matched = [];
+        foreach (\$entries as \$entry) {
+            if (\$entry === '.' || \$entry === '..') {
+                continue;
+            }
+            if (fnmatch(\$mask, \$entry)) {
+                \$matched[] = \$dir . '/' . \$entry;
+            }
+        }
+        sort(\$matched);
+        return (\$flags & GLOB_ONLYDIR)
+            ? array_filter(\$matched, 'is_dir')
+            : \$matched;
+    }
+}
 `;
 }
 

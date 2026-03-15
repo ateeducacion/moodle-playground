@@ -996,6 +996,15 @@ async function patchRuntimePhpSources(php) {
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            debugging('parent does not exist!');\n            return false;\n        }",
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            return false;\n        }",
     ],
+    // glob() returns [] on the readonly WASM VFS because musl's libc glob
+    // doesn't go through Emscripten's FS.readdir(). The polyfill is loaded
+    // globally via auto_prepend_file (__chdir_fix.php); we swap the call
+    // and use require_once to guard against duplicate loads if the path
+    // comparison with top.php/plugins.php doesn't match exactly.
+    [
+      "foreach (glob($CFG->dirroot.'/'.$CFG->admin.'/settings/*.php') as $file) {\n            if ($file == $CFG->dirroot.'/'.$CFG->admin.'/settings/top.php') {\n                continue;\n            }\n            if ($file == $CFG->dirroot.'/'.$CFG->admin.'/settings/plugins.php') {\n            // plugins are loaded last - they may insert pages anywhere\n                continue;\n            }\n            require($file);",
+      "foreach (playground_glob($CFG->dirroot.'/'.$CFG->admin.'/settings/*.php') as $file) {\n            if (basename($file) === 'top.php' || basename($file) === 'plugins.php') {\n                continue;\n            }\n            require_once($file);",
+    ],
   ]);
 
   await patchFile(SQLITE_DRIVER_PATH, [
