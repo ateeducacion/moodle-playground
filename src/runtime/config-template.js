@@ -121,36 +121,28 @@ if (!isset($_SERVER['SERVER_NAME'])) {
     $_SERVER['SERVER_NAME'] = 'localhost';
 }
 
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/output/renderable.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/output/templatable.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/output/bootstrap_renderer.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/lang_string.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/date.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/string_manager.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/string_manager_standard.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/collator.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/exception/moodle_exception.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/exception/coding_exception.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/cache.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/data_source_interface.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/versionable_data_source_interface.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/loader_interface.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/loader_with_locking_interface.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/store_interface.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/store.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/definition.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/disabled_cache.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/dummy_cachestore.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/factory.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/disabled_factory.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context_helper.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/system.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/user.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/coursecat.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/course.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/module.php');
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/context/block.php');
+// Fallback autoloader: when Moodle's core_component classmap is wiped (e.g. during
+// "Purge all caches" which defines IGNORE_COMPONENT_CACHE), the filesystem scan in
+// WASM's VFS can produce an incomplete classmap. This fallback re-reads the prebuilt
+// alternative_component_cache to resolve any class that Moodle's autoloader misses.
+spl_autoload_register(function (\$class) {
+    global \$CFG;
+    static \$fallbackMap = null;
+    if (\$fallbackMap === null) {
+        \$cachefile = '${escapePhpSingleQuoted(componentCachePath)}';
+        if (file_exists(\$cachefile)) {
+            \$cache = [];
+            include(\$cachefile);
+            \$fallbackMap = \$cache['classmap'] ?? [];
+        } else {
+            \$fallbackMap = [];
+        }
+    }
+    if (isset(\$fallbackMap[\$class]) && file_exists(\$fallbackMap[\$class])) {
+        require_once(\$fallbackMap[\$class]);
+    }
+});
+
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/setup.php');
 `;
 }
