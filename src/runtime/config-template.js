@@ -16,7 +16,6 @@ export function createMoodleConfigPhp({
   dbName,
   dbPassword,
   dbUser,
-  ignoreComponentCache = false,
   prefix,
   wwwroot,
 }) {
@@ -56,8 +55,8 @@ $CFG->debugdisplay = 1;
 $CFG->debugdeveloper = true;
 $CFG->showcrondebugging = true;
 $CFG->cachejs = false;
-$CFG->cachetemplates = true;
-$CFG->langstringcache = true;
+$CFG->cachetemplates = false;
+$CFG->langstringcache = false;
 $CFG->themedesignermode = false;
 if (!property_exists($CFG, 'navcourselimit')) {
     $CFG->navcourselimit = 10;
@@ -96,7 +95,7 @@ if (!property_exists($CFG, 'langmenu')) {
     $CFG->langmenu = 0;
 }
 
-${ignoreComponentCache ? "if (!defined('IGNORE_COMPONENT_CACHE')) { define('IGNORE_COMPONENT_CACHE', true); }\n" : ""}if (!defined('NO_DEBUG_DISPLAY')) {
+if (!defined('NO_DEBUG_DISPLAY')) {
     define('NO_DEBUG_DISPLAY', false);
 }
 if (!defined('MOODLE_INTERNAL')) {
@@ -129,6 +128,7 @@ require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/lang_string.php'
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/date.php');
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/string_manager.php');
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/string_manager_standard.php');
+require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/collator.php');
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/exception/moodle_exception.php');
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/classes/exception/coding_exception.php');
 require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/cache/classes/cache.php');

@@ -970,26 +970,6 @@ async function patchRuntimePhpSources(php) {
   ]);
 }
 
-async function runAutoloadCheck(php, { ignoreComponentCache = false } = {}) {
-  const checkUrl = new URL("https://bootstrap.local/__autoload_check.php");
-  if (ignoreComponentCache) {
-    checkUrl.searchParams.set("ignorecache", "1");
-  }
-
-  const response = await php.request(new Request(checkUrl));
-  const body = textDecoder.decode(await response.arrayBuffer());
-
-  if (!response.ok) {
-    throw new Error(`Autoload check failed with HTTP ${response.status}: ${body}`);
-  }
-
-  try {
-    return JSON.parse(body);
-  } catch (error) {
-    throw new Error(`Autoload check returned non-JSON output: ${body}`);
-  }
-}
-
 async function prepareMoodleRuntime({
   php,
   archive,
@@ -1235,7 +1215,6 @@ export async function bootstrapMoodle({
     dbUser: "",
   };
   const phpIni = createPhpIni({ timezone: effectiveConfig.timezone });
-  let shouldIgnoreComponentCache = false;
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
   const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
@@ -1244,7 +1223,6 @@ export async function bootstrapMoodle({
     adminDirectory: ADMIN_DIRECTORY,
     componentCachePath: COMPONENT_CACHE_PATH,
     ...dbConfig,
-    ignoreComponentCache: shouldIgnoreComponentCache,
     prefix: "mdl_",
     wwwroot,
   });
