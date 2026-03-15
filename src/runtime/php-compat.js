@@ -124,6 +124,11 @@ function phpResponseToResponse(phpResponse) {
 export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://localhost:8080" } = {}) {
   const emscriptenModule = php[__private__dont__use];
   const parsedAbsoluteUrl = new URL(absoluteUrl);
+  // URL base path for subpath deployments (e.g., "/moodle-playground" on GH Pages).
+  // Moodle's setup_get_remote_url() uses SCRIPT_NAME to construct $FULLME/$FULLSCRIPT,
+  // combining only the scheme+host from $CFG->wwwroot with $_SERVER['SCRIPT_NAME'].
+  // Without this prefix, redirect URLs lose the subpath on GitHub Pages deployments.
+  const urlBasePath = parsedAbsoluteUrl.pathname.replace(/\/+$/u, "");
   const cookies = new Map();
 
   return {
@@ -159,13 +164,17 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
         return new Response("Not Found", { status: 404 });
       }
 
-      // Build $_SERVER to match what Moodle expects from a CGI environment
+      // Build $_SERVER to match what Moodle expects from a CGI environment.
+      // SCRIPT_NAME and PHP_SELF must include the URL base path (e.g.,
+      // "/moodle-playground/admin/index.php" not just "/admin/index.php")
+      // so that Moodle's setup_get_remote_url() constructs correct absolute URLs.
+      const scriptRelative = scriptPath.substring(MOODLE_ROOT.length) || "/index.php";
       const serverVars = {
         DOCUMENT_ROOT: MOODLE_ROOT,
         SCRIPT_FILENAME: scriptPath,
-        SCRIPT_NAME: scriptPath.substring(MOODLE_ROOT.length) || "/index.php",
-        PHP_SELF: scriptPath.substring(MOODLE_ROOT.length) || "/index.php",
-        REQUEST_URI: urlPath,
+        SCRIPT_NAME: urlBasePath + scriptRelative,
+        PHP_SELF: urlBasePath + scriptRelative,
+        REQUEST_URI: urlBasePath + urlPath,
         REQUEST_METHOD: req.method || "GET",
         QUERY_STRING: queryString,
         SERVER_NAME: parsedAbsoluteUrl.hostname,
