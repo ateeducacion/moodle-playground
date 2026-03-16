@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-03-16T17:24:34.793Z",
+  "channel": "MOODLE_501_STABLE",
+  "release": "5.1.3+ (Build: 20260306)",
+  "runtimeVersion": "0.0.9-alpha-32",
+  "source": {
+    "url": "https://github.com/moodle/moodle/tree/MOODLE_501_STABLE"
+  },
+  "bundle": {
+    "format": "zip",
+    "path": "../moodle/MOODLE_501_STABLE/moodle-core-5.1.3___Build__20260306_.zip",
+    "fileName": "moodle-core-5.1.3___Build__20260306_.zip",
+    "size": 179153205,
+    "sha256": "522e2a175f22fb6b8980bc9c761443445922fde666df6fdd7edc4ba395dad4f3",
+    "fileCount": 29340
+  },
+  "vfs": {
+    "format": "moodle-vfs-image-v1",
+    "mountMode": "readonly-vfs-overlay-v1",
+    "data": {
+      "path": "../moodle/MOODLE_501_STABLE/moodle-core-5.1.3___Build__20260306_.vfs.bin",
+      "fileName": "moodle-core-5.1.3___Build__20260306_.vfs.bin",
+      "size": 396494458,
+      "sha256": "8bc7114c2489036bbe32b1e28d32479c35bdc736436b13d26fb78119d94eab45"
+    },
+    "index": {
+      "path": "../moodle/MOODLE_501_STABLE/moodle-core-5.1.3___Build__20260306_.vfs.index.json",
+      "fileName": "moodle-core-5.1.3___Build__20260306_.vfs.index.json",
+      "size": 5427265,
+      "sha256": "27019d461eac6d5bf33bf4053b1ad4968d29bb53d7e69e06ab41f591fbd9b5e9"
+    },
+    "fileCount": 29340
+  },
+  "snapshot": {
+    "path": "../moodle/MOODLE_501_STABLE/snapshot/install.sq3",
+    "fileName": "install.sq3",
+    "size": 7995392,
+    "sha256": "b47136091f10a995c303282c994b6121a0b954dd9efa5327b6ceb2e999153d17"
+  }
+}

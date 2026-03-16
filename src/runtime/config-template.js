@@ -8,9 +8,14 @@ function escapePhpSingleQuoted(value) {
   return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
 }
 
+export function buildComponentCachePath(moodleRoot) {
+  return `${moodleRoot}/.playground/core_component.php`;
+}
+
 export function createMoodleConfigPhp({
   adminDirectory = ADMIN_DIRECTORY,
-  componentCachePath = COMPONENT_CACHE_PATH,
+  componentCachePath,
+  moodleRoot = MOODLE_ROOT,
   dbFile,
   dbHost,
   dbName,
@@ -19,6 +24,7 @@ export function createMoodleConfigPhp({
   prefix,
   wwwroot,
 }) {
+  const resolvedComponentCachePath = componentCachePath || buildComponentCachePath(moodleRoot);
   return `<?php
 unset($CFG);
 global $CFG;
@@ -46,7 +52,7 @@ $CFG->localcachedir = '${escapePhpSingleQuoted(MOODLEDATA_ROOT)}/localcache';
 $CFG->tempdir = '${escapePhpSingleQuoted(MOODLEDATA_ROOT)}/temp';
 $CFG->backuptempdir = '${escapePhpSingleQuoted(MOODLEDATA_ROOT)}/temp/backup';
 $CFG->admin = '${escapePhpSingleQuoted(adminDirectory)}';
-$CFG->alternative_component_cache = '${escapePhpSingleQuoted(componentCachePath)}';
+$CFG->alternative_component_cache = '${escapePhpSingleQuoted(resolvedComponentCachePath)}';
 $CFG->directorypermissions = 0777;
 $CFG->sslproxy = false;
 $CFG->reverseproxy = false;
@@ -142,7 +148,7 @@ spl_autoload_register(function (\$class) {
     global \$CFG;
     static \$fallbackMap = null;
     if (\$fallbackMap === null) {
-        \$cachefile = '${escapePhpSingleQuoted(componentCachePath)}';
+        \$cachefile = '${escapePhpSingleQuoted(resolvedComponentCachePath)}';
         if (file_exists(\$cachefile)) {
             \$cache = [];
             include(\$cachefile);
@@ -156,7 +162,7 @@ spl_autoload_register(function (\$class) {
     }
 });
 
-require_once('${escapePhpSingleQuoted(MOODLE_ROOT)}/lib/setup.php');
+require_once('${escapePhpSingleQuoted(moodleRoot)}/lib/setup.php');
 `;
 }
 

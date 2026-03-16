@@ -2,6 +2,7 @@ import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
+import { getBranchMetadata } from "./src/shared/version-resolver.js";
 
 const workerUrl = new URL(self.location.href);
 // __APP_ROOT__ is injected by esbuild and points to the project root.
@@ -9,6 +10,8 @@ const workerUrl = new URL(self.location.href);
 const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL("./", self.location.href).toString();
 const scopeId = workerUrl.searchParams.get("scope");
 const runtimeId = workerUrl.searchParams.get("runtime");
+const phpVersion = workerUrl.searchParams.get("phpVersion") || null;
+const moodleBranch = workerUrl.searchParams.get("moodleBranch") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
@@ -39,7 +42,7 @@ async function capturePhpInfoHtml(runtimeConfig, reason = "manual") {
   }
 
   phpInfoCapturePromise = (async () => {
-    const php = createProvisioningRuntime(runtimeConfig);
+    const php = createProvisioningRuntime(runtimeConfig, { phpVersion });
 
     try {
       await php.refresh();
@@ -157,12 +160,14 @@ async function getRuntimeState() {
 
     const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
     activeRuntimeConfig = runtime;
-    const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl });
+    const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
+    const webRoot = branchMeta?.webRoot || "/www/moodle";
+    const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl, phpVersion, webRoot });
 
     postShell({
       kind: "progress",
       title: "Refreshing PHP runtime",
-      detail: `[${configMs}ms config] Booting ${runtime.label}.`,
+      detail: `[${configMs}ms config] Booting PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}.`,
       progress: 0.12,
     });
 
@@ -199,6 +204,8 @@ async function getRuntimeState() {
         runtimeId,
         scopeId,
         origin: self.location.origin,
+        moodleBranch,
+        webRoot,
       });
     } catch (error) {
       await publishPhpInfo(runtime, "bootstrap-error");
@@ -216,7 +223,7 @@ async function getRuntimeState() {
 
     postShell({
       kind: "ready",
-      detail: `Moodle bootstrapped for ${runtime.label}. [${totalMs}ms total]`,
+      detail: `Moodle bootstrapped for PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}. [${totalMs}ms total]`,
       path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath,
     });
 

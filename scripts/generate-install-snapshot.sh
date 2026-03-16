@@ -30,14 +30,18 @@ if [ -z "$OUTPUT_DIR" ]; then
   exit 1
 fi
 
-# Verify the patched SQLite driver exists in the source
-if [ ! -f "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+# Verify the patched SQLite driver exists in the source (Moodle 5.1+ uses public/ prefix)
+if [ -f "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+  PUB=""
+elif [ -f "$SOURCE_DIR/public/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+  PUB="public/"
+else
   echo "Error: Patched SQLite driver not found. Run patch-moodle-source.sh first." >&2
   exit 1
 fi
 
 # Verify PHP has pdo_sqlite
-if ! php -m 2>/dev/null | grep -qi pdo_sqlite; then
+if ! ${PHP_BIN:-php} -m 2>/dev/null | grep -qi pdo_sqlite; then
   echo "Error: PHP pdo_sqlite extension is required but not available." >&2
   exit 1
 fi
@@ -123,7 +127,7 @@ echo "Running Moodle CLI install to generate snapshot..." >&2
 
 # Run the Moodle CLI installer
 INSTALL_LOG="$TMPROOT/install.log"
-php -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/install_database.php" \
+${PHP_BIN:-php} -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/install_database.php" \
   --agree-license \
   --adminuser=admin \
   --adminpass=admin \
@@ -151,7 +155,7 @@ echo "Snapshot database created: $DBSIZE bytes" >&2
 
 # Apply post-install defaults that the runtime installer normally does in its
 # 'finalize' stage. We run a small PHP script to set these directly.
-php -d max_input_vars=5000 -r "
+${PHP_BIN:-php} -d max_input_vars=5000 -r "
 define('CLI_SCRIPT', true);
 define('CACHE_DISABLE_ALL', true);
 define('CACHE_DISABLE_STORES', true);

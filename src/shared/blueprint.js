@@ -49,8 +49,9 @@ export function buildDefaultBlueprint(config) {
       description: "Default Moodle Playground blueprint.",
     },
     preferredVersions: {
-      php: config.runtimes?.find((runtime) => runtime.default)?.phpVersionLabel || "8.3",
-      moodle: "5.0.x",
+      php: config.defaults?.phpVersion || config.runtimes?.find((runtime) => runtime.default)?.phpVersionLabel || "8.3",
+      moodle: "5.0",
+      moodleBranch: config.defaults?.moodleBranch || "MOODLE_500_STABLE",
     },
     landingPage: config.landingPath || "/install.php?lang=en",
     siteOptions: {
@@ -125,6 +126,7 @@ export function normalizeBlueprint(input, config) {
     preferredVersions: {
       php: blueprint.preferredVersions?.php || fallback.preferredVersions.php,
       moodle: blueprint.preferredVersions?.moodle || fallback.preferredVersions.moodle,
+      moodleBranch: blueprint.preferredVersions?.moodleBranch || fallback.preferredVersions.moodleBranch,
     },
     landingPage: normalizePath(blueprint.landingPage || blueprint.landingPath || fallback.landingPage, fallback.landingPage),
     siteOptions: {

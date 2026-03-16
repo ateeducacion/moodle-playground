@@ -8,6 +8,15 @@ import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
 import { resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
 import { clearScopeSession, getOrCreateScopeId, loadSessionState, saveSessionState } from "../shared/storage.js";
+import {
+  MOODLE_BRANCHES,
+  DEFAULT_PHP_VERSION,
+  buildRuntimeId,
+  getCompatiblePhpVersions,
+  parseQueryParams,
+  resolveVersions,
+  resolveMoodleBranch,
+} from "../shared/version-resolver.js";
 
 const els = {
   addressForm: document.querySelector("#address-form"),
@@ -34,6 +43,14 @@ const els = {
   refresh: document.querySelector("#refresh-button"),
   reset: document.querySelector("#reset-button"),
   runtime: document.querySelector("#runtime-select"),
+  settingsButton: document.querySelector("#settings-button"),
+  settingsModal: document.querySelector("#settings-modal"),
+  settingsMoodleVersion: document.querySelector("#settings-moodle-version"),
+  settingsPhpVersion: document.querySelector("#settings-php-version"),
+  settingsApply: document.querySelector("#settings-apply"),
+  settingsCancel: document.querySelector("#settings-cancel"),
+  currentMoodleLabel: document.querySelector("#current-moodle-label"),
+  currentPhpLabel: document.querySelector("#current-php-label"),
   settingsPanel: document.querySelector("#settings-panel"),
   settingsTab: document.querySelector("#settings-tab"),
   sidePanel: document.querySelector("#side-panel"),
@@ -43,6 +60,8 @@ const els = {
 const scopeId = getOrCreateScopeId();
 let config;
 let currentRuntimeId;
+let currentPhpVersion = DEFAULT_PHP_VERSION;
+let currentMoodleBranch = null;
 let currentPath = "/";
 let channel;
 let serviceWorkerReady = null;
@@ -119,7 +138,10 @@ async function updateFrame() {
   }
 
   await serviceWorkerReady;
-  const url = resolveRemoteUrl(scopeId, currentRuntimeId, currentPath);
+  const url = resolveRemoteUrl(scopeId, currentRuntimeId, currentPath, {
+    phpVersion: currentPhpVersion,
+    moodleBranch: currentMoodleBranch,
+  });
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
   }
@@ -366,29 +388,157 @@ function bindServiceWorkerMessages() {
   });
 }
 
+function populateSettingsModal() {
+  if (!els.settingsMoodleVersion || !els.settingsPhpVersion) {
+    return;
+  }
+
+  // Populate Moodle version dropdown
+  els.settingsMoodleVersion.innerHTML = "";
+  for (const branch of MOODLE_BRANCHES) {
+    const option = document.createElement("option");
+    option.value = branch.branch;
+    option.textContent = branch.label;
+    els.settingsMoodleVersion.append(option);
+  }
+  els.settingsMoodleVersion.value = currentMoodleBranch;
+
+  // Populate PHP version dropdown based on selected Moodle branch
+  updatePhpVersionDropdown(currentMoodleBranch);
+  els.settingsPhpVersion.value = currentPhpVersion;
+}
+
+function updatePhpVersionDropdown(branch) {
+  if (!els.settingsPhpVersion) {
+    return;
+  }
+
+  const compatibleVersions = getCompatiblePhpVersions(branch);
+  const previousValue = els.settingsPhpVersion.value;
+  els.settingsPhpVersion.innerHTML = "";
+  for (const version of compatibleVersions) {
+    const option = document.createElement("option");
+    option.value = version;
+    option.textContent = `PHP ${version}`;
+    els.settingsPhpVersion.append(option);
+  }
+
+  // Keep current selection if still compatible, otherwise fall back
+  if (compatibleVersions.includes(previousValue)) {
+    els.settingsPhpVersion.value = previousValue;
+  } else if (compatibleVersions.includes(DEFAULT_PHP_VERSION)) {
+    els.settingsPhpVersion.value = DEFAULT_PHP_VERSION;
+  } else {
+    els.settingsPhpVersion.value = compatibleVersions[0];
+  }
+}
+
+function updateCurrentVersionLabels() {
+  const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === currentMoodleBranch);
+  if (els.currentMoodleLabel) {
+    els.currentMoodleLabel.textContent = branchInfo ? branchInfo.label : currentMoodleBranch;
+  }
+  if (els.currentPhpLabel) {
+    els.currentPhpLabel.textContent = `PHP ${currentPhpVersion}`;
+  }
+}
+
+function openSettingsModal() {
+  if (!els.settingsModal) {
+    return;
+  }
+  populateSettingsModal();
+  els.settingsModal.showModal();
+}
+
+function closeSettingsModal() {
+  if (!els.settingsModal) {
+    return;
+  }
+  els.settingsModal.close();
+}
+
+function applySettingsAndReset() {
+  const newBranch = els.settingsMoodleVersion?.value;
+  const newPhp = els.settingsPhpVersion?.value;
+  closeSettingsModal();
+
+  if (newBranch === currentMoodleBranch && newPhp === currentPhpVersion) {
+    return;
+  }
+
+  // Update URL params and reload
+  const url = new URL(window.location.href);
+  url.searchParams.set("php", newPhp);
+  const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === newBranch);
+  url.searchParams.set("moodle", branchInfo ? branchInfo.version : newBranch);
+  url.searchParams.delete("moodleBranch");
+  window.location.href = url.toString();
+}
+
 async function main() {
   config = await loadPlaygroundConfig();
   activeBlueprint = await resolveBlueprintForShell(scopeId, config);
   updateBlueprintTextarea();
+
+  // Resolve versions from URL params > blueprint > defaults
+  const urlParams = parseQueryParams(window.location);
+  const blueprintVersions = {
+    php: activeBlueprint?.preferredVersions?.php || null,
+    moodle: activeBlueprint?.preferredVersions?.moodle || null,
+  };
+  const resolved = resolveVersions({
+    php: urlParams.php || blueprintVersions.php,
+    moodle: urlParams.moodle || blueprintVersions.moodle,
+    moodleBranch: urlParams.moodleBranch,
+  });
+  currentPhpVersion = resolved.phpVersion;
+  currentMoodleBranch = resolved.moodleBranch;
+  currentRuntimeId = buildRuntimeId(currentPhpVersion, currentMoodleBranch);
+
   const previous = loadSessionState(scopeId);
-  const defaultRuntime = getDefaultRuntime(config);
   const preferredPath = activeBlueprint?.landingPage || config.landingPath || "/";
   const shouldBypassSavedLogin = config.autologin && previous?.path === "/login";
   const shouldBypassInternalPath = isInternalRuntimePath(previous?.path);
 
-  currentRuntimeId = previous?.runtimeId || defaultRuntime.id;
   currentPath = (shouldBypassSavedLogin || shouldBypassInternalPath)
     ? preferredPath
     : (previous?.path || preferredPath);
   els.address.value = currentPath;
 
+  // Populate runtime dropdown from config (backward compat) + current resolved
   for (const runtime of config.runtimes) {
     const option = document.createElement("option");
     option.value = runtime.id;
     option.textContent = runtime.label;
     els.runtime.append(option);
   }
+  // If current runtimeId isn't in the legacy dropdown, add it
+  if (!Array.from(els.runtime.options).some((opt) => opt.value === currentRuntimeId)) {
+    const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === currentMoodleBranch);
+    const option = document.createElement("option");
+    option.value = currentRuntimeId;
+    option.textContent = `PHP ${currentPhpVersion} / ${branchInfo ? branchInfo.label : currentMoodleBranch}`;
+    els.runtime.append(option);
+  }
   els.runtime.value = currentRuntimeId;
+  updateCurrentVersionLabels();
+
+  // Settings modal event listeners
+  if (els.settingsButton) {
+    els.settingsButton.addEventListener("click", openSettingsModal);
+  }
+  if (els.settingsCancel) {
+    els.settingsCancel.addEventListener("click", closeSettingsModal);
+  }
+  if (els.settingsApply) {
+    els.settingsApply.addEventListener("click", applySettingsAndReset);
+  }
+  if (els.settingsMoodleVersion) {
+    els.settingsMoodleVersion.addEventListener("change", () => {
+      updatePhpVersionDropdown(els.settingsMoodleVersion.value);
+    });
+  }
 
   bindShellChannel();
   bindServiceWorkerMessages();

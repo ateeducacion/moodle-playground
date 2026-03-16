@@ -1,5 +1,5 @@
 {
-  "bundleVersion": "0.2.1",
+  "bundleVersion": "0.3.0",
   "defaultBlueprintUrl": "./assets/blueprints/default.blueprint.json",
   "siteTitle": "Moodle Playground",
   "landingPath": "/login/index.php",
@@ -7,6 +7,10 @@
   "timezone": "UTC",
   "autologin": false,
   "resetOnVersionMismatch": true,
+  "defaults": {
+    "phpVersion": "8.3",
+    "moodleBranch": "MOODLE_500_STABLE"
+  },
   "admin": {
     "username": "admin",
     "password": "password",

@@ -3,12 +3,14 @@ import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   ADMIN_DIRECTORY,
   COMPONENT_CACHE_PATH,
+  buildComponentCachePath,
   createMoodleConfigPhp,
   MOODLEDATA_ROOT,
   MOODLE_ROOT,
   TEMP_ROOT,
 } from "./config-template.js";
-import { buildManifestState } from "./manifest.js";
+import { buildManifestState, resolveManifestUrl } from "./manifest.js";
+import { getBranchMetadata, DEFAULT_MOODLE_BRANCH } from "../shared/version-resolver.js";
 import {
   ensureDir,
   readJsonFile,
@@ -21,35 +23,53 @@ import { extractZipEntries, fetchBundleWithCache, writeEntriesToPhp } from "../.
 const DOCROOT = "/www";
 const CONFIG_ROOT = "/persist/config";
 const MANIFEST_STATE_PATH = `${CONFIG_ROOT}/moodle-playground-manifest.json`;
-const AUTOLOAD_CHECK_PATH = `${MOODLE_ROOT}/__autoload_check.php`;
-const INSTALL_CHECK_PATH = `${MOODLE_ROOT}/__install_check.php`;
-const INSTALL_RUNNER_PATH = `${MOODLE_ROOT}/__install_database.php`;
-const PDO_PROBE_PATH = `${MOODLE_ROOT}/__pdo_probe.php`;
-const PDO_DDL_PROBE_PATH = `${MOODLE_ROOT}/__pdo_ddl_probe.php`;
-const CONFIG_NORMALIZER_PATH = `${MOODLE_ROOT}/__config_normalizer.php`;
-const CACHE_CONFIG_PATH = `${MOODLE_ROOT}/cache/classes/config.php`;
-const COMPONENT_CLASS_PATH = `${MOODLE_ROOT}/lib/classes/component.php`;
-const ADMINLIB_PATH = `${MOODLE_ROOT}/lib/adminlib.php`;
-const DATAPRIVACY_SETTINGS_PATH = `${MOODLE_ROOT}/admin/tool/dataprivacy/settings.php`;
-const LOG_SETTINGS_PATH = `${MOODLE_ROOT}/admin/tool/log/settings.php`;
-const HTTPSREPLACE_SETTINGS_PATH = `${MOODLE_ROOT}/admin/tool/httpsreplace/settings.php`;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const INTERNAL_RUNTIME_FILES = [
-  `${MOODLE_ROOT}/config.php`,
-  AUTOLOAD_CHECK_PATH,
-  INSTALL_CHECK_PATH,
-  INSTALL_RUNNER_PATH,
-  PDO_PROBE_PATH,
-  PDO_DDL_PROBE_PATH,
-  CONFIG_NORMALIZER_PATH,
-  CACHE_CONFIG_PATH,
-  COMPONENT_CLASS_PATH,
-  ADMINLIB_PATH,
-  DATAPRIVACY_SETTINGS_PATH,
-  LOG_SETTINGS_PATH,
-  HTTPSREPLACE_SETTINGS_PATH,
-];
+
+/**
+ * Build runtime paths that depend on the webRoot (document root where PHP scripts live).
+ * For Moodle <=5.0: webRoot = "/www/moodle"
+ * For Moodle 5.1+:  webRoot = "/www/moodle/public"
+ *
+ * Playground internal scripts (prefixed with __) are placed at webRoot so they
+ * are reachable via HTTP through php-compat.js's webRoot-based routing.
+ * config.php stays at MOODLE_ROOT (Moodle expects it above public/ for 5.1+).
+ */
+function buildRuntimePaths(webRoot) {
+  return {
+    AUTOLOAD_CHECK_PATH: `${webRoot}/__autoload_check.php`,
+    INSTALL_CHECK_PATH: `${webRoot}/__install_check.php`,
+    INSTALL_RUNNER_PATH: `${webRoot}/__install_database.php`,
+    PDO_PROBE_PATH: `${webRoot}/__pdo_probe.php`,
+    PDO_DDL_PROBE_PATH: `${webRoot}/__pdo_ddl_probe.php`,
+    CONFIG_NORMALIZER_PATH: `${webRoot}/__config_normalizer.php`,
+    CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
+    COMPONENT_CLASS_PATH: `${webRoot}/lib/classes/component.php`,
+    ADMINLIB_PATH: `${webRoot}/lib/adminlib.php`,
+    DATAPRIVACY_SETTINGS_PATH: `${webRoot}/admin/tool/dataprivacy/settings.php`,
+    LOG_SETTINGS_PATH: `${webRoot}/admin/tool/log/settings.php`,
+    HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
+  };
+}
+
+function buildInternalRuntimeFiles(webRoot) {
+  const paths = buildRuntimePaths(webRoot);
+  return [
+    `${MOODLE_ROOT}/config.php`,
+    paths.AUTOLOAD_CHECK_PATH,
+    paths.INSTALL_CHECK_PATH,
+    paths.INSTALL_RUNNER_PATH,
+    paths.PDO_PROBE_PATH,
+    paths.PDO_DDL_PROBE_PATH,
+    paths.CONFIG_NORMALIZER_PATH,
+    paths.CACHE_CONFIG_PATH,
+    paths.COMPONENT_CLASS_PATH,
+    paths.ADMINLIB_PATH,
+    paths.DATAPRIVACY_SETTINGS_PATH,
+    paths.LOG_SETTINGS_PATH,
+    paths.HTTPSREPLACE_SETTINGS_PATH,
+  ];
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -944,7 +964,7 @@ if ($hassiteconfig) {
 `;
 }
 
-async function patchRuntimePhpSources(php) {
+async function patchRuntimePhpSources(php, webRoot) {
   const patchFile = async (path, replacers) => {
     const current = textDecoder.decode(await php.readFile(path));
     let next = current;
@@ -959,7 +979,9 @@ async function patchRuntimePhpSources(php) {
     }
   };
 
-  await patchFile(CACHE_CONFIG_PATH, [
+  const rp = buildRuntimePaths(webRoot);
+
+  await patchFile(rp.CACHE_CONFIG_PATH, [
     [
       "debugging('Invalid cache store in config. Missing name or plugin.', DEBUG_DEVELOPER);",
       "if (!(defined('CACHE_DISABLE_ALL') && CACHE_DISABLE_ALL)) { debugging('Invalid cache store in config. Missing name or plugin.', DEBUG_DEVELOPER); }",
@@ -982,14 +1004,14 @@ async function patchRuntimePhpSources(php) {
   // incomplete component registry (missing plugins, themes, lang strings, classes).
   // Patch core_component::init() to skip the scan and fall through to the prebuilt
   // alternative_component_cache when PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE is set.
-  await patchFile(COMPONENT_CLASS_PATH, [
+  await patchFile(rp.COMPONENT_CLASS_PATH, [
     [
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE) {\n            self::fill_all_caches();\n            return;\n        }",
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE\n                && !(defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE') && PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE)) {\n            self::fill_all_caches();\n            return;\n        }",
     ],
   ]);
 
-  await patchFile(ADMINLIB_PATH, [
+  await patchFile(rp.ADMINLIB_PATH, [
     [
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            debugging('parent does not exist!');\n            return false;\n        }",
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            return false;\n        }",
@@ -1016,12 +1038,19 @@ async function prepareMoodleRuntime({
   configNormalizerPhp,
   publish,
   allowDiagnostics = false,
+  webRoot = MOODLE_ROOT,
 }) {
   const shouldMountArchive = !manifestStateMatches(savedManifestState, manifestState);
+  const rp = buildRuntimePaths(webRoot);
+  const internalFiles = buildInternalRuntimeFiles(webRoot);
 
   const tDirs = performance.now();
   await ensureDir(php, DOCROOT);
   await ensureDir(php, MOODLE_ROOT);
+  // For 5.1+, ensure the public/ subdirectory exists before VFS mount
+  if (webRoot !== MOODLE_ROOT) {
+    await ensureDir(php, webRoot);
+  }
   await ensureDir(php, MOODLEDATA_ROOT);
   await ensureDir(php, `${MOODLEDATA_ROOT}/cache`);
   await ensureDir(php, `${MOODLEDATA_ROOT}/localcache`);
@@ -1039,7 +1068,7 @@ async function prepareMoodleRuntime({
       imageBytes: archive.bytes,
       entries: archive.image.entries || [],
       mountPath: MOODLE_ROOT,
-      writablePaths: INTERNAL_RUNTIME_FILES,
+      writablePaths: internalFiles,
     });
   } else {
     publish("Writing fallback Moodle bundle into the runtime VFS.", 0.58);
@@ -1052,19 +1081,19 @@ async function prepareMoodleRuntime({
 
   const tFiles = performance.now();
   await php.writeFile(`${MOODLE_ROOT}/config.php`, textEncoder.encode(configPhp));
-  await php.writeFile(AUTOLOAD_CHECK_PATH, textEncoder.encode(createAutoloadCheckPhp()));
-  await php.writeFile(INSTALL_CHECK_PATH, textEncoder.encode(createInstallCheckPhp()));
-  await php.writeFile(INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
-  await php.writeFile(PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
-  await php.writeFile(PDO_DDL_PROBE_PATH, textEncoder.encode(pdoDdlProbePhp));
-  await php.writeFile(CONFIG_NORMALIZER_PATH, textEncoder.encode(configNormalizerPhp));
-  await php.writeFile(DATAPRIVACY_SETTINGS_PATH, textEncoder.encode(createPatchedDataprivacySettingsPhp()));
-  await php.writeFile(LOG_SETTINGS_PATH, textEncoder.encode(createPatchedLogSettingsPhp()));
-  await php.writeFile(HTTPSREPLACE_SETTINGS_PATH, textEncoder.encode(createPatchedHttpsreplaceSettingsPhp()));
+  await php.writeFile(rp.AUTOLOAD_CHECK_PATH, textEncoder.encode(createAutoloadCheckPhp()));
+  await php.writeFile(rp.INSTALL_CHECK_PATH, textEncoder.encode(createInstallCheckPhp()));
+  await php.writeFile(rp.INSTALL_RUNNER_PATH, textEncoder.encode(installRunnerPhp));
+  await php.writeFile(rp.PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
+  await php.writeFile(rp.PDO_DDL_PROBE_PATH, textEncoder.encode(pdoDdlProbePhp));
+  await php.writeFile(rp.CONFIG_NORMALIZER_PATH, textEncoder.encode(configNormalizerPhp));
+  await php.writeFile(rp.DATAPRIVACY_SETTINGS_PATH, textEncoder.encode(createPatchedDataprivacySettingsPhp()));
+  await php.writeFile(rp.LOG_SETTINGS_PATH, textEncoder.encode(createPatchedLogSettingsPhp()));
+  await php.writeFile(rp.HTTPSREPLACE_SETTINGS_PATH, textEncoder.encode(createPatchedHttpsreplaceSettingsPhp()));
   const filesMs = Math.round(performance.now() - tFiles);
 
   const tPatch = performance.now();
-  await patchRuntimePhpSources(php);
+  await patchRuntimePhpSources(php, webRoot);
   const patchMs = Math.round(performance.now() - tPatch);
 
   publish(`Prepare sub-timings: dirs=${dirsMs}ms mount=${mountMs}ms files=${filesMs}ms patches=${patchMs}ms`, 0.83);
@@ -1079,20 +1108,35 @@ async function prepareMoodleRuntime({
   return { shouldMountArchive };
 }
 
-async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish }) {
-  const snapshotUrl = new URL("./assets/moodle/snapshot/install.sq3", appBaseUrl);
+async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish, moodleBranch }) {
+  const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const meta = getBranchMetadata(branch);
+
+  // Try branch-specific snapshot first, then fall back to legacy path
+  const snapshotPaths = [];
+  if (meta) {
+    snapshotPaths.push(`assets/moodle/${meta.snapshotDir}/install.sq3`);
+  }
+  snapshotPaths.push("assets/moodle/snapshot/install.sq3");
+
   publish("Downloading pre-installed database snapshot.", 0.87);
 
   let response;
-  try {
-    response = await fetch(snapshotUrl);
-  } catch {
-    publish("Snapshot fetch failed (network error), falling back to full install.", 0.875);
-    return false;
+  for (const snapshotPath of snapshotPaths) {
+    const snapshotUrl = new URL(`./${snapshotPath}`, appBaseUrl);
+    try {
+      response = await fetch(snapshotUrl);
+      if (response.ok) {
+        break;
+      }
+      response = null;
+    } catch {
+      response = null;
+    }
   }
 
-  if (!response.ok) {
-    publish(`Snapshot not available (HTTP ${response.status}), falling back to full install.`, 0.875);
+  if (!response || !response.ok) {
+    publish("Snapshot not available, falling back to full install.", 0.875);
     return false;
   }
 
@@ -1111,8 +1155,8 @@ async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish }) {
   return true;
 }
 
-async function runProvisioningCheck(php) {
-  const payload = await requestRuntimeScript(php, "/__install_check.php");
+async function runProvisioningCheck(php, webRoot) {
+  const payload = await requestRuntimeScript(php, "/__install_check.php", undefined, webRoot);
   const jsonStart = payload.lastIndexOf("\n{");
   const candidate = jsonStart >= 0 ? payload.slice(jsonStart + 1) : payload.trim();
 
@@ -1123,7 +1167,7 @@ async function runProvisioningCheck(php) {
   }
 }
 
-async function runCliProvisioning(php, publish) {
+async function runCliProvisioning(php, publish, webRoot) {
   const stages = [
     { id: "core", label: "Installing Moodle core schema." },
     { id: "plugins", label: "Installing bundled Moodle plugins." },
@@ -1135,7 +1179,7 @@ async function runCliProvisioning(php, publish) {
   for (const [index, stage] of stages.entries()) {
     const stageStart = performance.now();
     publish(stage.label, 0.89 + (index * 0.01));
-    const output = await requestRuntimeScript(php, "/__install_database.php", { stage: stage.id });
+    const output = await requestRuntimeScript(php, "/__install_database.php", { stage: stage.id }, webRoot);
     const stageMs = Math.round(performance.now() - stageStart);
     publish(`${stage.label} [${stageMs}ms]`, 0.89 + ((index + 0.5) * 0.01));
     outputs.push({ stage: stage.id, output });
@@ -1147,8 +1191,8 @@ async function runCliProvisioning(php, publish) {
   };
 }
 
-async function runPdoProbe(php) {
-  const output = await requestRuntimeScript(php, "/__pdo_probe.php");
+async function runPdoProbe(php, webRoot) {
+  const output = await requestRuntimeScript(php, "/__pdo_probe.php", undefined, webRoot);
   const payload = output.trim();
   const jsonStart = payload.indexOf("{");
   const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
@@ -1159,8 +1203,8 @@ async function runPdoProbe(php) {
   };
 }
 
-async function runPdoDdlProbe(php) {
-  const output = await requestRuntimeScript(php, "/__pdo_ddl_probe.php");
+async function runPdoDdlProbe(php, webRoot) {
+  const output = await requestRuntimeScript(php, "/__pdo_ddl_probe.php", undefined, webRoot);
   const payload = output.trim();
   const jsonStart = payload.indexOf("{");
   const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
@@ -1168,8 +1212,8 @@ async function runPdoDdlProbe(php) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
-async function runConfigNormalizer(php) {
-  const output = await requestRuntimeScript(php, "/__config_normalizer.php");
+async function runConfigNormalizer(php, webRoot) {
+  const output = await requestRuntimeScript(php, "/__config_normalizer.php", undefined, webRoot);
   const payload = output.trim();
   const jsonStart = payload.indexOf("{");
   const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
@@ -1177,7 +1221,7 @@ async function runConfigNormalizer(php) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
-async function requestRuntimeScript(php, path, searchParams) {
+async function requestRuntimeScript(php, path, searchParams, webRoot = MOODLE_ROOT) {
   const url = new URL(path, "https://bootstrap.local/");
 
   if (searchParams) {
@@ -1188,7 +1232,7 @@ async function requestRuntimeScript(php, path, searchParams) {
     }
   }
 
-  const runtimePath = `${MOODLE_ROOT}${url.pathname}`;
+  const runtimePath = `${webRoot}${url.pathname}`;
   const beforeRequest = await php.analyzePath(runtimePath);
   const response = await php.request(new Request(url));
   const body = textDecoder.decode(await response.arrayBuffer());
@@ -1217,11 +1261,16 @@ export async function bootstrapMoodle({
   scopeId,
   appBaseUrl,
   origin,
+  moodleBranch,
+  webRoot: webRootParam,
 }) {
   const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
   const effectiveConfig = buildEffectivePlaygroundConfig(config, blueprint);
+  const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const branchMeta = getBranchMetadata(resolvedBranch);
+  const webRoot = webRootParam || branchMeta?.webRoot || MOODLE_ROOT;
   const tArchive = performance.now();
-  const manifestUrl = new URL("./assets/manifests/latest.json", appBaseUrl || self.location.href).toString();
+  const manifestUrl = await resolveManifestUrl(resolvedBranch, appBaseUrl || self.location.href);
   let archive = await resolveBootstrapArchive({
     manifestUrl,
   }, ({ ratio, cached, phase, detail }) => {
@@ -1290,6 +1339,7 @@ export async function bootstrapMoodle({
   let configPhp = createMoodleConfigPhp({
     adminDirectory: ADMIN_DIRECTORY,
     componentCachePath: COMPONENT_CACHE_PATH,
+    moodleRoot: webRoot,
     ...dbConfig,
     prefix: "mdl_",
     wwwroot,
@@ -1309,6 +1359,7 @@ export async function bootstrapMoodle({
     configNormalizerPhp,
     publish,
     allowDiagnostics: true,
+    webRoot,
   });
   const prepareMs = Math.round(performance.now() - tPrepare);
   publish(`Runtime preparation completed in ${prepareMs}ms.`, 0.86);
@@ -1320,7 +1371,7 @@ export async function bootstrapMoodle({
 
   const tPdo = performance.now();
   publish("Probing PDO SQLite connectivity.", 0.865);
-  const pdoProbe = await runPdoProbe(php);
+  const pdoProbe = await runPdoProbe(php, webRoot);
   const pdoMs = Math.round(performance.now() - tPdo);
   if (pdoProbe.ok) {
     publish(`PDO SQLite probe connected successfully with ${pdoProbe.dsn}. [${pdoMs}ms]`, 0.868);
@@ -1339,7 +1390,7 @@ export async function bootstrapMoodle({
     publish("Using persisted install marker to skip Moodle install checks.", 0.87);
   } else if (hasSavedInstallState) {
     publish("Checking whether Moodle is already installed.", 0.87);
-    installState = await runProvisioningCheck(php);
+    installState = await runProvisioningCheck(php, webRoot);
     if (installState.error) {
       publish(`Provisioning check failed: ${installState.error.type}: ${installState.error.message}`, 0.88);
     } else if (installState.installed) {
@@ -1355,7 +1406,7 @@ export async function bootstrapMoodle({
   } else {
     publish("No persisted install marker found. Checking if Moodle is already installed in the database.", 0.87);
     try {
-      installState = await runProvisioningCheck(php);
+      installState = await runProvisioningCheck(php, webRoot);
       if (installState.installed) {
         publish("Moodle installation detected from the config table (marker was missing).", 0.885);
         await writeJsonFile(php, installStatePath, {
@@ -1379,6 +1430,7 @@ export async function bootstrapMoodle({
       dbFile,
       appBaseUrl: appBaseUrl || origin,
       publish,
+      moodleBranch: resolvedBranch,
     });
 
     if (snapshotLoaded) {
@@ -1394,7 +1446,7 @@ export async function bootstrapMoodle({
     } else {
       // Fallback: run the full Moodle CLI installer
       publish("Running Moodle installation inside the CGI runtime.", 0.89);
-      const provisioningResult = await runCliProvisioning(php, publish);
+      const provisioningResult = await runCliProvisioning(php, publish, webRoot);
       if (provisioningResult.errorOutput.trim()) {
         publish(`CLI installer stderr: ${provisioningResult.errorOutput.slice(0, 400)}`, 0.9);
       }
@@ -1440,7 +1492,7 @@ export async function bootstrapMoodle({
 
   const tNorm = performance.now();
   publish("Normalizing persisted Moodle configuration defaults.", 0.915);
-  const configNormalizer = await runConfigNormalizer(php);
+  const configNormalizer = await runConfigNormalizer(php, webRoot);
   const normMs = Math.round(performance.now() - tNorm);
   if (configNormalizer?.ok) {
     const setKeys = Object.keys(configNormalizer.set || {});
@@ -1463,7 +1515,7 @@ export async function bootstrapMoodle({
   // We write a temporary PHP script and request it via HTTP so that Moodle's
   // web session handler creates a proper session with Set-Cookie headers,
   // which the cookie jar in php-compat.js captures automatically.
-  const AUTO_LOGIN_PATH = MOODLE_ROOT + "/__playground_autologin.php";
+  const AUTO_LOGIN_PATH = webRoot + "/__playground_autologin.php";
   let readyPath = "/my/";
   try {
     publish("Creating admin session for auto-login.", 0.95);

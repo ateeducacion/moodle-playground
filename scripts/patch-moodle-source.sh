@@ -3,28 +3,51 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PATCH_DIR="$SCRIPT_DIR/../patches/moodle"
+SHARED_PATCH_DIR="$SCRIPT_DIR/../patches/shared"
+LEGACY_PATCH_DIR="$SCRIPT_DIR/../patches/moodle"
 SOURCE_DIR=${1:-}
+BRANCH=${2:-}
 
 if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
-  echo "Usage: $0 <moodle-source-dir>" >&2
+  echo "Usage: $0 <moodle-source-dir> [branch]" >&2
   exit 1
 fi
 
-DMLLIB="$SOURCE_DIR/lib/dmllib.php"
-INSTALLPHP="$SOURCE_DIR/install.php"
-CACHEPHP="$SOURCE_DIR/cache/classes/cache.php"
-INSTALL_LANG_EN="$SOURCE_DIR/lang/en/install.php"
+# Determine which patch directory to use for file copies:
+# prefer patches/shared, fall back to legacy patches/moodle
+if [ -d "$SHARED_PATCH_DIR" ]; then
+  PATCH_DIR="$SHARED_PATCH_DIR"
+else
+  PATCH_DIR="$LEGACY_PATCH_DIR"
+fi
+
+# Per-branch patch directory (applied after shared patches)
+BRANCH_PATCH_DIR=""
+if [ -n "$BRANCH" ] && [ -d "$SCRIPT_DIR/../patches/$BRANCH" ]; then
+  BRANCH_PATCH_DIR="$SCRIPT_DIR/../patches/$BRANCH"
+fi
+
+# Moodle 5.1+ moves core files under public/. Detect the prefix.
+if [ -f "$SOURCE_DIR/public/lib/setup.php" ] && [ "$(wc -l < "$SOURCE_DIR/public/lib/setup.php")" -gt 100 ]; then
+  PUB="public/"
+else
+  PUB=""
+fi
+
+DMLLIB="$SOURCE_DIR/${PUB}lib/dmllib.php"
+INSTALLPHP="$SOURCE_DIR/${PUB}install.php"
+CACHEPHP="$SOURCE_DIR/${PUB}cache/classes/cache.php"
+INSTALL_LANG_EN="$SOURCE_DIR/${PUB}lang/en/install.php"
 PDO_SQLITE_DRIVER_PATCH="$PATCH_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
 SQLITE_GENERATOR_PATCH="$PATCH_DIR/lib/ddl/sqlite_sql_generator.php"
 XMLIZE_PATCH="$PATCH_DIR/lib/xmlize.php"
 XMLDB_FILE_PATCH="$PATCH_DIR/lib/xmldb/xmldb_file.php"
 ENCRYPTION_PATCH="$PATCH_DIR/lib/classes/encryption.php"
-COMPONENTPHP="$SOURCE_DIR/lib/classes/component.php"
-SETUPLIBPHP="$SOURCE_DIR/lib/setuplib.php"
-SETUPPHP="$SOURCE_DIR/lib/setup.php"
+COMPONENTPHP="$SOURCE_DIR/${PUB}lib/classes/component.php"
+SETUPLIBPHP="$SOURCE_DIR/${PUB}lib/setuplib.php"
+SETUPPHP="$SOURCE_DIR/${PUB}lib/setup.php"
 
-if [ -f "$DMLLIB" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
+if [ -f "$DMLLIB" ] && [ -f "$SOURCE_DIR/${PUB}lib/classes/exception/response_aware_exception.php" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
   python3 - "$DMLLIB" <<'PY'
 from pathlib import Path
 import sys
@@ -138,31 +161,31 @@ PY
 fi
 
 if [ -f "$PDO_SQLITE_DRIVER_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/dml"
-  cp "$PDO_SQLITE_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/dml"
+  cp "$PDO_SQLITE_DRIVER_PATCH" "$SOURCE_DIR/${PUB}lib/dml/sqlite3_pdo_moodle_database.php"
 fi
 
 if [ -f "$SQLITE_GENERATOR_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/ddl"
-  cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/lib/ddl/sqlite_sql_generator.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/ddl"
+  cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/${PUB}lib/ddl/sqlite_sql_generator.php"
 fi
 
 if [ -f "$XMLIZE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib"
-  cp "$XMLIZE_PATCH" "$SOURCE_DIR/lib/xmlize.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib"
+  cp "$XMLIZE_PATCH" "$SOURCE_DIR/${PUB}lib/xmlize.php"
 fi
 
 if [ -f "$XMLDB_FILE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/xmldb"
-  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/lib/xmldb/xmldb_file.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/xmldb"
+  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/${PUB}lib/xmldb/xmldb_file.php"
 fi
 
 if [ -f "$ENCRYPTION_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/classes"
-  cp "$ENCRYPTION_PATCH" "$SOURCE_DIR/lib/classes/encryption.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/classes"
+  cp "$ENCRYPTION_PATCH" "$SOURCE_DIR/${PUB}lib/classes/encryption.php"
 fi
 
-PDO_DATABASE="$SOURCE_DIR/lib/dml/pdo_moodle_database.php"
+PDO_DATABASE="$SOURCE_DIR/${PUB}lib/dml/pdo_moodle_database.php"
 if [ -f "$PDO_DATABASE" ] && grep -q 'query_end(\$result)' "$PDO_DATABASE"; then
   python3 - "$PDO_DATABASE" <<'PY'
 from pathlib import Path
@@ -251,7 +274,7 @@ path.write_text(text, encoding="utf-8")
 PY
 fi
 
-ENVIRONMENT_XML="$SOURCE_DIR/admin/environment.xml"
+ENVIRONMENT_XML="$SOURCE_DIR/${PUB}admin/environment.xml"
 if [ -f "$ENVIRONMENT_XML" ]; then
   python3 - "$ENVIRONMENT_XML" <<'PY'
 from pathlib import Path
@@ -301,4 +324,16 @@ if needle not in text:
 
 path.write_text(text.replace(needle, insert, 1), encoding="utf-8")
 PY
+fi
+
+# Apply per-branch patches (file copies from patches/$BRANCH/)
+if [ -n "$BRANCH_PATCH_DIR" ]; then
+  echo "Applying per-branch patches from $BRANCH_PATCH_DIR" >&2
+  find "$BRANCH_PATCH_DIR" -type f -name '*.php' | while IFS= read -r patchfile; do
+    relpath="${patchfile#"$BRANCH_PATCH_DIR/"}"
+    target_dir="$SOURCE_DIR/$(dirname "$relpath")"
+    mkdir -p "$target_dir"
+    cp "$patchfile" "$SOURCE_DIR/$relpath"
+    echo "  Copied branch patch: $relpath" >&2
+  done
 fi

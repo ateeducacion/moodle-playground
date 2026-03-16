@@ -20,7 +20,8 @@
       "type": "object",
       "properties": {
         "php": { "type": "string" },
-        "moodle": { "type": "string" }
+        "moodle": { "type": "string" },
+        "moodleBranch": { "type": "string" }
       },
       "additionalProperties": true
     },
