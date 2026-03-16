@@ -531,6 +531,13 @@ async function bootstrapRemote() {
     }
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
+      // If bootstrap returns a readyPath (e.g. "/" after auto-login),
+      // override the stale path from the URL so we don't navigate to
+      // a previous session's install.php or other outdated path.
+      if (msg.path && msg.path !== activePath) {
+        activePath = msg.path;
+        navigateFrame(scopeId, runtime.id, activePath, { force: true });
+      }
     }
   });
 
@@ -548,7 +555,11 @@ async function bootstrapRemote() {
 
   bindShellCommands(scopeId, runtime.id);
   bindFrameNavigation(scopeId, runtime.id);
-  navigateFrame(scopeId, runtime.id, requestedPath);
+  // Navigate to the requested path. If bootstrap later sends a readyPath
+  // via the "ready" message (e.g. "/" after snapshot load + auto-login),
+  // the shellChannel listener will update activePath and re-navigate,
+  // overriding stale saved paths like "/install.php".
+  navigateFrame(scopeId, runtime.id, activePath);
   setRemoteProgress("Loading Moodle…", 0.98);
 }
 
