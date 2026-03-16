@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-03-16T17:40:07.839Z",
+  "generatedAt": "2026-03-16T22:03:38.501Z",
   "channel": "MOODLE_405_STABLE",
   "release": "4.5.10+ (Build: 20260306)",
   "runtimeVersion": "0.0.9-alpha-32",
@@ -11,8 +11,8 @@
     "format": "zip",
     "path": "../moodle/MOODLE_405_STABLE/moodle-core-4.5.10___Build__20260306_.zip",
     "fileName": "moodle-core-4.5.10___Build__20260306_.zip",
-    "size": 177821851,
-    "sha256": "64ecbe39064de0a0c7e217c75e3fc0f010699b9868f4585b431a83569080432a",
+    "size": 177821866,
+    "sha256": "22f0d708c437c472a8e15c2f869dc29f4734ab0f9af64a3a54500651477f4c8b",
     "fileCount": 29084
   },
   "vfs": {
@@ -21,14 +21,14 @@
     "data": {
       "path": "../moodle/MOODLE_405_STABLE/moodle-core-4.5.10___Build__20260306_.vfs.bin",
       "fileName": "moodle-core-4.5.10___Build__20260306_.vfs.bin",
-      "size": 392613885,
-      "sha256": "b2a5cbe4078853ec9718088cd320ed41598c599922ff1279d83c4ef9d64c932e"
+      "size": 392614237,
+      "sha256": "3731a4d4d17ed6134c33834ce58ce0157192a08d56935d50c4f9d372be265c83"
     },
     "index": {
       "path": "../moodle/MOODLE_405_STABLE/moodle-core-4.5.10___Build__20260306_.vfs.index.json",
       "fileName": "moodle-core-4.5.10___Build__20260306_.vfs.index.json",
-      "size": 5175293,
-      "sha256": "9674b0853d4e3d9a893b6cba7ae4bda8ee54914fbf5bfdb1ce2c56b835b7eaf4"
+      "size": 5175294,
+      "sha256": "315cc9090b65ca0860cf848d63e1cfaa868337ad82563ab048291fbd78ecf6e3"
     },
     "fileCount": 29084
   },
@@ -36,6 +36,6 @@
     "path": "../moodle/MOODLE_405_STABLE/snapshot/install.sq3",
     "fileName": "install.sq3",
     "size": 8105984,
-    "sha256": "f3115a9cacba2b233d97779658324bd121b232bd9e174b0469062f0853a33fe2"
+    "sha256": "29e7b8bb4217ab736203f1f56ae37161f2a97f59620f3eb0af135f10acee7b1e"
   }
 }

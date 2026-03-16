@@ -128,7 +128,9 @@ export function resolveMoodleBranch(versionOrBranch) {
 
   // Loose version match: strip trailing ".x" (e.g. "5.0.x" -> "5.0")
   const stripped = input.replace(/\.x$/u, "");
-  const byStripped = MOODLE_BRANCHES.find((entry) => entry.version === stripped);
+  const byStripped = MOODLE_BRANCHES.find(
+    (entry) => entry.version === stripped,
+  );
   if (byStripped) {
     return byStripped.branch;
   }
@@ -183,9 +185,14 @@ export function buildRuntimeId(phpVersion, moodleBranch) {
 
   if (meta) {
     // Use version for stable branches, "main" for dev
-    moodlePart = meta.branch === "main" ? "main" : `moodle${meta.version.replace(".", "")}`;
+    moodlePart =
+      meta.branch === "main"
+        ? "main"
+        : `moodle${meta.version.replace(".", "")}`;
   } else {
-    moodlePart = String(moodleBranch).replace(/[^A-Za-z0-9]/gu, "").toLowerCase();
+    moodlePart = String(moodleBranch)
+      .replace(/[^A-Za-z0-9]/gu, "")
+      .toLowerCase();
   }
 
   return `${phpPart}-${moodlePart}`;
@@ -269,7 +276,8 @@ export function parseQueryParams(urlOrSearchParams) {
  * Build the manifest URL for a given branch.
  */
 export function buildManifestUrl(moodleBranch, appBaseUrl) {
-  const base = appBaseUrl || (typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : "./");
+  const base =
+    appBaseUrl || (typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : "./");
   const meta = getBranchMetadata(moodleBranch);
   const filename = meta ? meta.manifestFile : "latest.json";
   return new URL(`assets/manifests/${filename}`, base).toString();

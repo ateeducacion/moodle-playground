@@ -79,7 +79,9 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color: var(--text);
@@ -105,7 +107,10 @@ label.import-button {
   color: var(--text);
   cursor: pointer;
   font-size: 13px;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
 }
 
 button:hover,
@@ -497,7 +502,10 @@ button.danger:hover {
 .panel__row {
   justify-content: space-between;
   margin-bottom: var(--space-sm);
-  font: 600 11px/1.2 ui-monospace, "SFMono-Regular", monospace;
+  font:
+    600 11px / 1.2 ui-monospace,
+    "SFMono-Regular",
+    monospace;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -516,7 +524,10 @@ button.danger:hover {
   padding: var(--space-md);
   background: var(--color-gray-900);
   color: #e4e8ec;
-  font: 12px/1.6 ui-monospace, "SFMono-Regular", monospace;
+  font:
+    12px / 1.6 ui-monospace,
+    "SFMono-Regular",
+    monospace;
   overflow: auto;
 }
 
@@ -543,7 +554,10 @@ button.danger:hover {
   padding: var(--space-md);
   background: var(--color-gray-900);
   color: #e4e8ec;
-  font: 12px/1.5 ui-monospace, "SFMono-Regular", monospace;
+  font:
+    12px / 1.5 ui-monospace,
+    "SFMono-Regular",
+    monospace;
   overflow: auto;
 }
 

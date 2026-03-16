@@ -1,0 +1,19 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/my/",
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "admin",
+        "adminPass": "password",
+        "adminEmail": "admin@example.com",
+        "siteName": "My Moodle"
+      }
+    },
+    {
+      "step": "login",
+      "username": "admin"
+    }
+  ]
+}

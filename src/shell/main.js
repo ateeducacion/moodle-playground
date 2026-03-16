@@ -1,21 +1,25 @@
 import {
-  exportBlueprintPayload,
-  parseImportedBlueprintPayload,
-  resolveBlueprintForShell,
-  saveActiveBlueprint,
-} from "../shared/blueprint.js";
-import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
+  parseBlueprint,
+  resolveBlueprint,
+  saveBlueprint,
+  validateBlueprint,
+} from "../blueprint/index.js";
+import { loadPlaygroundConfig } from "../shared/config.js";
 import { resolveRemoteUrl } from "../shared/paths.js";
-import { createShellChannel } from "../shared/protocol.js";
-import { clearScopeSession, getOrCreateScopeId, loadSessionState, saveSessionState } from "../shared/storage.js";
+import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
 import {
-  MOODLE_BRANCHES,
-  DEFAULT_PHP_VERSION,
+  clearScopeSession,
+  getOrCreateScopeId,
+  loadSessionState,
+  saveSessionState,
+} from "../shared/storage.js";
+import {
   buildRuntimeId,
+  DEFAULT_PHP_VERSION,
   getCompatiblePhpVersions,
+  MOODLE_BRANCHES,
   parseQueryParams,
   resolveVersions,
-  resolveMoodleBranch,
 } from "../shared/version-resolver.js";
 
 const els = {
@@ -69,6 +73,7 @@ let uiLocked = true;
 let remoteReloadToken = 0;
 let pendingCleanBoot = false;
 let latestPhpInfoHtml = "";
+// biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
 let phpInfoCapturePromise = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
 
@@ -115,7 +120,8 @@ async function ensureRuntimeServiceWorker() {
   await navigator.serviceWorker.ready;
 
   if (!navigator.serviceWorker.controller) {
-    const alreadyReloaded = window.sessionStorage.getItem(CONTROL_RELOAD_KEY) === "1";
+    const alreadyReloaded =
+      window.sessionStorage.getItem(CONTROL_RELOAD_KEY) === "1";
     if (!alreadyReloaded) {
       window.sessionStorage.setItem(CONTROL_RELOAD_KEY, "1");
       window.location.reload();
@@ -165,7 +171,10 @@ function navigateWithinRuntime(path) {
   els.address.value = currentPath;
   saveState();
 
-  if (remoteFrameBooted && postToRemote({ kind: "navigate-site", path: currentPath })) {
+  if (
+    remoteFrameBooted &&
+    postToRemote({ kind: "navigate-site", path: currentPath })
+  ) {
     appendLog(`Navigating site to ${currentPath}`);
     return;
   }
@@ -173,6 +182,7 @@ function navigateWithinRuntime(path) {
   void updateFrame();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called via postToRemote from remote.html
 function refreshWithinRuntime() {
   if (remoteFrameBooted && postToRemote({ kind: "refresh-site" })) {
     appendLog(`Refreshing ${currentPath}`);
@@ -221,7 +231,10 @@ function requestPhpInfoCapture() {
 
 function capturePhpInfoViaWorker(reason = "manual") {
   if (!config) {
-    appendLog("Cannot capture PHP info before the playground configuration is loaded.", true);
+    appendLog(
+      "Cannot capture PHP info before the playground configuration is loaded.",
+      true,
+    );
     return;
   }
 
@@ -268,8 +281,10 @@ function saveState(extra = {}) {
 }
 
 function exportBlueprint() {
-  const payload = exportBlueprintPayload(config, activeBlueprint);
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const payload = activeBlueprint || {};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -279,28 +294,39 @@ function exportBlueprint() {
 }
 
 function updateBlueprintTextarea() {
-  if (!config || !activeBlueprint || !els.blueprintTextarea) {
+  if (!activeBlueprint || !els.blueprintTextarea) {
     return;
   }
 
-  els.blueprintTextarea.value = JSON.stringify(exportBlueprintPayload(config, activeBlueprint), null, 2);
+  els.blueprintTextarea.value = JSON.stringify(activeBlueprint, null, 2);
   els.blueprintTextarea.scrollTop = 0;
 }
 
 async function importPayload(file) {
-  const imported = parseImportedBlueprintPayload(JSON.parse(await file.text()), config);
+  const rawPayload = JSON.parse(await file.text());
 
-  if (imported.type === "snapshot") {
-    currentRuntimeId = imported.runtimeId || currentRuntimeId;
-    currentPath = imported.path || "/";
+  // Check if this is a snapshot payload (old format)
+  if (rawPayload?.version === SNAPSHOT_VERSION) {
+    currentRuntimeId = rawPayload.runtimeId || currentRuntimeId;
+    currentPath = rawPayload.path || "/";
     els.address.value = currentPath;
     saveState({ importedAt: new Date().toISOString() });
     await updateFrame();
     return;
   }
 
-  activeBlueprint = imported.blueprint;
-  saveActiveBlueprint(scopeId, activeBlueprint);
+  // Parse and validate as blueprint
+  const blueprint = parseBlueprint(rawPayload);
+  const validation = validateBlueprint(blueprint);
+  if (!validation.valid) {
+    appendLog(
+      `Blueprint validation errors:\n${validation.errors.join("\n")}`,
+      true,
+    );
+  }
+
+  activeBlueprint = blueprint;
+  saveBlueprint(scopeId, activeBlueprint);
   pendingCleanBoot = true;
   currentPath = activeBlueprint.landingPage || config.landingPath || "/";
   els.address.value = currentPath;
@@ -323,7 +349,9 @@ function bindShellChannel() {
         setUiLocked(false);
         {
           const previousPath = currentPath;
-          currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || currentPath);
+          currentPath = isInternalRuntimePath(message.path)
+            ? currentPath
+            : message.path || currentPath;
           if (remoteFrameBooted && currentPath !== previousPath) {
             postToRemote({ kind: "navigate-site", path: currentPath });
           }
@@ -334,13 +362,17 @@ function bindShellChannel() {
       case "frame-ready":
         remoteFrameBooted = true;
         if (!uiLocked) {
-          currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || currentPath);
+          currentPath = isInternalRuntimePath(message.path)
+            ? currentPath
+            : message.path || currentPath;
           els.address.value = currentPath;
           saveState();
         }
         break;
       case "navigate":
-        currentPath = isInternalRuntimePath(message.path) ? currentPath : (message.path || "/");
+        currentPath = isInternalRuntimePath(message.path)
+          ? currentPath
+          : message.path || "/";
         els.address.value = currentPath;
         saveState();
         break;
@@ -418,9 +450,13 @@ function updatePhpVersionDropdown(branch) {
 }
 
 function updateCurrentVersionLabels() {
-  const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === currentMoodleBranch);
+  const branchInfo = MOODLE_BRANCHES.find(
+    (b) => b.branch === currentMoodleBranch,
+  );
   if (els.currentMoodleLabel) {
-    els.currentMoodleLabel.textContent = branchInfo ? branchInfo.label : currentMoodleBranch;
+    els.currentMoodleLabel.textContent = branchInfo
+      ? branchInfo.label
+      : currentMoodleBranch;
   }
   if (els.currentPhpLabel) {
     els.currentPhpLabel.textContent = `PHP ${currentPhpVersion}`;
@@ -477,7 +513,11 @@ function applySettingsAndReset() {
 
 async function main() {
   config = await loadPlaygroundConfig();
-  activeBlueprint = await resolveBlueprintForShell(scopeId, config);
+  activeBlueprint = await resolveBlueprint({
+    scopeId,
+    location: window.location,
+    defaultBlueprintUrl: config.defaultBlueprintUrl,
+  });
   updateBlueprintTextarea();
 
   // Resolve versions from URL params > blueprint > defaults
@@ -496,13 +536,16 @@ async function main() {
   currentRuntimeId = buildRuntimeId(currentPhpVersion, currentMoodleBranch);
 
   const previous = loadSessionState(scopeId);
-  const preferredPath = activeBlueprint?.landingPage || config.landingPath || "/";
-  const shouldBypassSavedLogin = config.autologin && previous?.path === "/login";
+  const preferredPath =
+    activeBlueprint?.landingPage || config.landingPath || "/";
+  const shouldBypassSavedLogin =
+    config.autologin && previous?.path === "/login";
   const shouldBypassInternalPath = isInternalRuntimePath(previous?.path);
 
-  currentPath = (shouldBypassSavedLogin || shouldBypassInternalPath)
-    ? preferredPath
-    : (previous?.path || preferredPath);
+  currentPath =
+    shouldBypassSavedLogin || shouldBypassInternalPath
+      ? preferredPath
+      : previous?.path || preferredPath;
   els.address.value = currentPath;
 
   updateCurrentVersionLabels();
@@ -535,7 +578,10 @@ async function main() {
 
   // Close popover on Escape
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && els.settingsPopover?.classList.contains("is-open")) {
+    if (
+      event.key === "Escape" &&
+      els.settingsPopover?.classList.contains("is-open")
+    ) {
       closeSettingsPopover();
     }
   });
@@ -568,7 +614,9 @@ els.copyLogs.addEventListener("click", () => {
   navigator.clipboard.writeText(text).then(() => {
     const original = els.copyLogs.textContent;
     els.copyLogs.textContent = "Copied!";
-    setTimeout(() => { els.copyLogs.textContent = original; }, 1200);
+    setTimeout(() => {
+      els.copyLogs.textContent = original;
+    }, 1200);
   });
 });
 els.refreshPhpInfoButton.addEventListener("click", requestPhpInfoCapture);

@@ -21,7 +21,9 @@ export async function ensureDir(php, path) {
         continue;
       }
 
-      throw new Error(`Cannot create directory ${current}: path exists and is not a directory.`);
+      throw new Error(
+        `Cannot create directory ${current}: path exists and is not a directory.`,
+      );
     }
 
     await php.mkdir(current);
@@ -40,7 +42,10 @@ export async function readJsonFile(php, path) {
 }
 
 export async function writeJsonFile(php, path, value) {
-  await php.writeFile(path, textEncoder.encode(`${JSON.stringify(value, null, 2)}\n`));
+  await php.writeFile(
+    path,
+    textEncoder.encode(`${JSON.stringify(value, null, 2)}\n`),
+  );
 }
 
 export { resolveBootstrapArchive };

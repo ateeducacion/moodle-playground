@@ -1,0 +1,101 @@
+{
+  "$schema": "./assets/blueprints/blueprint-schema.json",
+  "preferredVersions": {
+    "php": "8.3",
+    "moodle": "5.0"
+  },
+  "landingPage": "/my/",
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com",
+    "SITE_NAME": "Moodle Playground"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "{{SITE_NAME}}",
+        "locale": "en",
+        "timezone": "UTC"
+      }
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "installMoodlePlugin",
+      "pluginType": "block",
+      "pluginName": "participants",
+      "url": "https://github.com/moodlehq/moodle-block_participants/archive/refs/heads/master.zip"
+    },
+    {
+      "step": "installMoodlePlugin",
+      "pluginType": "local",
+      "pluginName": "staticpage",
+      "url": "https://github.com/moodle-an-hochschulen/moodle-local_staticpage/archive/refs/heads/MOODLE_404_STABLE.zip"
+    },
+    {
+      "step": "createCategory",
+      "name": "Sample Courses"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Getting Started with Moodle",
+      "shortname": "INTRO101",
+      "category": "Sample Courses",
+      "summary": "An introductory course created by the sample blueprint."
+    },
+    {
+      "step": "createUsers",
+      "users": [
+        {
+          "username": "teacher1",
+          "password": "Teacher1!",
+          "email": "teacher1@example.com",
+          "firstname": "Jane",
+          "lastname": "Teacher"
+        },
+        {
+          "username": "student1",
+          "password": "Student1!",
+          "email": "student1@example.com",
+          "firstname": "Alex",
+          "lastname": "Student"
+        }
+      ]
+    },
+    {
+      "step": "enrolUsers",
+      "enrolments": [
+        { "username": "{{ADMIN_USER}}", "course": "INTRO101", "role": "editingteacher" },
+        { "username": "teacher1", "course": "INTRO101", "role": "editingteacher" },
+        { "username": "student1", "course": "INTRO101", "role": "student" }
+      ]
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "INTRO101",
+      "section": 1,
+      "name": "Welcome",
+      "intro": "<h3>Welcome!</h3><p>This is a sample course created via a Moodle Playground blueprint.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "assign",
+      "course": "INTRO101",
+      "section": 1,
+      "name": "First Assignment",
+      "intro": "Submit a short introduction about yourself."
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/my/"
+    }
+  ]
+}

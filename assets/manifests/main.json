@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-03-16T17:42:18.698Z",
+  "generatedAt": "2026-03-16T22:05:46.855Z",
   "channel": "main",
   "release": "5.2dev (Build: 20260306)",
   "runtimeVersion": "0.0.9-alpha-32",
@@ -11,8 +11,8 @@
     "format": "zip",
     "path": "../moodle/main/moodle-core-5.2dev__Build__20260306_.zip",
     "fileName": "moodle-core-5.2dev__Build__20260306_.zip",
-    "size": 240435205,
-    "sha256": "d5121f0f3371c10e87ff587b6f6ab7f0cc26d40abcb41872a6a37e0e064a45e3",
+    "size": 240435215,
+    "sha256": "19f007a89895f45169a6dc5b0754c8c829fbaec29a6b55bf49a66e5304a157e0",
     "fileCount": 61579
   },
   "vfs": {
@@ -21,14 +21,14 @@
     "data": {
       "path": "../moodle/main/moodle-core-5.2dev__Build__20260306_.vfs.bin",
       "fileName": "moodle-core-5.2dev__Build__20260306_.vfs.bin",
-      "size": 533503251,
-      "sha256": "6ff3b827fbd53e766896050b5d6c6f26ca22acb57ce90fbe12c61020cc44638a"
+      "size": 533503577,
+      "sha256": "851bedfaec2c3a8ae2762bb5c0438f1c9c2b9698d270a0fbe3f89577516f99a4"
     },
     "index": {
       "path": "../moodle/main/moodle-core-5.2dev__Build__20260306_.vfs.index.json",
       "fileName": "moodle-core-5.2dev__Build__20260306_.vfs.index.json",
       "size": 12131651,
-      "sha256": "d665bfeeefece1d35ae30470c38e86bb7ed3e98be4bfaa0c7653093b2df7721f"
+      "sha256": "cb078532e23f04f7797bdb2c8546757f30acca4dfd8752aba5b0875c98442fc0"
     },
     "fileCount": 61579
   },
@@ -36,6 +36,6 @@
     "path": "../moodle/main/snapshot/install.sq3",
     "fileName": "install.sq3",
     "size": 8007680,
-    "sha256": "496226a786a9bdd530303bde5ac17bdf2bf66459514d5c253329be8c265bc1cb"
+    "sha256": "7ff3a6a24cadaafa56403efd383762c4ac2de1170cf6a4d27b8cec36c767a34b"
   }
 }

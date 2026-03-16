@@ -41,11 +41,23 @@ src/
     php-loader.js      # PHP instance creation
     php-compat.js      # WP Playground API compatibility
     config-template.js # config.php generator
+  blueprint/           # Step-based blueprint system
+    index.js           # Public re-exports
+    parser.js          # JSON / base64 / data-URL parsing
+    schema.js          # Hand-written validator
+    constants.js       # {{KEY}} placeholder substitution
+    resources.js       # Named resource registry
+    resolver.js        # Blueprint source resolution
+    executor.js        # Sequential step runner
+    storage.js         # sessionStorage persistence
+    steps/             # Step handlers (filesystem, Moodle API, etc.)
+    php/helpers.js     # PHP code generators for Moodle API calls
   shared/              # Shared utilities
   styles/app.css       # App stylesheet
 patches/moodle/        # Build-time Moodle patches
 scripts/               # Build and utility scripts
-assets/blueprints/     # Blueprint definitions
+assets/blueprints/     # Blueprint definitions and examples
+tests/blueprint/       # Blueprint unit tests
 docs/                  # Documentation (this site)
 ```
 
@@ -65,6 +77,16 @@ mkdocs serve
 # Build for production
 mkdocs build --strict
 ```
+
+## Tests
+
+### Blueprint tests
+
+```bash
+npm run test:blueprint
+```
+
+Runs 49 unit tests covering the parser, schema validator, constants, resources, executor, resolver, and step registry.
 
 ## Manual validation
 

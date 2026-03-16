@@ -1,4 +1,4 @@
-import { loadActiveBlueprint } from "../shared/blueprint.js";
+import { loadBlueprint } from "../blueprint/index.js";
 import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
@@ -109,7 +109,10 @@ async function registerRuntimeServiceWorker(scopeId, runtimeId, config) {
   }
 
   const swUrl = new URL("../../sw.js", import.meta.url);
-  swUrl.searchParams.set("v", buildServiceWorkerVersionToken(config.bundleVersion, scopeId, runtimeId));
+  swUrl.searchParams.set(
+    "v",
+    buildServiceWorkerVersionToken(config.bundleVersion, scopeId, runtimeId),
+  );
   swUrl.searchParams.set("scope", scopeId);
   swUrl.searchParams.set("runtime", runtimeId);
 
@@ -142,7 +145,11 @@ async function resetOpfsStorage() {
   }
 }
 
-async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOverlay = false }) {
+async function resetRuntimeIndexedDb({
+  scopeId,
+  runtimeId,
+  includePersistentOverlay = false,
+}) {
   let cleared = false;
 
   // Clear OPFS persistent storage (used by @php-wasm/web mount handler)
@@ -170,8 +177,11 @@ async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOver
       continue;
     }
 
-    const isCurrentRuntimeDb = runtimeStorageMarkers.some((fragment) => name.includes(fragment));
-    const isPersistentOverlay = includePersistentOverlay && (name === "/persist" || name === "/config");
+    const isCurrentRuntimeDb = runtimeStorageMarkers.some((fragment) =>
+      name.includes(fragment),
+    );
+    const isPersistentOverlay =
+      includePersistentOverlay && (name === "/persist" || name === "/config");
 
     if (!isCurrentRuntimeDb && !isPersistentOverlay) {
       continue;
@@ -184,7 +194,10 @@ async function resetRuntimeIndexedDb({ scopeId, runtimeId, includePersistentOver
   return cleared;
 }
 
-async function resetRuntimeCaching(bundleVersion, { scopeId, runtimeId, includePersistentOverlay = false } = {}) {
+async function resetRuntimeCaching(
+  bundleVersion,
+  { scopeId, runtimeId, includePersistentOverlay = false } = {},
+) {
   const resetKey = `${SW_RESET_KEY_PREFIX}:${bundleVersion}:${scopeId}:${runtimeId}:${includePersistentOverlay ? "full" : "soft"}`;
   if (window.sessionStorage.getItem(resetKey) === "1") {
     return false;
@@ -230,17 +243,23 @@ async function waitForServiceWorkerControl() {
         reject(new Error("Timed out waiting for service worker control."));
       }, 10000);
 
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        window.clearTimeout(timeoutId);
-        resolve();
-      }, { once: true });
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => {
+          window.clearTimeout(timeoutId);
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 }
 
 function ensureRemoteServiceWorkerControl(scopeId, runtimeId) {
   if (navigator.serviceWorker.controller) {
-    window.sessionStorage.removeItem(`${CONTROL_RELOAD_KEY_PREFIX}:${scopeId}:${runtimeId}`);
+    window.sessionStorage.removeItem(
+      `${CONTROL_RELOAD_KEY_PREFIX}:${scopeId}:${runtimeId}`,
+    );
     return false;
   }
 
@@ -257,7 +276,11 @@ function ensureRemoteServiceWorkerControl(scopeId, runtimeId) {
 async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
   await new Promise((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
-      reject(new Error(`Timed out while waiting for php-worker readiness for ${runtimeId}.`));
+      reject(
+        new Error(
+          `Timed out while waiting for php-worker readiness for ${runtimeId}.`,
+        ),
+      );
     }, 15000);
 
     const onWorkerMessage = (event) => {
@@ -265,7 +288,9 @@ async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
       if (message?.kind === "worker-startup-error") {
         window.clearTimeout(timeoutId);
         worker.removeEventListener("message", onWorkerMessage);
-        reject(new Error(message.detail || "php-worker failed during startup."));
+        reject(
+          new Error(message.detail || "php-worker failed during startup."),
+        );
         return;
       }
 
@@ -304,7 +329,10 @@ function emitNavigation(scopeId, runtimeId, href) {
 }
 
 function buildEntryUrl(scopeId, runtimeId, path) {
-  return new URL(buildScopedSitePath(scopeId, runtimeId, path), window.location.origin);
+  return new URL(
+    buildScopedSitePath(scopeId, runtimeId, path),
+    window.location.origin,
+  );
 }
 
 function finalizeFrameReady(scopeId, runtimeId) {
@@ -361,12 +389,19 @@ function isFrameDocumentStalled() {
       return false;
     }
 
-    if (!frameWindow.location.href || frameWindow.location.href === "about:blank") {
+    if (
+      !frameWindow.location.href ||
+      frameWindow.location.href === "about:blank"
+    ) {
       return false;
     }
 
     const bodyHtml = frameDocument.body?.innerHTML || "";
-    return frameDocument.readyState === "loading" && bodyHtml.trim() === "" && Boolean(frameDocument.title);
+    return (
+      frameDocument.readyState === "loading" &&
+      bodyHtml.trim() === "" &&
+      Boolean(frameDocument.title)
+    );
   } catch {
     return false;
   }
@@ -401,7 +436,12 @@ function startFrameWatch(scopeId, runtimeId) {
   }, 150);
 }
 
-function navigateFrame(scopeId, runtimeId, path, { reload = false, force = false } = {}) {
+function navigateFrame(
+  scopeId,
+  runtimeId,
+  path,
+  { reload = false, force = false } = {},
+) {
   const entryUrl = buildEntryUrl(scopeId, runtimeId, path);
   const entryHref = entryUrl.toString();
 
@@ -473,15 +513,19 @@ async function bootstrapRemote() {
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
-  const blueprint = loadActiveBlueprint(scopeId);
-  const runtime = config.runtimes.find((entry) => entry.id === requestedRuntimeId) || getDefaultRuntime(config);
+  const blueprint = loadBlueprint(scopeId);
+  const runtime =
+    config.runtimes.find((entry) => entry.id === requestedRuntimeId) ||
+    getDefaultRuntime(config);
   setOverlayVisible(true);
 
-  if (await resetRuntimeCaching(config.bundleVersion, {
-    scopeId,
-    runtimeId: runtime.id,
-    includePersistentOverlay: cleanBoot,
-  })) {
+  if (
+    await resetRuntimeCaching(config.bundleVersion, {
+      scopeId,
+      runtimeId: runtime.id,
+      includePersistentOverlay: cleanBoot,
+    })
+  ) {
     window.location.reload();
     return;
   }
@@ -501,7 +545,10 @@ async function bootstrapRemote() {
   setRemoteProgress("Service Worker ready and controlling this tab.");
 
   if (!phpWorker) {
-    const workerUrl = new URL("../../dist/php-worker.bundle.js", import.meta.url);
+    const workerUrl = new URL(
+      "../../dist/php-worker.bundle.js",
+      import.meta.url,
+    );
     workerUrl.searchParams.set("scope", scopeId);
     workerUrl.searchParams.set("runtime", runtime.id);
     if (phpVersion) {
@@ -551,7 +598,11 @@ async function bootstrapRemote() {
     }
   });
 
-  const workerReadyPromise = waitForPhpWorkerReady(scopeId, runtime.id, phpWorker);
+  const workerReadyPromise = waitForPhpWorkerReady(
+    scopeId,
+    runtime.id,
+    phpWorker,
+  );
   phpWorker.postMessage({
     kind: "configure-blueprint",
     blueprint,

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  createWriteStream,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 function parseArgs(argv) {
@@ -31,8 +38,9 @@ function listFiles(rootDir) {
   const files = [];
 
   function walk(currentDir) {
-    const entries = readdirSync(currentDir, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
+    const entries = readdirSync(currentDir, { withFileTypes: true }).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    );
 
     for (const entry of entries) {
       const absolutePath = join(currentDir, entry.name);
@@ -61,7 +69,9 @@ async function main() {
   const indexPath = resolve(args.index || "");
 
   if (!args.source || !args.data || !args.index) {
-    throw new Error("Usage: build-vfs-image.mjs --source <dir> --data <file> --index <file>");
+    throw new Error(
+      "Usage: build-vfs-image.mjs --source <dir> --data <file> --index <file>",
+    );
   }
 
   const files = listFiles(sourceDir);
@@ -74,7 +84,10 @@ async function main() {
   let offset = 0;
 
   for (const absolutePath of files) {
-    const relativePath = relative(sourceDir, absolutePath).replaceAll("\\", "/");
+    const relativePath = relative(sourceDir, absolutePath).replaceAll(
+      "\\",
+      "/",
+    );
     const data = readFileSync(absolutePath);
     const stats = statSync(absolutePath);
 

@@ -1,46 +1,51 @@
 {
   "$schema": "./blueprint-schema.json",
-  "meta": {
-    "title": "Moodle Playground Blueprint",
-    "author": "moodle-playground",
-    "description": "Default Moodle Playground bootstrap blueprint."
-  },
   "preferredVersions": {
     "php": "8.3",
-    "moodle": "5.0",
-    "moodleBranch": "MOODLE_500_STABLE"
+    "moodle": "5.0"
   },
-  "landingPage": "/install.php?lang=en",
-  "siteOptions": {
-    "fullname": "Moodle Playground",
-    "shortname": "Playground",
-    "locale": "en",
-    "timezone": "UTC"
+  "landingPage": "/my/",
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com"
   },
-  "login": {
-    "username": "admin",
-    "password": "password",
-    "email": "admin@example.com"
-  },
-  "users": [
+  "steps": [
     {
-      "username": "admin",
-      "email": "admin@example.com",
-      "password": "password",
-      "role": "manager"
-    }
-  ],
-  "categories": [
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Moodle Playground",
+        "locale": "en",
+        "timezone": "UTC"
+      }
+    },
     {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "createCategory",
       "name": "Playground Courses"
-    }
-  ],
-  "courses": [
+    },
     {
+      "step": "createCourse",
       "fullname": "Getting Started",
       "shortname": "PLAY101",
       "category": "Playground Courses",
-      "summary": "Default course provisioned from the Moodle Playground blueprint."
+      "summary": "Welcome to Moodle Playground! This starter course is a sandbox for you to explore Moodle features — add activities, upload resources, and experiment freely. Everything resets when you close the tab."
+    },
+    {
+      "step": "enrolUser",
+      "username": "{{ADMIN_USER}}",
+      "course": "PLAY101",
+      "role": "editingteacher"
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/my/"
     }
   ]
 }

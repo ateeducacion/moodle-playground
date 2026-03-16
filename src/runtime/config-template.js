@@ -24,7 +24,8 @@ export function createMoodleConfigPhp({
   prefix,
   wwwroot,
 }) {
-  const resolvedComponentCachePath = componentCachePath || buildComponentCachePath(moodleRoot);
+  const resolvedComponentCachePath =
+    componentCachePath || buildComponentCachePath(moodleRoot);
   return `<?php
 unset($CFG);
 global $CFG;
@@ -144,21 +145,21 @@ if (!isset($_SERVER['SERVER_NAME'])) {
 // "Purge all caches" which defines IGNORE_COMPONENT_CACHE), the filesystem scan in
 // WASM's VFS can produce an incomplete classmap. This fallback re-reads the prebuilt
 // alternative_component_cache to resolve any class that Moodle's autoloader misses.
-spl_autoload_register(function (\$class) {
-    global \$CFG;
-    static \$fallbackMap = null;
-    if (\$fallbackMap === null) {
-        \$cachefile = '${escapePhpSingleQuoted(resolvedComponentCachePath)}';
-        if (file_exists(\$cachefile)) {
-            \$cache = [];
-            include(\$cachefile);
-            \$fallbackMap = \$cache['classmap'] ?? [];
+spl_autoload_register(function ($class) {
+    global $CFG;
+    static $fallbackMap = null;
+    if ($fallbackMap === null) {
+        $cachefile = '${escapePhpSingleQuoted(resolvedComponentCachePath)}';
+        if (file_exists($cachefile)) {
+            $cache = [];
+            include($cachefile);
+            $fallbackMap = $cache['classmap'] ?? [];
         } else {
-            \$fallbackMap = [];
+            $fallbackMap = [];
         }
     }
-    if (isset(\$fallbackMap[\$class]) && file_exists(\$fallbackMap[\$class])) {
-        require_once(\$fallbackMap[\$class]);
+    if (isset($fallbackMap[$class]) && file_exists($fallbackMap[$class])) {
+        require_once($fallbackMap[$class]);
     }
 });
 
@@ -167,17 +168,18 @@ require_once('${escapePhpSingleQuoted(moodleRoot)}/lib/setup.php');
 }
 
 export const CHDIR_FIX_PATH = `${MOODLE_ROOT}/__chdir_fix.php`;
-export const CHDIR_FIX_PRELOAD_PATH = "/internal/shared/preload/moodle_chdir.php";
+export const CHDIR_FIX_PRELOAD_PATH =
+  "/internal/shared/preload/moodle_chdir.php";
 
 export function createChdirFixPhp() {
   return `<?php
 // Set cwd to the script's directory so relative paths (e.g.,
 // admin/index.php's file_exists('../config.php')) resolve correctly,
 // matching what a real web server does for CGI scripts.
-if (!empty(\$_SERVER['SCRIPT_FILENAME'])) {
-    \$dir = dirname(\$_SERVER['SCRIPT_FILENAME']);
-    if (\$dir && is_dir(\$dir)) {
-        chdir(\$dir);
+if (!empty($_SERVER['SCRIPT_FILENAME'])) {
+    $dir = dirname($_SERVER['SCRIPT_FILENAME']);
+    if ($dir && is_dir($dir)) {
+        chdir($dir);
     }
 }
 
@@ -190,31 +192,31 @@ if (!function_exists('playground_glob_polyfill_installed')) {
 
     // Rename the builtin so we can call it as fallback.
     // Since we cannot truly rename a builtin, we wrap it instead.
-    function playground_glob(string \$pattern, int \$flags = 0): array {
-        \$result = @\\glob(\$pattern, \$flags);
-        if (!empty(\$result)) {
-            return \$result;
+    function playground_glob(string $pattern, int $flags = 0): array {
+        $result = @\\glob($pattern, $flags);
+        if (!empty($result)) {
+            return $result;
         }
         // Fallback: scandir + fnmatch (works on Emscripten VFS).
-        \$dir = dirname(\$pattern);
-        \$mask = basename(\$pattern);
-        \$entries = @scandir(\$dir);
-        if (\$entries === false) {
+        $dir = dirname($pattern);
+        $mask = basename($pattern);
+        $entries = @scandir($dir);
+        if ($entries === false) {
             return [];
         }
-        \$matched = [];
-        foreach (\$entries as \$entry) {
-            if (\$entry === '.' || \$entry === '..') {
+        $matched = [];
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
                 continue;
             }
-            if (fnmatch(\$mask, \$entry)) {
-                \$matched[] = \$dir . '/' . \$entry;
+            if (fnmatch($mask, $entry)) {
+                $matched[] = $dir . '/' . $entry;
             }
         }
-        sort(\$matched);
-        return (\$flags & GLOB_ONLYDIR)
-            ? array_filter(\$matched, 'is_dir')
-            : \$matched;
+        sort($matched);
+        return ($flags & GLOB_ONLYDIR)
+            ? array_filter($matched, 'is_dir')
+            : $matched;
     }
 }
 `;
@@ -228,18 +230,18 @@ if (!function_exists('playground_glob_polyfill_installed')) {
 export function createPhpIniEntries({ timezone = "UTC" } = {}) {
   return {
     "date.timezone": timezone,
-    "display_errors": "0",
-    "display_startup_errors": "0",
-    "error_reporting": "32759", // E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
-    "html_errors": "0",
-    "log_errors": "1",
+    display_errors: "0",
+    display_startup_errors: "0",
+    error_reporting: "32759", // E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
+    html_errors: "0",
+    log_errors: "1",
     // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
-    "max_input_vars": "5000",
-    "memory_limit": "512M",
-    "post_max_size": "128M",
-    "upload_max_filesize": "128M",
-    "sys_temp_dir": TEMP_ROOT,
-    "upload_tmp_dir": TEMP_ROOT,
+    max_input_vars: "5000",
+    memory_limit: "512M",
+    post_max_size: "128M",
+    upload_max_filesize: "128M",
+    sys_temp_dir: TEMP_ROOT,
+    upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
     "session.save_path": `${TEMP_ROOT}/sessions`,
   };
