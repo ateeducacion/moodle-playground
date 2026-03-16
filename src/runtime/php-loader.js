@@ -2,6 +2,7 @@ import { PHP, __private__dont__use, setPhpIniEntries } from "@php-wasm/universal
 import { loadWebRuntime } from "@php-wasm/web";
 import { MOODLE_ROOT, createPhpIniEntries, createChdirFixPhp, CHDIR_FIX_PRELOAD_PATH } from "./config-template.js";
 import { wrapPhpInstance } from "./php-compat.js";
+import { DEFAULT_PHP_VERSION } from "../shared/version-resolver.js";
 
 const PERSIST_ROOT = "/persist";
 const TEMP_ROOT = "/tmp/moodle";
@@ -13,7 +14,8 @@ const TEMP_ROOT = "/tmp/moodle";
  * - Call refresh() to initialize the runtime (loads WASM)
  * - Then use request(), writeFile(), readFile(), etc.
  */
-export function createPhpRuntime(_runtime, { appBaseUrl } = {}) {
+export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion } = {}) {
+  const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   let wrapped = null;
 
   const deferred = {
@@ -21,7 +23,7 @@ export function createPhpRuntime(_runtime, { appBaseUrl } = {}) {
      * Initialize the PHP runtime. Must be called before any other method.
      */
     async refresh() {
-      const runtimeId = await loadWebRuntime("8.3", {
+      const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
         withIntl: true,
       });
       const php = new PHP(runtimeId);
@@ -77,12 +79,13 @@ export function createPhpRuntime(_runtime, { appBaseUrl } = {}) {
 /**
  * Create a lightweight PHP runtime for provisioning tasks (phpinfo capture).
  */
-export function createProvisioningRuntime(_runtime) {
+export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
+  const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   let wrapped = null;
 
   const deferred = {
     async refresh() {
-      const runtimeId = await loadWebRuntime("8.3", {
+      const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
         withIntl: true,
       });
       const php = new PHP(runtimeId);

@@ -456,6 +456,74 @@ button.danger {
   }
 }
 
+.settings-value {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.settings-modal {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: var(--shadow);
+}
+
+.settings-modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.settings-modal__content {
+  padding: 28px;
+  display: grid;
+  gap: 20px;
+}
+
+.settings-modal__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.settings-modal__field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-modal__field span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.settings-modal__field select {
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #26344b;
+  color: var(--ink);
+  font: inherit;
+}
+
+.settings-modal__warning {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(249, 128, 18, 0.1);
+  border: 1px solid rgba(249, 128, 18, 0.25);
+  color: var(--accent-strong);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.settings-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 @media (max-width: 1080px) {
   .workspace {
     grid-template-columns: 1fr;

@@ -1,9 +1,11 @@
 PORT ?= 8080
 LOCAL_PORT ?= 8081
 LOCAL_PHP ?= php84
-CHANNEL ?= stable500
+PHP_BIN ?= /opt/homebrew/opt/php@8.3/bin/php
+export PHP_BIN
 
-.PHONY: deps build-worker bundle prepare serve up up-local clean reset
+.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset
+.PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
 	npm install
@@ -11,8 +13,28 @@ deps:
 build-worker:
 	npm run build:worker
 
-bundle:
-	CHANNEL=$(CHANNEL) npm run bundle
+# Build all branches (default)
+bundle: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
+
+# Legacy single-branch build via CHANNEL (backward compat)
+bundle-legacy:
+	CHANNEL=stable500 npm run bundle
+
+# Per-branch bundle targets
+bundle-MOODLE_404_STABLE:
+	BRANCH=MOODLE_404_STABLE npm run bundle
+
+bundle-MOODLE_405_STABLE:
+	BRANCH=MOODLE_405_STABLE npm run bundle
+
+bundle-MOODLE_500_STABLE:
+	BRANCH=MOODLE_500_STABLE npm run bundle
+
+bundle-MOODLE_501_STABLE:
+	BRANCH=MOODLE_501_STABLE npm run bundle
+
+bundle-main:
+	BRANCH=main npm run bundle
 
 prepare: deps build-worker bundle
 
@@ -28,6 +50,8 @@ clean:
 	rm -rf .cache
 	rm -rf assets/moodle
 	rm -f assets/manifests/latest.json
+	rm -f assets/manifests/MOODLE_*.json
+	rm -f assets/manifests/main.json
 	touch assets/manifests/.gitkeep
 
 reset: clean

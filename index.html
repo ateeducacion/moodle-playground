@@ -38,6 +38,9 @@
         <div class="browser-toolbar__actions">
           <button type="button" id="home-button" class="toolbar-link">Home</button>
           <button type="button" id="admin-button" class="toolbar-link">Admin</button>
+          <button type="button" id="settings-button" class="icon-button" aria-label="Open settings" title="Settings">
+            <span aria-hidden="true">&#9881;</span>
+          </button>
           <button type="button" id="panel-toggle-button" class="icon-button" aria-label="Open settings panel" aria-expanded="false" title="Open settings panel">
             <span aria-hidden="true">☰</span>
           </button>
@@ -65,6 +68,15 @@
           </div>
 
           <section id="settings-panel" class="side-panel__content" role="tabpanel" aria-labelledby="settings-tab" data-panel-view="settings">
+            <div class="settings-field">
+              <span>Moodle version</span>
+              <span id="current-moodle-label" class="settings-value">-</span>
+            </div>
+            <div class="settings-field">
+              <span>PHP version</span>
+              <span id="current-php-label" class="settings-value">-</span>
+            </div>
+
             <label class="settings-field">
               <span>PHP runtime</span>
               <select id="runtime-select"></select>
@@ -127,6 +139,31 @@
         </aside>
       </div>
     </div>
+
+    <dialog id="settings-modal" class="settings-modal">
+      <div class="settings-modal__content">
+        <h2 class="settings-modal__title">Playground Settings</h2>
+
+        <label class="settings-modal__field">
+          <span>Moodle Version</span>
+          <select id="settings-moodle-version"></select>
+        </label>
+
+        <label class="settings-modal__field">
+          <span>PHP Version</span>
+          <select id="settings-php-version"></select>
+        </label>
+
+        <div class="settings-modal__warning">
+          Applying new settings will reset the Moodle site to its initial state. All current data will be lost.
+        </div>
+
+        <div class="settings-modal__actions">
+          <button type="button" id="settings-cancel">Cancel</button>
+          <button type="button" id="settings-apply" class="danger">Apply Settings &amp; Reset Playground</button>
+        </div>
+      </div>
+    </dialog>
 
     <script type="module" src="./src/shell/main.js"></script>
   </body>

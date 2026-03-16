@@ -3,12 +3,14 @@ import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   ADMIN_DIRECTORY,
   COMPONENT_CACHE_PATH,
+  buildComponentCachePath,
   createMoodleConfigPhp,
   MOODLEDATA_ROOT,
   MOODLE_ROOT,
   TEMP_ROOT,
 } from "./config-template.js";
-import { buildManifestState } from "./manifest.js";
+import { buildManifestState, resolveManifestUrl } from "./manifest.js";
+import { getBranchMetadata, DEFAULT_MOODLE_BRANCH } from "../shared/version-resolver.js";
 import {
   ensureDir,
   readJsonFile,
@@ -1079,20 +1081,35 @@ async function prepareMoodleRuntime({
   return { shouldMountArchive };
 }
 
-async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish }) {
-  const snapshotUrl = new URL("./assets/moodle/snapshot/install.sq3", appBaseUrl);
+async function loadInstallSnapshot(php, { dbFile, appBaseUrl, publish, moodleBranch }) {
+  const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const meta = getBranchMetadata(branch);
+
+  // Try branch-specific snapshot first, then fall back to legacy path
+  const snapshotPaths = [];
+  if (meta) {
+    snapshotPaths.push(`assets/moodle/${meta.snapshotDir}/install.sq3`);
+  }
+  snapshotPaths.push("assets/moodle/snapshot/install.sq3");
+
   publish("Downloading pre-installed database snapshot.", 0.87);
 
   let response;
-  try {
-    response = await fetch(snapshotUrl);
-  } catch {
-    publish("Snapshot fetch failed (network error), falling back to full install.", 0.875);
-    return false;
+  for (const snapshotPath of snapshotPaths) {
+    const snapshotUrl = new URL(`./${snapshotPath}`, appBaseUrl);
+    try {
+      response = await fetch(snapshotUrl);
+      if (response.ok) {
+        break;
+      }
+      response = null;
+    } catch {
+      response = null;
+    }
   }
 
-  if (!response.ok) {
-    publish(`Snapshot not available (HTTP ${response.status}), falling back to full install.`, 0.875);
+  if (!response || !response.ok) {
+    publish("Snapshot not available, falling back to full install.", 0.875);
     return false;
   }
 
@@ -1217,11 +1234,14 @@ export async function bootstrapMoodle({
   scopeId,
   appBaseUrl,
   origin,
+  moodleBranch,
 }) {
   const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
   const effectiveConfig = buildEffectivePlaygroundConfig(config, blueprint);
+  const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const branchMeta = getBranchMetadata(resolvedBranch);
   const tArchive = performance.now();
-  const manifestUrl = new URL("./assets/manifests/latest.json", appBaseUrl || self.location.href).toString();
+  const manifestUrl = await resolveManifestUrl(resolvedBranch, appBaseUrl || self.location.href);
   let archive = await resolveBootstrapArchive({
     manifestUrl,
   }, ({ ratio, cached, phase, detail }) => {
@@ -1379,6 +1399,7 @@ export async function bootstrapMoodle({
       dbFile,
       appBaseUrl: appBaseUrl || origin,
       publish,
+      moodleBranch: resolvedBranch,
     });
 
     if (snapshotLoaded) {

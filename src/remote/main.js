@@ -469,6 +469,8 @@ async function bootstrapRemote() {
   const requestedRuntimeId = url.searchParams.get("runtime");
   const requestedPath = url.searchParams.get("path") || "/";
   const cleanBoot = url.searchParams.get("clean") === "1";
+  const phpVersion = url.searchParams.get("phpVersion") || null;
+  const moodleBranch = url.searchParams.get("moodleBranch") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   const blueprint = loadActiveBlueprint(scopeId);
@@ -502,6 +504,12 @@ async function bootstrapRemote() {
     const workerUrl = new URL("../../dist/php-worker.bundle.js", import.meta.url);
     workerUrl.searchParams.set("scope", scopeId);
     workerUrl.searchParams.set("runtime", runtime.id);
+    if (phpVersion) {
+      workerUrl.searchParams.set("phpVersion", phpVersion);
+    }
+    if (moodleBranch) {
+      workerUrl.searchParams.set("moodleBranch", moodleBranch);
+    }
     phpWorker = new Worker(workerUrl, { type: "module" });
     phpWorker.addEventListener("error", (event) => {
       const parts = [

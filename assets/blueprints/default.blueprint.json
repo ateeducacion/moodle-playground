@@ -7,7 +7,8 @@
   },
   "preferredVersions": {
     "php": "8.3",
-    "moodle": "5.0.x"
+    "moodle": "5.0",
+    "moodleBranch": "MOODLE_500_STABLE"
   },
   "landingPage": "/install.php?lang=en",
   "siteOptions": {

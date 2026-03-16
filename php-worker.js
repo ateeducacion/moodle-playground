@@ -9,6 +9,8 @@ const workerUrl = new URL(self.location.href);
 const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL("./", self.location.href).toString();
 const scopeId = workerUrl.searchParams.get("scope");
 const runtimeId = workerUrl.searchParams.get("runtime");
+const phpVersion = workerUrl.searchParams.get("phpVersion") || null;
+const moodleBranch = workerUrl.searchParams.get("moodleBranch") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
@@ -39,7 +41,7 @@ async function capturePhpInfoHtml(runtimeConfig, reason = "manual") {
   }
 
   phpInfoCapturePromise = (async () => {
-    const php = createProvisioningRuntime(runtimeConfig);
+    const php = createProvisioningRuntime(runtimeConfig, { phpVersion });
 
     try {
       await php.refresh();
@@ -157,7 +159,7 @@ async function getRuntimeState() {
 
     const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
     activeRuntimeConfig = runtime;
-    const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl });
+    const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl, phpVersion });
 
     postShell({
       kind: "progress",
@@ -199,6 +201,7 @@ async function getRuntimeState() {
         runtimeId,
         scopeId,
         origin: self.location.origin,
+        moodleBranch,
       });
     } catch (error) {
       await publishPhpInfo(runtime, "bootstrap-error");
