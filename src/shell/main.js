@@ -21,7 +21,6 @@ import {
 const els = {
   addressForm: document.querySelector("#address-form"),
   address: document.querySelector("#address-input"),
-  adminButton: document.querySelector("#admin-button"),
   blueprintPanel: document.querySelector("#blueprint-panel"),
   blueprintTab: document.querySelector("#blueprint-tab"),
   blueprintTextarea: document.querySelector("#blueprint-textarea"),
@@ -30,29 +29,28 @@ const els = {
   exportButton: document.querySelector("#export-button"),
   importInput: document.querySelector("#import-input"),
   frame: document.querySelector("#site-frame"),
-  homeButton: document.querySelector("#home-button"),
   logPanel: document.querySelector("#log-panel"),
   logsPanel: document.querySelector("#logs-panel"),
   logsTab: document.querySelector("#logs-tab"),
   panelToggle: document.querySelector("#panel-toggle-button"),
-  phpInfoButton: document.querySelector("#phpinfo-button"),
   phpInfoFrame: document.querySelector("#phpinfo-frame"),
   phpInfoPanel: document.querySelector("#phpinfo-panel"),
   phpInfoTab: document.querySelector("#phpinfo-tab"),
   refreshPhpInfoButton: document.querySelector("#refresh-phpinfo-button"),
   refresh: document.querySelector("#refresh-button"),
   reset: document.querySelector("#reset-button"),
-  runtime: document.querySelector("#runtime-select"),
   settingsButton: document.querySelector("#settings-button"),
-  settingsModal: document.querySelector("#settings-modal"),
+  settingsPopover: document.querySelector("#settings-popover"),
+  settingsOverlay: document.querySelector("#settings-overlay"),
   settingsMoodleVersion: document.querySelector("#settings-moodle-version"),
   settingsPhpVersion: document.querySelector("#settings-php-version"),
   settingsApply: document.querySelector("#settings-apply"),
   settingsCancel: document.querySelector("#settings-cancel"),
   currentMoodleLabel: document.querySelector("#current-moodle-label"),
   currentPhpLabel: document.querySelector("#current-php-label"),
-  settingsPanel: document.querySelector("#settings-panel"),
-  settingsTab: document.querySelector("#settings-tab"),
+  currentRuntimeLabel: document.querySelector("#current-runtime-label"),
+  infoPanel: document.querySelector("#info-panel"),
+  infoTab: document.querySelector("#info-tab"),
   sidePanel: document.querySelector("#side-panel"),
   workspace: document.querySelector("#workspace"),
 };
@@ -92,11 +90,7 @@ function appendLog(message, isError = false) {
 function setUiLocked(locked) {
   uiLocked = locked;
   els.address.disabled = locked;
-  els.homeButton.disabled = locked;
-  els.adminButton.disabled = locked;
-  els.phpInfoButton.disabled = locked;
   els.refreshPhpInfoButton.disabled = locked;
-  els.runtime.disabled = locked;
   els.reset.disabled = locked;
   els.exportButton.disabled = locked;
   els.importInput.disabled = locked;
@@ -203,14 +197,6 @@ function restartRuntime() {
   void updateFrame();
 }
 
-function navigateHome() {
-  navigateWithinRuntime("/my/");
-}
-
-function navigateAdmin() {
-  navigateWithinRuntime("/admin/search.php");
-}
-
 function setPhpInfoContent(html = "") {
   latestPhpInfoHtml = typeof html === "string" ? html : "";
   if (!els.phpInfoFrame) {
@@ -241,11 +227,10 @@ function capturePhpInfoViaWorker(reason = "manual") {
 
   appendLog(`Requesting PHP runtime diagnostics (${reason}).`);
 
-  // Send capture request to the remote iframe, which forwards it to the worker.
+  // Send capture request through the site iframe (remote.html), which forwards it to the worker.
   // The worker will respond via BroadcastChannel with a "phpinfo" message.
-  const remoteFrame = document.querySelector("#remote-frame");
-  if (remoteFrame?.contentWindow) {
-    remoteFrame.contentWindow.postMessage({ kind: "capture-phpinfo" }, "*");
+  if (els.frame?.contentWindow) {
+    els.frame.contentWindow.postMessage({ kind: "capture-phpinfo" }, "*");
   } else {
     appendLog("Cannot capture PHP info: remote frame not available.", true);
   }
@@ -256,7 +241,7 @@ function setActivePanel(panel) {
     phpinfo: [els.phpInfoPanel, els.phpInfoTab],
     blueprint: [els.blueprintPanel, els.blueprintTab],
     logs: [els.logsPanel, els.logsTab],
-    settings: [els.settingsPanel, els.settingsTab],
+    info: [els.infoPanel, els.infoTab],
   };
 
   for (const [panelName, [panelEl, tabEl]] of Object.entries(panels)) {
@@ -309,7 +294,6 @@ async function importPayload(file) {
     currentRuntimeId = imported.runtimeId || currentRuntimeId;
     currentPath = imported.path || "/";
     els.address.value = currentPath;
-    els.runtime.value = currentRuntimeId;
     saveState({ importedAt: new Date().toISOString() });
     await updateFrame();
     return;
@@ -441,27 +425,42 @@ function updateCurrentVersionLabels() {
   if (els.currentPhpLabel) {
     els.currentPhpLabel.textContent = `PHP ${currentPhpVersion}`;
   }
+  if (els.currentRuntimeLabel) {
+    els.currentRuntimeLabel.textContent = currentRuntimeId;
+  }
 }
 
-function openSettingsModal() {
-  if (!els.settingsModal) {
+function openSettingsPopover() {
+  if (!els.settingsPopover) {
     return;
   }
   populateSettingsModal();
-  els.settingsModal.showModal();
+  els.settingsPopover.classList.add("is-open");
+  els.settingsOverlay.classList.add("is-open");
+  els.settingsOverlay.setAttribute("aria-hidden", "false");
+  els.settingsButton.setAttribute("aria-expanded", "true");
+  // Focus the first select for keyboard users
+  const firstInput = els.settingsPopover.querySelector("select");
+  if (firstInput) {
+    firstInput.focus();
+  }
 }
 
-function closeSettingsModal() {
-  if (!els.settingsModal) {
+function closeSettingsPopover() {
+  if (!els.settingsPopover) {
     return;
   }
-  els.settingsModal.close();
+  els.settingsPopover.classList.remove("is-open");
+  els.settingsOverlay.classList.remove("is-open");
+  els.settingsOverlay.setAttribute("aria-hidden", "true");
+  els.settingsButton.setAttribute("aria-expanded", "false");
+  els.settingsButton.focus();
 }
 
 function applySettingsAndReset() {
   const newBranch = els.settingsMoodleVersion?.value;
   const newPhp = els.settingsPhpVersion?.value;
-  closeSettingsModal();
+  closeSettingsPopover();
 
   if (newBranch === currentMoodleBranch && newPhp === currentPhpVersion) {
     return;
@@ -506,30 +505,24 @@ async function main() {
     : (previous?.path || preferredPath);
   els.address.value = currentPath;
 
-  // Populate runtime dropdown from config (backward compat) + current resolved
-  for (const runtime of config.runtimes) {
-    const option = document.createElement("option");
-    option.value = runtime.id;
-    option.textContent = runtime.label;
-    els.runtime.append(option);
-  }
-  // If current runtimeId isn't in the legacy dropdown, add it
-  if (!Array.from(els.runtime.options).some((opt) => opt.value === currentRuntimeId)) {
-    const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === currentMoodleBranch);
-    const option = document.createElement("option");
-    option.value = currentRuntimeId;
-    option.textContent = `PHP ${currentPhpVersion} / ${branchInfo ? branchInfo.label : currentMoodleBranch}`;
-    els.runtime.append(option);
-  }
-  els.runtime.value = currentRuntimeId;
   updateCurrentVersionLabels();
 
-  // Settings modal event listeners
+  // Settings popover event listeners
   if (els.settingsButton) {
-    els.settingsButton.addEventListener("click", openSettingsModal);
+    els.settingsButton.addEventListener("click", () => {
+      const isOpen = els.settingsPopover?.classList.contains("is-open");
+      if (isOpen) {
+        closeSettingsPopover();
+      } else {
+        openSettingsPopover();
+      }
+    });
+  }
+  if (els.settingsOverlay) {
+    els.settingsOverlay.addEventListener("click", closeSettingsPopover);
   }
   if (els.settingsCancel) {
-    els.settingsCancel.addEventListener("click", closeSettingsModal);
+    els.settingsCancel.addEventListener("click", closeSettingsPopover);
   }
   if (els.settingsApply) {
     els.settingsApply.addEventListener("click", applySettingsAndReset);
@@ -539,6 +532,13 @@ async function main() {
       updatePhpVersionDropdown(els.settingsMoodleVersion.value);
     });
   }
+
+  // Close popover on Escape
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.settingsPopover?.classList.contains("is-open")) {
+      closeSettingsPopover();
+    }
+  });
 
   bindShellChannel();
   bindServiceWorkerMessages();
@@ -552,12 +552,13 @@ els.refresh.addEventListener("click", () => {
   restartRuntime();
 });
 
-els.homeButton.addEventListener("click", navigateHome);
-els.adminButton.addEventListener("click", navigateAdmin);
 els.panelToggle.addEventListener("click", toggleSidePanel);
-els.settingsTab.addEventListener("click", () => setActivePanel("settings"));
+els.infoTab.addEventListener("click", () => setActivePanel("info"));
 els.logsTab.addEventListener("click", () => setActivePanel("logs"));
-els.phpInfoTab.addEventListener("click", () => setActivePanel("phpinfo"));
+els.phpInfoTab.addEventListener("click", () => {
+  setActivePanel("phpinfo");
+  capturePhpInfoViaWorker("tab-click");
+});
 els.blueprintTab.addEventListener("click", () => setActivePanel("blueprint"));
 els.clearLogs.addEventListener("click", () => {
   els.logPanel.textContent = "";
@@ -570,7 +571,6 @@ els.copyLogs.addEventListener("click", () => {
     setTimeout(() => { els.copyLogs.textContent = original; }, 1200);
   });
 });
-els.phpInfoButton.addEventListener("click", requestPhpInfoCapture);
 els.refreshPhpInfoButton.addEventListener("click", requestPhpInfoCapture);
 
 els.addressForm.addEventListener("submit", (event) => {
@@ -579,20 +579,6 @@ els.addressForm.addEventListener("submit", (event) => {
     return;
   }
   navigateWithinRuntime(els.address.value || "/");
-});
-
-els.runtime.addEventListener("change", () => {
-  if (uiLocked) {
-    return;
-  }
-  currentRuntimeId = els.runtime.value;
-  remoteFrameBooted = false;
-  setPhpInfoContent("");
-  phpInfoCapturePromise = null;
-  appendLog(`Switching runtime to ${currentRuntimeId}`);
-  saveState({ switchedAt: new Date().toISOString() });
-  serviceWorkerReady = null;
-  void updateFrame();
 });
 
 els.exportButton.addEventListener("click", exportBlueprint);
