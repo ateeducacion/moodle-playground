@@ -55,8 +55,19 @@ else
   echo "WARNING: Snapshot generation failed (exit $?) — bundle will work without it (runtime falls back to CLI install)" >&2
 fi
 
-RELEASE=$(sed -n "s/^[[:space:]]*\\\$release[[:space:]]*=[[:space:]]*'\\([^']*\\)'.*/\\1/p" "$MOODLE_DIR/version.php" | head -n 1)
+# Moodle 5.1+ moves version.php under public/
+if [ -f "$MOODLE_DIR/version.php" ]; then
+  VERSION_PHP="$MOODLE_DIR/version.php"
+elif [ -f "$MOODLE_DIR/public/version.php" ]; then
+  VERSION_PHP="$MOODLE_DIR/public/version.php"
+else
+  VERSION_PHP=""
+fi
 
+RELEASE=""
+if [ -n "$VERSION_PHP" ]; then
+  RELEASE=$(sed -n "s/^[[:space:]]*\\\$release[[:space:]]*=[[:space:]]*'\\([^']*\\)'.*/\\1/p" "$VERSION_PHP" | head -n 1)
+fi
 if [ -z "$RELEASE" ]; then
   RELEASE=$(basename "$MOODLE_DIR")
 fi

@@ -30,8 +30,12 @@ if [ -z "$OUTPUT_DIR" ]; then
   exit 1
 fi
 
-# Verify the patched SQLite driver exists in the source
-if [ ! -f "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+# Verify the patched SQLite driver exists in the source (Moodle 5.1+ uses public/ prefix)
+if [ -f "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+  PUB=""
+elif [ -f "$SOURCE_DIR/public/lib/dml/sqlite3_pdo_moodle_database.php" ]; then
+  PUB="public/"
+else
   echo "Error: Patched SQLite driver not found. Run patch-moodle-source.sh first." >&2
   exit 1
 fi

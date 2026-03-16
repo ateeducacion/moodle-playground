@@ -47,7 +47,7 @@ COMPONENTPHP="$SOURCE_DIR/${PUB}lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/${PUB}lib/setuplib.php"
 SETUPPHP="$SOURCE_DIR/${PUB}lib/setup.php"
 
-if [ -f "$DMLLIB" ] && [ -f "$SOURCE_DIR/lib/classes/exception/response_aware_exception.php" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
+if [ -f "$DMLLIB" ] && [ -f "$SOURCE_DIR/${PUB}lib/classes/exception/response_aware_exception.php" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
   python3 - "$DMLLIB" <<'PY'
 from pathlib import Path
 import sys
@@ -161,31 +161,31 @@ PY
 fi
 
 if [ -f "$PDO_SQLITE_DRIVER_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/dml"
-  cp "$PDO_SQLITE_DRIVER_PATCH" "$SOURCE_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/dml"
+  cp "$PDO_SQLITE_DRIVER_PATCH" "$SOURCE_DIR/${PUB}lib/dml/sqlite3_pdo_moodle_database.php"
 fi
 
 if [ -f "$SQLITE_GENERATOR_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/ddl"
-  cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/lib/ddl/sqlite_sql_generator.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/ddl"
+  cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/${PUB}lib/ddl/sqlite_sql_generator.php"
 fi
 
 if [ -f "$XMLIZE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib"
-  cp "$XMLIZE_PATCH" "$SOURCE_DIR/lib/xmlize.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib"
+  cp "$XMLIZE_PATCH" "$SOURCE_DIR/${PUB}lib/xmlize.php"
 fi
 
 if [ -f "$XMLDB_FILE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/xmldb"
-  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/lib/xmldb/xmldb_file.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/xmldb"
+  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/${PUB}lib/xmldb/xmldb_file.php"
 fi
 
 if [ -f "$ENCRYPTION_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/lib/classes"
-  cp "$ENCRYPTION_PATCH" "$SOURCE_DIR/lib/classes/encryption.php"
+  mkdir -p "$SOURCE_DIR/${PUB}lib/classes"
+  cp "$ENCRYPTION_PATCH" "$SOURCE_DIR/${PUB}lib/classes/encryption.php"
 fi
 
-PDO_DATABASE="$SOURCE_DIR/lib/dml/pdo_moodle_database.php"
+PDO_DATABASE="$SOURCE_DIR/${PUB}lib/dml/pdo_moodle_database.php"
 if [ -f "$PDO_DATABASE" ] && grep -q 'query_end(\$result)' "$PDO_DATABASE"; then
   python3 - "$PDO_DATABASE" <<'PY'
 from pathlib import Path
@@ -274,7 +274,7 @@ path.write_text(text, encoding="utf-8")
 PY
 fi
 
-ENVIRONMENT_XML="$SOURCE_DIR/admin/environment.xml"
+ENVIRONMENT_XML="$SOURCE_DIR/${PUB}admin/environment.xml"
 if [ -f "$ENVIRONMENT_XML" ]; then
   python3 - "$ENVIRONMENT_XML" <<'PY'
 from pathlib import Path
