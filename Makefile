@@ -1,10 +1,28 @@
 PORT ?= 8080
 LOCAL_PORT ?= 8081
 LOCAL_PHP ?= php84
-PHP_BIN ?= /opt/homebrew/opt/php@8.3/bin/php
+# Auto-detect PHP 8.3 binary: check Homebrew paths (Apple Silicon, Intel), then system php
+PHP_BIN ?= $(or \
+  $(wildcard /opt/homebrew/opt/php@8.3/bin/php),\
+  $(wildcard /usr/local/opt/php@8.3/bin/php),\
+  $(shell command -v php 2>/dev/null))
 export PHP_BIN
 
-.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset
+# Verify PHP 8.3 is available
+check-php:
+	@if [ -z "$(PHP_BIN)" ]; then \
+		echo "ERROR: No PHP binary found. Install PHP 8.3 via: brew install php@8.3"; \
+		exit 1; \
+	fi
+	@PHP_VER=$$($(PHP_BIN) -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null); \
+	if [ "$$PHP_VER" != "8.3" ]; then \
+		echo "ERROR: PHP 8.3 required but $(PHP_BIN) is PHP $$PHP_VER"; \
+		echo "Install PHP 8.3 via: brew install php@8.3"; \
+		exit 1; \
+	fi
+	@echo "Using PHP 8.3: $(PHP_BIN)"
+
+.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset check-php
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
@@ -14,7 +32,7 @@ build-worker:
 	npm run build:worker
 
 # Build all branches (default)
-bundle: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
+bundle: check-php bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 # Legacy single-branch build via CHANNEL (backward compat)
 bundle-legacy:
