@@ -199,37 +199,23 @@ Files:
 - `src/remote/main.js`
 - `src/runtime/bootstrap.js`
 
-### White iframe, but URL/title inside Moodle are correct
+### White iframe, but URL/title inside Moodle are correct — resolved
 
-Typical symptom:
+This was previously the most visible browser-side issue but has been resolved.
+The recovery watchdog in `src/remote/main.js` is still present as a safety net.
 
-- inner iframe URL is a valid Moodle page like `/login/index.php` or `/my/`
-- document title updates
-- document stays in `readyState = "loading"` with an empty body
+If this symptom reappears after changes to routing or bootstrap:
 
-Files:
+- `src/remote/main.js` — inspect `isFrameDocumentStalled()`, `scheduleFrameRecovery()`
+- `sw.js` — check HTML response rewriting
+- `src/runtime/php-compat.js` — check `$_SERVER` variable construction
 
-- `src/remote/main.js`
+### `RangeError: Array buffer allocation failed` — resolved
 
-Notes:
+This was caused by the VFS loader double-buffering (chunk buffers + full output buffer).
+Fixed by preallocating a single destination buffer when `content-length` is known.
 
-- this is the current first-render fragility point
-- the watchdog in `src/remote/main.js` is intended to force a second navigation when the document is stalled
-
-### `RangeError: Array buffer allocation failed`
-
-Likely cause:
-
-- readonly VFS bundle is large
-- loader was allocating chunk buffers and then a second full output buffer
-
-File:
-
-- `lib/moodle-loader.js`
-
-Current fix:
-
-- when `content-length` is known, the loader preallocates one destination buffer and fills it incrementally
+If this reappears after changes to the loader, inspect `lib/moodle-loader.js`.
 
 ### Warnings like `Undefined property: stdClass::$frontpage`
 

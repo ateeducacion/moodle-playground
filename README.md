@@ -1,12 +1,18 @@
 # Moodle Playground
 
-> Moodle in the browser, powered by WebAssembly. No traditional backend required.
+[Live demo](https://ateeducacion.github.io/moodle-playground/) · [Documentation](docs/) · [Blueprints](docs/blueprint-json.md)
 
-Inspired by WordPress Playground and aligned with the product shape of `omeka-s-playground`, this project runs a Moodle site entirely in the browser using `php-wasm`, `php-cgi-wasm`, Service Workers and a file-backed SQLite database. The readonly Moodle core is served from a pre-built bundle while mutable state is kept in browser persistence.
+> Run a full Moodle site in the browser — no server required.
+
+Moodle Playground runs [Moodle](https://moodle.org) entirely in the browser using WebAssembly, powered by [WordPress Playground](https://github.com/WordPress/wordpress-playground)'s `@php-wasm/web` runtime. Every page load boots a fresh Moodle instance with a pre-built SQLite snapshot — nothing is stored on disk and nothing leaves your browser.
 
 ## Getting Started
 
-### Quick start
+### Try it online
+
+Open the [live demo](https://ateeducacion.github.io/moodle-playground/) — no install needed.
+
+### Run it locally
 
 ```bash
 git clone https://github.com/ateeducacion/moodle-playground.git
@@ -14,7 +20,7 @@ cd moodle-playground
 make up
 ```
 
-Open <http://localhost:8080>.
+Then open <http://localhost:8080>.
 
 ### Prerequisites
 
@@ -23,114 +29,81 @@ Open <http://localhost:8080>.
 - Python 3
 - Git
 
-### Make targets
-
-| Command | Description |
-|---------|-------------|
-| `make up` | Install deps, prepare runtime assets, build the Moodle bundle, and serve locally |
-| `make prepare` | Install npm deps, sync browser runtime assets, and build the bundle |
-| `make bundle` | Build the Moodle bundle and manifest |
-| `make serve` | Start a static server on port 8080 |
-| `make clean` | Remove generated bundle and manifest artifacts |
-| `make reset` | Clean generated bundle artifacts and the vendored runtime |
-
 ## How It Works
 
 ```text
-index.html          Shell UI (toolbar, address bar, log panel, iframe viewport)
+index.html          Shell UI (toolbar, address bar, log panel)
   └─ remote.html    Runtime host — registers the Service Worker
-       ├─ sw.js     Intercepts requests and forwards them to the PHP worker
+       ├─ sw.js     Intercepts requests → routes to PHP worker
        └─ php-worker.js
-            └─ php-cgi-wasm (WebAssembly)
-                 ├─ Readonly Moodle core  (assets/moodle/*.vfs.*)
-                 └─ Writable overlay      (IndexedDB-backed wasm FS, config, moodledata)
+            └─ @php-wasm/web (WebAssembly, PHP 8.3)
+                 ├─ Readonly Moodle core  (pre-built VFS bundle)
+                 └─ In-memory state       (SQLite + moodledata in MEMFS)
 ```
 
-The runtime flow is deliberately similar to `omeka-s-playground`:
+1. The shell boots a scoped runtime host inside an iframe.
+2. The Service Worker intercepts all requests under `/playground/<scope>/<runtime>/…`.
+3. The PHP worker loads the readonly Moodle VFS bundle and a pre-built install snapshot.
+4. Moodle runs against an in-memory SQLite database — fully ephemeral, no persistence.
 
-1. The shell boots a scoped runtime host.
-2. The Service Worker routes requests under `/playground/<scope>/<runtime>/...`.
-3. The PHP worker loads the manifest and readonly Moodle VFS bundle.
-4. Only mutable paths such as `config.php`, `moodledata`, and runtime markers are written.
+### No persistence by design
 
-## Blueprint Support
+All state lives in memory (Emscripten MEMFS). Closing the tab destroys everything. This is intentional — the playground is meant for exploration, demos, and testing, not for storing data.
 
-Blueprints are JSON files that describe the desired state of a playground instance.
+## Blueprints
 
-A default blueprint is bundled at [`assets/blueprints/default.blueprint.json`](assets/blueprints/default.blueprint.json). You can override it by:
+Blueprints are JSON files that configure a playground instance before it boots.
 
-- Passing `?blueprint=/path/to/file.json` in the URL.
-- Importing a `.json` file from the shell panel.
+A default blueprint is bundled at [`assets/blueprints/default.blueprint.json`](assets/blueprints/default.blueprint.json). Override it by:
 
-### Blueprint scope in this repo
+- Passing `?blueprint=/path/to/file.json` in the URL
+- Importing a `.json` file from the shell toolbar
 
-The current blueprint model covers:
+Blueprints can configure:
 
-- Site title, locale and timezone
-- Admin login defaults
+- Site title, locale, and timezone
+- Admin credentials
 - Additional users
-- Starter categories
-- Starter courses
+- Categories and starter courses
 
-The schema is available at [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-schema.json).
+Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-schema.json).
 
-## Bundle and Runtime Assets
+## Development
 
-The offline pipeline generates:
+| Command | Description |
+|---------|-------------|
+| `make up` | Install deps, prepare assets, build bundle, and serve locally |
+| `make prepare` | Install npm deps and build the worker + bundle |
+| `make bundle` | Rebuild the Moodle VFS bundle and manifest |
+| `make serve` | Start a local server on port 8080 |
+| `make clean` | Remove generated bundle and manifest artifacts |
+| `make reset` | Full clean including vendored runtime assets |
 
-- `assets/moodle/*.vfs.bin`
-- `assets/moodle/*.vfs.index.json`
-- `assets/moodle/*.zip`
-- `assets/manifests/latest.json`
+### Worker bundling
 
-The browser runtime depends on vendored assets under `vendor/`, prepared via:
+The PHP worker is bundled with esbuild into `dist/php-worker.bundle.js`:
 
 ```bash
-npm run sync-browser-deps
+npm run build:worker
 ```
-
-The current runtime resolves these shared PHP libraries:
-
-- `dom`
-- `iconv`
-- `intl`
-- `libxml`
-- `simplexml`
-- `zlib`
-- `zip`
-- `mbstring`
-- `openssl`
-- `phar`
-
-Some Moodle capabilities may still require additional extensions or a custom `php-wasm` build.
-
-Migration and prototype hardening notes for the current SQLite-based runtime are documented in [`docs/sqlite-wasm-migration-notes.md`](docs/sqlite-wasm-migration-notes.md).
-Fast symptom-oriented debugging notes are documented in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
-The currently open issues and fragile areas are tracked in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## Deployment
 
-The project is designed for static hosting, including GitHub Pages.
+Designed for static hosting, including GitHub Pages. The app handles subpath deployments (e.g., `/moodle-playground`) automatically via Service Worker URL rewriting.
 
-Important runtime assumptions:
+## Technical Details
 
-- requests are routed through the Service Worker
-- the app may live under a subpath such as `/moodle-playground`
-- HTML redirects and links are rewritten to stay scoped inside the runtime iframe
+- **PHP runtime**: `@php-wasm/web` PHP 8.3 with built-in extensions (`sqlite3`, `pdo_sqlite`, `dom`, `xml`, `mbstring`, `openssl`, `intl`, `curl`, `gd`, `zip`, and more)
+- **Database**: SQLite via PDO, running from an in-memory file (MEMFS)
+- **Boot**: Pre-built install snapshot eliminates the CLI install phase
+- **Patches**: Minimal patches to Moodle core for WASM compatibility (SQLite driver, XML parsing, encryption fallback)
 
-## Current Status
+For architecture details and migration notes, see the [`docs/`](docs/) directory.
 
-What is now aligned with Omeka:
+## Contributing
 
-- same shell/remote split
-- scoped runtime routing
-- readonly bundle mounting
-- blueprint import/export flow
-- repo-level maintenance files (`AGENTS.md`, `Makefile`, `.gitignore`, `playground.config.json`)
+Contributions are welcome. See the [development docs](docs/development.md) to get started.
 
-What still needs further hardening:
+## License
 
-- full Moodle provisioning
-- reliable admin autologin
-- broader extension coverage for Moodle requirements
-- end-to-end validation of the installer/admin flow in Chromium and GitHub Pages
+See [LICENSE](LICENSE).

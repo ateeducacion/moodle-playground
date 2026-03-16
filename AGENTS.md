@@ -275,9 +275,11 @@ These areas have repeatedly caused regressions during the SQLite migration:
     `$_SERVER['SCRIPT_NAME']`. If SCRIPT_NAME lacks the base path, all redirect URLs lose
     the subpath, causing infinite redirect loops on subpath deployments.
 - `src/remote/main.js`
-  - the nested iframe can stall with a valid URL/title but an empty body
+  - historically, the nested iframe could stall with a valid URL/title but an empty body
+    (this is now resolved; the watchdog recovery code remains as a safety net)
 - `lib/moodle-loader.js`
-  - large readonly VFS downloads can trigger memory pressure if buffering is careless
+  - historically, large VFS downloads could trigger memory pressure due to double-buffer
+    allocation (this is now resolved; the loader preallocates a single destination buffer)
 - `src/runtime/bootstrap.js`
   - many install-time compatibility shims live here and are easy to break accidentally
   - **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets

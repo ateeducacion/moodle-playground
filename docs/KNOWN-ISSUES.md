@@ -14,37 +14,18 @@ For historical context, see:
 - [`sqlite-wasm-migration-notes.md`](./sqlite-wasm-migration-notes.md)
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)
 
-## 1. First render inside the nested iframe is still fragile
+## ~~1. First render inside the nested iframe is still fragile~~ — resolved
 
 Status:
 
-- open
+- **resolved**
 
-Symptom:
+This was previously the most visible issue — the inner iframe would reach a valid Moodle URL
+but the document body remained empty (white screen). The watchdog recovery logic in
+`src/remote/main.js` and improvements to the boot sequence have resolved this.
 
-- the inner iframe reaches a valid Moodle URL like `/login/index.php` or `/my/`
-- the page title updates correctly
-- the document can remain in `readyState = "loading"` with an empty body
-- visually, the iframe looks white or blank
-
-Impact:
-
-- high
-- this is currently the most visible browser-side issue after a successful bootstrap
-
-Current mitigation:
-
-- `src/remote/main.js` has a watchdog that tries to detect a stalled document and force another navigation
-
-Where to continue:
-
-- `src/remote/main.js`
-- inspect `finalizeFrameReady()`, `isFrameDocumentStalled()`, and `scheduleFrameRecovery()`
-
-Notes:
-
-- this is not the same issue as CSS failing to load
-- several times the DOM URL/title were correct while the body stayed empty
+The recovery code (`isFrameDocumentStalled()`, `scheduleFrameRecovery()`) is still present
+as a safety net but is no longer triggered during normal operation.
 
 ## 2. PHP extensions — mostly resolved
 
@@ -120,30 +101,16 @@ Where to continue:
 - Once seeded, re-enable `CACHE_DISABLE_ALL = false` for full MUC caching in MEMFS
 - The `PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE` constant is still needed
 
-## 5. Large readonly bundle still puts pressure on browser memory
+## ~~5. Large readonly bundle still puts pressure on browser memory~~ — resolved
 
 Status:
 
-- mitigated, not fully solved
+- **resolved**
 
-Symptom:
-
-- large `.vfs.bin` downloads can trigger memory pressure in some sessions
-
-What was already fixed:
-
-- `lib/moodle-loader.js` no longer keeps every chunk and then allocates a second full output buffer when `content-length` is known
-
-What is still true:
-
-- the readonly VFS image is still large
-- weaker environments may still struggle
-
-Where to continue:
-
-- `lib/moodle-loader.js`
-- bundle generation pipeline
-- evaluate smaller bundles or more segmented loading if needed
+The VFS loader in `lib/moodle-loader.js` was reworked to preallocate a single destination
+buffer when `content-length` is known and fill it incrementally, eliminating the double-buffer
+allocation that previously caused `RangeError: Array buffer allocation failed`. This is no
+longer an issue in practice.
 
 ## 6. Asset routing issues may still recur after changes to SW/CGI logic
 
@@ -195,8 +162,8 @@ Examples:
 
 If continuing work from here, the next priority should be:
 
-1. make the first render of the inner Moodle iframe deterministic
-2. keep the login/home route rendering without a manual second load
+1. ~~make the first render of the inner Moodle iframe deterministic~~ — **resolved**
+2. ~~keep the login/home route rendering without a manual second load~~ — **resolved**
 3. verify all newly-available extensions work correctly with Moodle
 4. benchmark navigation performance with caching enabled vs disabled
 5. ~~consider pre-building a post-install SQLite snapshot to skip CLI provisioning on boot~~ — **implemented**: `scripts/generate-install-snapshot.sh` creates a snapshot at build time; `bootstrap.js` loads it at runtime, falling back to the full CLI install if the snapshot is unavailable
