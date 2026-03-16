@@ -15,6 +15,7 @@ const STATIC_PREFIXES = [
   "/favicon.ico",
   "/favicon-32x32.png",
   "/apple-touch-icon.png",
+  "/logo.png",
 ];
 
 function getAppBasePath() {

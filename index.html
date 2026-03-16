@@ -26,7 +26,7 @@
         <div class="browser-toolbar__address">
           <form id="address-form" class="address-form">
             <div class="toolbar-brand" aria-label="Moodle Playground">
-              <span class="toolbar-brand__mark" aria-hidden="true">M</span>
+              <img src="logo.png" alt="Moodle Playground" class="toolbar-brand__logo">
             </div>
             <button type="button" id="refresh-button" class="icon-button" aria-label="Refresh page" title="Refresh page">
               <span aria-hidden="true">↻</span>
@@ -38,13 +38,21 @@
           </form>
         </div>
         <div class="browser-toolbar__actions">
-          <button type="button" id="home-button" class="toolbar-link">Home</button>
-          <button type="button" id="admin-button" class="toolbar-link">Admin</button>
-          <button type="button" id="settings-button" class="icon-button" aria-label="Open settings" title="Settings">
-            <span aria-hidden="true">&#9881;</span>
+          <a href="docs/" class="icon-button" aria-label="Documentation" title="Documentation" target="_blank" rel="noreferrer">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
+              <path d="M3 2.5A1.5 1.5 0 0 1 4.5 1h6.586a1 1 0 0 1 .707.293l3.414 3.414a1 1 0 0 1 .293.707V15.5A1.5 1.5 0 0 1 14 17H4.5A1.5 1.5 0 0 1 3 15.5v-13Z" stroke="currentColor" stroke-width="1.4" fill="none"/>
+              <path d="M6 9h6M6 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M11 1v3.5a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+            </svg>
+          </a>
+          <button type="button" id="panel-toggle-button" class="icon-button" aria-label="Toggle sidebar panel" aria-expanded="false" title="Toggle sidebar">
+            <svg width="18" height="16" viewBox="0 0 18 16" fill="none" aria-hidden="true" focusable="false">
+              <rect x="0.5" y="0.5" width="10" height="15" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              <rect x="13" y="0.5" width="4.5" height="15" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            </svg>
           </button>
-          <button type="button" id="panel-toggle-button" class="icon-button" aria-label="Open settings panel" aria-expanded="false" title="Open settings panel">
-            <span aria-hidden="true">☰</span>
+          <button type="button" id="settings-button" class="icon-button" aria-label="Open settings" aria-expanded="false" title="Settings">
+            <span aria-hidden="true">&#9881;</span>
           </button>
         </div>
       </header>
@@ -63,13 +71,13 @@
           </div>
 
           <div class="panel-tabs" role="tablist" aria-label="Playground panel tabs">
-            <button type="button" id="settings-tab" class="panel-tab is-active" role="tab" aria-selected="true" data-panel-tab="settings">Settings</button>
+            <button type="button" id="info-tab" class="panel-tab is-active" role="tab" aria-selected="true" data-panel-tab="info">Info</button>
             <button type="button" id="logs-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="logs">Logs</button>
             <button type="button" id="phpinfo-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="phpinfo">PHP Info</button>
             <button type="button" id="blueprint-tab" class="panel-tab" role="tab" aria-selected="false" data-panel-tab="blueprint">Blueprint</button>
           </div>
 
-          <section id="settings-panel" class="side-panel__content" role="tabpanel" aria-labelledby="settings-tab" data-panel-view="settings">
+          <section id="info-panel" class="side-panel__content" role="tabpanel" aria-labelledby="info-tab" data-panel-view="info">
             <div class="settings-field">
               <span>Moodle version</span>
               <span id="current-moodle-label" class="settings-value">-</span>
@@ -78,18 +86,12 @@
               <span>PHP version</span>
               <span id="current-php-label" class="settings-value">-</span>
             </div>
-
-            <label class="settings-field">
-              <span>PHP runtime</span>
-              <select id="runtime-select"></select>
-            </label>
-
+            <div class="settings-field">
+              <span>Runtime ID</span>
+              <span id="current-runtime-label" class="settings-value">-</span>
+            </div>
             <div class="settings-actions">
-              <button type="button" id="reset-button" class="danger">Reset</button>
-              <button type="button" id="phpinfo-button">PHP Info</button>
-              <button type="button" id="export-button">Export</button>
-              <label class="import-button" for="import-input">Import</label>
-              <input id="import-input" type="file" accept="application/json" hidden>
+              <button type="button" id="reset-button" class="danger">Reset Playground</button>
             </div>
           </section>
 
@@ -115,12 +117,17 @@
           <section id="blueprint-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="blueprint-tab" data-panel-view="blueprint">
             <div class="panel__row">
               <span>Blueprint JSON</span>
+              <span class="panel__row-actions">
+                <button type="button" id="export-button">Export</button>
+                <label class="import-button" for="import-input">Import</label>
+                <input id="import-input" type="file" accept="application/json" hidden>
+              </span>
             </div>
             <textarea id="blueprint-textarea" class="panel-textarea" spellcheck="false" readonly></textarea>
           </section>
 
           <footer class="side-panel__footer">
-            <p>Moodle Playground runtime for local browser testing.</p>
+            <p>Made with &#10084;&#65039; by <a href="https://www3.gobiernodecanarias.org/medusa/ecoescuela/ate/" target="_blank" rel="noreferrer">Área de Tecnología Educativa</a></p>
             <a
               class="side-panel__footer-link"
               href="https://github.com/ateeducacion/moodle-playground"
@@ -142,30 +149,29 @@
       </div>
     </div>
 
-    <dialog id="settings-modal" class="settings-modal">
-      <div class="settings-modal__content">
-        <h2 class="settings-modal__title">Playground Settings</h2>
+    <div id="settings-overlay" class="settings-popover-overlay" aria-hidden="true"></div>
+    <div id="settings-popover" class="settings-popover" role="dialog" aria-label="Playground Settings">
+      <h2 class="settings-popover__title">Playground Settings</h2>
 
-        <label class="settings-modal__field">
-          <span>Moodle Version</span>
-          <select id="settings-moodle-version"></select>
-        </label>
+      <label class="settings-popover__field">
+        <span>Moodle Version</span>
+        <select id="settings-moodle-version"></select>
+      </label>
 
-        <label class="settings-modal__field">
-          <span>PHP Version</span>
-          <select id="settings-php-version"></select>
-        </label>
+      <label class="settings-popover__field">
+        <span>PHP Version</span>
+        <select id="settings-php-version"></select>
+      </label>
 
-        <div class="settings-modal__warning">
-          Applying new settings will reset the Moodle site to its initial state. All current data will be lost.
-        </div>
-
-        <div class="settings-modal__actions">
-          <button type="button" id="settings-cancel">Cancel</button>
-          <button type="button" id="settings-apply" class="danger">Apply Settings &amp; Reset Playground</button>
-        </div>
+      <div class="settings-popover__warning">
+        Applying new settings will reset the Moodle site to its initial state. All current data will be lost.
       </div>
-    </dialog>
+
+      <div class="settings-popover__actions">
+        <button type="button" id="settings-cancel">Cancel</button>
+        <button type="button" id="settings-apply" class="danger">Apply &amp; Reset</button>
+      </div>
+    </div>
 
     <script type="module" src="./src/shell/main.js"></script>
   </body>
