@@ -6,7 +6,7 @@
 
 import { __private__dont__use } from "@php-wasm/universal";
 
-const MOODLE_ROOT = "/www/moodle";
+const DEFAULT_WEB_ROOT = "/www/moodle";
 
 /**
  * Convert a native Request object to a normalized request descriptor.
@@ -41,16 +41,16 @@ async function normalizeRequest(requestOrUrl) {
  * Handles directory requests by appending index.php.
  * Handles PATH_INFO (e.g., /theme/styles.php/boost/123/all).
  */
-function resolveScriptPath(pathname) {
+function resolveScriptPath(pathname, webRoot) {
   // Check for PATH_INFO: split at ".php/" to find the script and the extra path
   const phpIdx = pathname.indexOf(".php/");
   if (phpIdx >= 0) {
-    const scriptPath = `${MOODLE_ROOT}${pathname.substring(0, phpIdx + 4)}`;
+    const scriptPath = `${webRoot}${pathname.substring(0, phpIdx + 4)}`;
     const pathInfo = pathname.substring(phpIdx + 4);
     return { scriptPath, pathInfo };
   }
 
-  let scriptPath = `${MOODLE_ROOT}${pathname}`;
+  let scriptPath = `${webRoot}${pathname}`;
 
   // Directory requests → index.php
   if (scriptPath.endsWith("/")) {
@@ -121,7 +121,8 @@ function phpResponseToResponse(phpResponse) {
  * control over the CGI environment. This avoids issues with PHPRequestHandler's
  * URL rewriting, directory resolution, and cookie handling.
  */
-export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://localhost:8080" } = {}) {
+export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://localhost:8080", webRoot } = {}) {
+  const resolvedWebRoot = webRoot || DEFAULT_WEB_ROOT;
   const emscriptenModule = php[__private__dont__use];
   const parsedAbsoluteUrl = new URL(absoluteUrl);
   // URL base path for subpath deployments (e.g., "/moodle-playground" on GH Pages).
@@ -143,7 +144,7 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       const qIdx = urlPath.indexOf("?");
       const pathname = qIdx >= 0 ? urlPath.substring(0, qIdx) : urlPath;
       const queryString = qIdx >= 0 ? urlPath.substring(qIdx + 1) : "";
-      const { scriptPath, pathInfo } = resolveScriptPath(pathname);
+      const { scriptPath, pathInfo } = resolveScriptPath(pathname, resolvedWebRoot);
 
       // Serve static files (images, CSS, JS, etc.) directly from the filesystem
       // without executing them through PHP.
@@ -168,9 +169,9 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       // SCRIPT_NAME and PHP_SELF must include the URL base path (e.g.,
       // "/moodle-playground/admin/index.php" not just "/admin/index.php")
       // so that Moodle's setup_get_remote_url() constructs correct absolute URLs.
-      const scriptRelative = scriptPath.substring(MOODLE_ROOT.length) || "/index.php";
+      const scriptRelative = scriptPath.substring(resolvedWebRoot.length) || "/index.php";
       const serverVars = {
-        DOCUMENT_ROOT: MOODLE_ROOT,
+        DOCUMENT_ROOT: resolvedWebRoot,
         SCRIPT_FILENAME: scriptPath,
         SCRIPT_NAME: urlBasePath + scriptRelative,
         PHP_SELF: urlBasePath + scriptRelative,

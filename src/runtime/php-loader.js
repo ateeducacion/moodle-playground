@@ -14,7 +14,7 @@ const TEMP_ROOT = "/tmp/moodle";
  * - Call refresh() to initialize the runtime (loads WASM)
  * - Then use request(), writeFile(), readFile(), etc.
  */
-export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion } = {}) {
+export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion, webRoot } = {}) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   let wrapped = null;
 
@@ -43,7 +43,7 @@ export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion } = {}) {
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(/\/$/u, "");
-      wrapped = wrapPhpInstance(php, { syncFs: null, absoluteUrl });
+      wrapped = wrapPhpInstance(php, { syncFs: null, absoluteUrl, webRoot });
 
       // Copy all methods from the wrapped instance onto this deferred object
       for (const key of Object.keys(wrapped)) {

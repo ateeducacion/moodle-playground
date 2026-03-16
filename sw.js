@@ -13,6 +13,8 @@ const STATIC_PREFIXES = [
   "/index.html",
   "/playground.config.json",
   "/favicon.ico",
+  "/favicon-32x32.png",
+  "/apple-touch-icon.png",
 ];
 
 function getAppBasePath() {
