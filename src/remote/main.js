@@ -520,6 +520,7 @@ async function bootstrapRemote() {
   }
   // Listen to the shell channel so we can pick up bootstrap progress
   // messages from the worker and display them on the loading overlay.
+  let readyNavigated = false;
   const shellChannel = new BroadcastChannel(createShellChannel(scopeId));
   shellChannel.addEventListener("message", (event) => {
     const msg = event.data;
@@ -531,11 +532,12 @@ async function bootstrapRemote() {
     }
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
-      // If bootstrap returns a readyPath (e.g. "/" after auto-login),
+      // If bootstrap returns a readyPath (e.g. "/my/" after auto-login),
       // override the stale path from the URL so we don't navigate to
       // a previous session's install.php or other outdated path.
       if (msg.path && msg.path !== activePath) {
         activePath = msg.path;
+        readyNavigated = true;
         navigateFrame(scopeId, runtime.id, activePath, { force: true });
       }
     }
@@ -555,11 +557,12 @@ async function bootstrapRemote() {
 
   bindShellCommands(scopeId, runtime.id);
   bindFrameNavigation(scopeId, runtime.id);
-  // Navigate to the requested path. If bootstrap later sends a readyPath
-  // via the "ready" message (e.g. "/" after snapshot load + auto-login),
-  // the shellChannel listener will update activePath and re-navigate,
-  // overriding stale saved paths like "/install.php".
-  navigateFrame(scopeId, runtime.id, activePath);
+  // Navigate to the requested path only if the ready handler hasn't
+  // already navigated to a fresh readyPath from bootstrap. This avoids
+  // a wasted PHP request to a stale path from a previous session.
+  if (!readyNavigated) {
+    navigateFrame(scopeId, runtime.id, activePath);
+  }
   setRemoteProgress("Loading Moodle…", 0.98);
 }
 

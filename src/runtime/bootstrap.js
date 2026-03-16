@@ -1464,7 +1464,7 @@ export async function bootstrapMoodle({
   // web session handler creates a proper session with Set-Cookie headers,
   // which the cookie jar in php-compat.js captures automatically.
   const AUTO_LOGIN_PATH = MOODLE_ROOT + "/__playground_autologin.php";
-  let readyPath = "/";
+  let readyPath = "/my/";
   try {
     publish("Creating admin session for auto-login.", 0.95);
     const autoLoginPhp = [
