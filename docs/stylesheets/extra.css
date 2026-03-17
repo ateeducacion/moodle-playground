@@ -1,0 +1,8 @@
+/* Match the navbar orange from the main app (--color-orange-soft: #f5923a) */
+:root,
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #f5923a;
+  --md-primary-fg-color--light: #f9a85e;
+  --md-primary-fg-color--dark: #e07010;
+}
