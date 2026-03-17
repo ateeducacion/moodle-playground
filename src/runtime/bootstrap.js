@@ -1469,6 +1469,14 @@ export async function bootstrapMoodle({
     config.runtimes.find((entry) => entry.id === runtimeId) ||
     config.runtimes[0];
   const blueprintOverlay = buildInstallConfig(blueprint);
+  // Extract debug settings from blueprint runtime section
+  const blueprintRuntime = blueprint?.runtime || {};
+  const effectiveDebug =
+    blueprintRuntime.debug != null ? Number(blueprintRuntime.debug) : 0;
+  const effectiveDebugDisplay =
+    blueprintRuntime.debugdisplay != null
+      ? Number(blueprintRuntime.debugdisplay)
+      : 0;
   const effectiveConfig = {
     ...config,
     ...(blueprintOverlay.siteTitle
@@ -1485,6 +1493,8 @@ export async function bootstrapMoodle({
       ...config.admin,
       ...(blueprintOverlay.admin || {}),
     },
+    debug: effectiveDebug,
+    debugdisplay: effectiveDebugDisplay,
   };
   const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
   const branchMeta = getBranchMetadata(resolvedBranch);
@@ -1586,6 +1596,8 @@ export async function bootstrapMoodle({
     ...dbConfig,
     prefix: "mdl_",
     wwwroot,
+    debug: effectiveConfig.debug,
+    debugdisplay: effectiveConfig.debugdisplay,
   });
 
   const tPrepare = performance.now();
@@ -1607,11 +1619,17 @@ export async function bootstrapMoodle({
   const prepareMs = Math.round(performance.now() - tPrepare);
   publish(`Runtime preparation completed in ${prepareMs}ms.`, 0.86);
 
-  // Update timezone in php.ini if blueprint specifies a non-default timezone
+  // Update php.ini entries if blueprint specifies non-default timezone or debug display
+  const iniOverrides = {};
   if (effectiveConfig.timezone && effectiveConfig.timezone !== "UTC") {
-    await setPhpIniEntries(php._php, {
-      "date.timezone": effectiveConfig.timezone,
-    });
+    iniOverrides["date.timezone"] = effectiveConfig.timezone;
+  }
+  if (effectiveConfig.debugdisplay) {
+    iniOverrides.display_errors = "1";
+    iniOverrides.display_startup_errors = "1";
+  }
+  if (Object.keys(iniOverrides).length > 0) {
+    await setPhpIniEntries(php._php, iniOverrides);
   }
 
   const tPdo = performance.now();

@@ -40,6 +40,21 @@
     },
     "runtime": {
       "type": "object",
+      "description": "Runtime configuration options applied at boot time via config.php.",
+      "properties": {
+        "debug": {
+          "type": "integer",
+          "enum": [0, 5, 15, 32767],
+          "default": 0,
+          "description": "Moodle debug level. 0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER."
+        },
+        "debugdisplay": {
+          "type": "integer",
+          "enum": [0, 1],
+          "default": 0,
+          "description": "Whether to display debug messages on page (1) or only log them (0)."
+        }
+      },
       "additionalProperties": true
     },
     "steps": {
