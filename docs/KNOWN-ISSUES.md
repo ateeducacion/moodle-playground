@@ -77,19 +77,30 @@ Status:
 
 - **resolved**
 
-The root cause was that cache store plugin settings (`cachestore_apcu`, `cachestore_redis`)
-were not saved in the database, causing `any_new_admin_settings()` to detect them as "new"
-and redirect to `upgradesettings.php` on every page load.
+There were three interacting issues when enabling MUC (`CACHE_DISABLE_ALL = false`):
 
-Fix (three-pronged):
+1. **Missing cache store admin settings** — cache store plugin settings (`cachestore_apcu`,
+   `cachestore_redis`) were not in the database. `any_new_admin_settings()` detected them
+   as "new" and redirected to `upgradesettings.php`.
+2. **`adminsetuppending` flag** — the CLI installer sets `adminsetuppending = 1` in
+   `mdl_config`. With MUC disabled the web admin flow cleared it; with MUC enabled the
+   stale flag caused `is_major_upgrade_required()` to redirect all pages to admin.
+3. **`moodle_needs_upgrading()` version hash mismatch** — the `allversionshash` computed
+   at runtime differs from the snapshot value (component scanning varies in WASM VFS).
+   This caused `/my/` to redirect to `/admin/index.php` on every request.
 
-1. **Snapshot generation** (`scripts/generate-install-snapshot.sh`): runs
-   `admin_apply_default_settings()` at build time to save ALL admin defaults, plus
-   explicit cache store defaults as belt-and-suspenders
-2. **Runtime config normalizer** (`src/runtime/bootstrap.js`): seeds cache store plugin
-   defaults on every boot, catching existing snapshots built without them
-3. **Install runner fallback** (`src/runtime/bootstrap.js`): includes cache store defaults
-   in `$postinstalldefaults` for the CLI install path
+Fix:
+
+- **Snapshot generation** (`scripts/generate-install-snapshot.sh`): runs
+  `admin_apply_default_settings()` at build time, seeds cache store defaults, clears
+  `adminsetuppending`
+- **Config normalizer** (`src/runtime/bootstrap.js`): seeds cache store plugin defaults
+  and clears `adminsetuppending` on every boot
+- **Admin defaults seeder** (`src/runtime/bootstrap.js`): runs
+  `admin_apply_default_settings(NULL, false)` with MUC-enabled config after the normalizer
+- **Runtime patches** (`src/runtime/bootstrap.js`): `moodle_needs_upgrading()` returns
+  `false` (ephemeral runtime, no upgrades possible); `any_new_admin_settings()` returns
+  `false` (defaults are seeded at boot)
 
 `CACHE_DISABLE_ALL` and `CACHE_DISABLE_STORES` are now `false` in `config-template.js`.
 MUC file-based caches live in MEMFS and persist for the worker session lifetime, making

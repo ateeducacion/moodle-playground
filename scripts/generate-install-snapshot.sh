@@ -222,6 +222,8 @@ foreach (\$normDefaults as \$name => \$value) {
     }
 }
 
+// Clear adminsetuppending — CLI install sets it but the web setup flow never runs
+unset_config('adminsetuppending');
 echo 'Post-install defaults applied.' . PHP_EOL;
 
 // Cache store plugin settings (needed when CACHE_DISABLE_ALL=false at runtime)

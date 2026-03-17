@@ -53,6 +53,7 @@ function buildRuntimePaths(webRoot) {
     CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
     COMPONENT_CLASS_PATH: `${webRoot}/lib/classes/component.php`,
     ADMINLIB_PATH: `${webRoot}/lib/adminlib.php`,
+    MOODLELIB_PATH: `${webRoot}/lib/moodlelib.php`,
     DATAPRIVACY_SETTINGS_PATH: `${webRoot}/admin/tool/dataprivacy/settings.php`,
     LOG_SETTINGS_PATH: `${webRoot}/admin/tool/log/settings.php`,
     HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
@@ -72,6 +73,8 @@ function buildInternalRuntimeFiles(webRoot) {
     paths.CACHE_CONFIG_PATH,
     paths.COMPONENT_CLASS_PATH,
     paths.ADMINLIB_PATH,
+    paths.MOODLELIB_PATH,
+    paths.ADMIN_DEFAULTS_SEEDER_PATH,
     paths.DATAPRIVACY_SETTINGS_PATH,
     paths.LOG_SETTINGS_PATH,
     paths.HTTPSREPLACE_SETTINGS_PATH,
@@ -759,6 +762,16 @@ try {
         }
     }
 
+    // Clear adminsetuppending — the snapshot sets this during CLI install
+    // (admin/index.php line 726) and it never gets cleared because the web-based
+    // admin setup flow doesn't run. With MUC enabled, this flag causes
+    // is_major_upgrade_required() to redirect ALL pages to /admin/index.php.
+    if (!empty($CFG->adminsetuppending)) {
+        unset_config('adminsetuppending');
+        unset($CFG->adminsetuppending);
+        $result['set']['adminsetuppending'] = 'unset';
+    }
+
     $result['ok'] = true;
 } catch (Throwable $error) {
     $result['error'] = [
@@ -1079,6 +1092,16 @@ async function patchRuntimePhpSources(php, webRoot) {
     [
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE) {\n            self::fill_all_caches();\n            return;\n        }",
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE\n                && !(defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE') && PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE)) {\n            self::fill_all_caches();\n            return;\n        }",
+    ],
+  ]);
+
+  // PLAYGROUND: the ephemeral runtime never needs upgrading — the VFS image
+  // and the snapshot are built together. moodle_needs_upgrading() returns true
+  // when allversionshash is missing or stale, causing /my/ to redirect to admin.
+  await patchFile(rp.MOODLELIB_PATH, [
+    [
+      "function moodle_needs_upgrading($checkupgradeflag = true) {",
+      "function moodle_needs_upgrading($checkupgradeflag = true) {\n    return false; // PLAYGROUND: ephemeral runtime, no upgrades possible",
     ],
   ]);
 
@@ -1783,10 +1806,7 @@ export async function bootstrapMoodle({
   const adminDefaults = await runAdminDefaultsSeeder(php, webRoot);
   const adminDefaultsMs = Math.round(performance.now() - tAdminDefaults);
   if (adminDefaults?.ok) {
-    publish(
-      `Admin default settings applied. [${adminDefaultsMs}ms]`,
-      0.919,
-    );
+    publish(`Admin default settings applied. [${adminDefaultsMs}ms]`, 0.919);
   } else if (adminDefaults?.error?.message) {
     publish(
       `Admin defaults seeder failed: ${adminDefaults.error.message} [${adminDefaultsMs}ms]`,
