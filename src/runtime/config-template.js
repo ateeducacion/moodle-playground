@@ -227,7 +227,10 @@ if (!function_exists('playground_glob_polyfill_installed')) {
  * setPhpIniEntries() from @php-wasm/universal.  WP Playground hardcodes
  * /internal/shared/php.ini — writing a separate file has no effect.
  */
-export function createPhpIniEntries({ timezone = "UTC", debugdisplay = 0 } = {}) {
+export function createPhpIniEntries({
+  timezone = "UTC",
+  debugdisplay = 0,
+} = {}) {
   const showErrors = Number(debugdisplay) ? "1" : "0";
   return {
     "date.timezone": timezone,
