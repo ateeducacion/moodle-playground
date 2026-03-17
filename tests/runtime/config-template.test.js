@@ -63,9 +63,14 @@ describe("createMoodleConfigPhp", () => {
     assert.ok(config.includes("C:\\\\path\\\\to\\\\db"));
   });
 
-  it("includes CACHE_DISABLE_ALL", () => {
+  it("sets CACHE_DISABLE_ALL to false", () => {
     const config = createMoodleConfigPhp(baseParams);
-    assert.ok(config.includes("CACHE_DISABLE_ALL"));
+    assert.ok(config.includes("define('CACHE_DISABLE_ALL', false)"));
+  });
+
+  it("sets CACHE_DISABLE_STORES to false", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("define('CACHE_DISABLE_STORES', false)"));
   });
 
   it("disables debug by default", () => {

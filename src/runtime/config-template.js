@@ -118,17 +118,15 @@ if (!defined('MOODLE_INTERNAL')) {
 if (!defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE')) {
     define('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE', true);
 }
-// CACHE_DISABLE_ALL must stay true for now. When set to false, Moodle's admin tree
-// detects new cache-related settings that haven't been saved, causing admin/index.php
-// to redirect to ?cache=1 on every page load. This breaks admin section navigation.
-// TODO: seed the missing cache-store admin settings in $postinstalldefaults to allow
-// enabling the full MUC cache subsystem (which would make langstringcache and
-// cachetemplates effective across requests via file-based stores in MEMFS).
+// MUC caching is enabled — the filesystem is MEMFS (pure memory) so file-backed
+// cache stores are fast and persist for the lifetime of the worker session.
+// Cache store admin settings are seeded in the install snapshot and config normalizer
+// to prevent admin/index.php from redirecting to upgradesettings.php.
 if (!defined('CACHE_DISABLE_ALL')) {
-    define('CACHE_DISABLE_ALL', true);
+    define('CACHE_DISABLE_ALL', false);
 }
 if (!defined('CACHE_DISABLE_STORES')) {
-    define('CACHE_DISABLE_STORES', true);
+    define('CACHE_DISABLE_STORES', false);
 }
 
 if (!isset($_SERVER['REMOTE_ADDR'])) {

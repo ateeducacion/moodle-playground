@@ -49,6 +49,7 @@ function buildRuntimePaths(webRoot) {
     PDO_PROBE_PATH: `${webRoot}/__pdo_probe.php`,
     PDO_DDL_PROBE_PATH: `${webRoot}/__pdo_ddl_probe.php`,
     CONFIG_NORMALIZER_PATH: `${webRoot}/__config_normalizer.php`,
+    ADMIN_DEFAULTS_SEEDER_PATH: `${webRoot}/__admin_defaults_seeder.php`,
     CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
     COMPONENT_CLASS_PATH: `${webRoot}/lib/classes/component.php`,
     ADMINLIB_PATH: `${webRoot}/lib/adminlib.php`,
@@ -604,6 +605,14 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
                 ['noreplyaddress', 'noreply@localhost', null],
                 // server.php: supportemail (empty by default)
                 ['supportemail', '', null],
+                // Cache store plugin settings (needed when CACHE_DISABLE_ALL=false)
+                ['testperformance', 0, 'cachestore_apcu'],
+                ['test_clustermode', 0, 'cachestore_redis'],
+                ['test_server', '', 'cachestore_redis'],
+                ['test_encryption', 0, 'cachestore_redis'],
+                ['test_cafile', '', 'cachestore_redis'],
+                ['test_password', '', 'cachestore_redis'],
+                ['test_ttl', 0, 'cachestore_redis'],
             ];
             foreach ($postinstalldefaults as [$key, $val, $plugin]) {
                 if (get_config($plugin ?? 'core', $key) === false) {
@@ -728,6 +737,17 @@ try {
             'coursedisplay' => '0',
             'enablecompletion' => '1',
         ],
+        'cachestore_apcu' => [
+            'testperformance' => '0',
+        ],
+        'cachestore_redis' => [
+            'test_clustermode' => '0',
+            'test_server' => '',
+            'test_encryption' => '0',
+            'test_cafile' => '',
+            'test_password' => '',
+            'test_ttl' => '0',
+        ],
     ];
     foreach ($pluginDefaults as $plugin => $settings) {
         foreach ($settings as $name => $value) {
@@ -746,6 +766,46 @@ try {
         'message' => $error->getMessage(),
         'file' => $error->getFile(),
         'line' => $error->getLine(),
+    ];
+}
+
+$buffer = ob_get_clean();
+if ($buffer !== '') {
+    $result['output'] = $buffer;
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+`;
+}
+
+/**
+ * Generate a PHP script that applies ALL admin default settings with
+ * CACHE_DISABLE_ALL = false, matching the runtime configuration.
+ * This catches cache-store plugin settings and any other admin settings
+ * that are only registered when MUC is active.
+ */
+function createAdminDefaultsSeederPhp() {
+  return `<?php
+header('content-type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+
+unset($_SERVER['REMOTE_ADDR']);
+define('CLI_SCRIPT', true);
+
+$result = ['ok' => false];
+
+try {
+    require_once('/www/moodle/config.php');
+    require_once($CFG->libdir . '/adminlib.php');
+    admin_apply_default_settings(NULL, false);
+    $result['ok'] = true;
+    $result['applied'] = true;
+} catch (Throwable $error) {
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
     ];
 }
 
@@ -1027,6 +1087,14 @@ async function patchRuntimePhpSources(php, webRoot) {
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            debugging('parent does not exist!');\n            return false;\n        }",
       "        $parent = $this->locate($parentname);\n        if (is_null($parent)) {\n            return false;\n        }",
     ],
+    // PLAYGROUND: skip the "new admin settings" check that causes admin/index.php
+    // to redirect to ?cache=1 on every page load. admin_apply_default_settings()
+    // doesn't cover all settings (some return NULL from get_setting() even after
+    // defaults are applied), so we neutralize the check entirely.
+    [
+      "function any_new_admin_settings($node) {",
+      "function any_new_admin_settings($node) {\n    return false; // PLAYGROUND: skip new settings redirect\n    // Original implementation follows (unreachable):",
+    ],
     // glob() returns [] on the readonly WASM VFS because musl's libc glob
     // doesn't go through Emscripten's FS.readdir(). We replace the glob loop
     // with a hardcoded list of admin settings files from Moodle core.
@@ -1068,6 +1136,7 @@ async function prepareMoodleRuntime({
   await ensureDir(php, MOODLEDATA_ROOT);
   await ensureDir(php, `${MOODLEDATA_ROOT}/cache`);
   await ensureDir(php, `${MOODLEDATA_ROOT}/localcache`);
+  await ensureDir(php, `${MOODLEDATA_ROOT}/muc`);
   await ensureDir(php, `${MOODLEDATA_ROOT}/sessions`);
   await ensureDir(php, TEMP_ROOT);
   await ensureDir(php, `${TEMP_ROOT}/sessions`);
@@ -1123,6 +1192,10 @@ async function prepareMoodleRuntime({
   await php.writeFile(
     rp.CONFIG_NORMALIZER_PATH,
     textEncoder.encode(configNormalizerPhp),
+  );
+  await php.writeFile(
+    rp.ADMIN_DEFAULTS_SEEDER_PATH,
+    textEncoder.encode(createAdminDefaultsSeederPhp()),
   );
   await php.writeFile(
     rp.DATAPRIVACY_SETTINGS_PATH,
@@ -1291,6 +1364,20 @@ async function runConfigNormalizer(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
     "/__config_normalizer.php",
+    undefined,
+    webRoot,
+  );
+  const payload = output.trim();
+  const jsonStart = payload.indexOf("{");
+  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
+
+  return jsonPayload ? JSON.parse(jsonPayload) : {};
+}
+
+async function runAdminDefaultsSeeder(php, webRoot) {
+  const output = await requestRuntimeScript(
+    php,
+    "/__admin_defaults_seeder.php",
     undefined,
     webRoot,
   );
@@ -1685,6 +1772,25 @@ export async function bootstrapMoodle({
     publish(
       `Config default normalization failed: ${configNormalizer.error.message} [${normMs}ms]`,
       0.918,
+    );
+  }
+
+  // Apply ALL admin default settings with CACHE_DISABLE_ALL = false (matching the
+  // runtime config.php). This catches cache-store plugin settings and any other
+  // admin settings only registered when MUC is active, preventing
+  // any_new_admin_settings() from redirecting to upgradesettings.php.
+  const tAdminDefaults = performance.now();
+  const adminDefaults = await runAdminDefaultsSeeder(php, webRoot);
+  const adminDefaultsMs = Math.round(performance.now() - tAdminDefaults);
+  if (adminDefaults?.ok) {
+    publish(
+      `Admin default settings applied. [${adminDefaultsMs}ms]`,
+      0.919,
+    );
+  } else if (adminDefaults?.error?.message) {
+    publish(
+      `Admin defaults seeder failed: ${adminDefaults.error.message} [${adminDefaultsMs}ms]`,
+      0.919,
     );
   }
 

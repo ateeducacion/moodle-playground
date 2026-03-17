@@ -175,8 +175,8 @@ When touching the migration/runtime path, preserve these invariants:
 4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
 5. Keep the default scope stable unless there is a deliberate migration plan
 6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
-7. CACHE_DISABLE_ALL must stay true until missing cache-store admin settings are seeded
-   in $postinstalldefaults — enabling it causes admin/index.php redirect loops
+7. CACHE_DISABLE_ALL is false (MUC enabled). Cache store plugin defaults are seeded in
+   the install snapshot, config normalizer, and install runner to prevent admin redirect loops
 
 Important files for this prototype:
 
@@ -202,7 +202,7 @@ Prototype-specific defaults currently matter during first boot:
 - several Moodle config values are seeded manually during bootstrap
 - `sodium` is NOT available in the WASM binary; the OpenSSL fallback patch handles encryption
 - Debug is disabled (`$CFG->debug = 0`) for performance — this is a playground, not a dev environment
-- `CACHE_DISABLE_ALL = true` (still required — see invariant 7 above)
+- `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
 - PHP `display_errors` is off; errors are still logged but not shown to the user
 

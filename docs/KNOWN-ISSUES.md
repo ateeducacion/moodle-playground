@@ -71,35 +71,29 @@ Main files involved:
 - `scripts/patch-moodle-source.sh`
 - `src/runtime/bootstrap.js`
 
-## 4. CACHE_DISABLE_ALL must stay true (admin redirect loop)
+## ~~4. CACHE_DISABLE_ALL must stay true (admin redirect loop)~~ — resolved
 
 Status:
 
-- open
+- **resolved**
 
-Symptom:
+The root cause was that cache store plugin settings (`cachestore_apcu`, `cachestore_redis`)
+were not saved in the database, causing `any_new_admin_settings()` to detect them as "new"
+and redirect to `upgradesettings.php` on every page load.
 
-- When `CACHE_DISABLE_ALL = false`, `admin/index.php` detects new unsaved cache-related
-  admin settings and redirects to `admin/index.php?cache=1` on every page load
-- Admin section navigation (e.g., clicking "Server") breaks because the redirect
-  interrupts the JavaScript admin tree initialization
+Fix (three-pronged):
 
-Impact:
+1. **Snapshot generation** (`scripts/generate-install-snapshot.sh`): runs
+   `admin_apply_default_settings()` at build time to save ALL admin defaults, plus
+   explicit cache store defaults as belt-and-suspenders
+2. **Runtime config normalizer** (`src/runtime/bootstrap.js`): seeds cache store plugin
+   defaults on every boot, catching existing snapshots built without them
+3. **Install runner fallback** (`src/runtime/bootstrap.js`): includes cache store defaults
+   in `$postinstalldefaults` for the CLI install path
 
-- high (blocks admin navigation)
-
-Current mitigation:
-
-- `CACHE_DISABLE_ALL = true` and `CACHE_DISABLE_STORES = true` remain enabled
-- `$CFG->cachetemplates = true` and `$CFG->langstringcache = true` are set but have
-  limited effect with MUC disabled (caching only works within a single PHP request)
-
-Where to continue:
-
-- Identify which cache-related admin settings appear when `CACHE_DISABLE_ALL = false`
-- Add those settings to `$postinstalldefaults` in `bootstrap.js`
-- Once seeded, re-enable `CACHE_DISABLE_ALL = false` for full MUC caching in MEMFS
-- The `PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE` constant is still needed
+`CACHE_DISABLE_ALL` and `CACHE_DISABLE_STORES` are now `false` in `config-template.js`.
+MUC file-based caches live in MEMFS and persist for the worker session lifetime, making
+`cachetemplates` and `langstringcache` effective across requests.
 
 ## ~~5. Large readonly bundle still puts pressure on browser memory~~ — resolved
 
