@@ -23,6 +23,8 @@ export function createMoodleConfigPhp({
   dbUser,
   prefix,
   wwwroot,
+  debug = 0,
+  debugdisplay = 0,
 }) {
   const resolvedComponentCachePath =
     componentCachePath || buildComponentCachePath(moodleRoot);
@@ -57,11 +59,11 @@ $CFG->alternative_component_cache = '${escapePhpSingleQuoted(resolvedComponentCa
 $CFG->directorypermissions = 0777;
 $CFG->sslproxy = false;
 $CFG->reverseproxy = false;
-// Ephemeral in-memory runtime: disable developer debugging for performance.
-// Errors are still logged via php.ini but not displayed to the user.
-$CFG->debug = 0;
-$CFG->debugdisplay = 0;
-$CFG->debugdeveloper = false;
+// Debug level: 0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER.
+// Configurable via blueprint runtime.debug / runtime.debugdisplay or URL ?debug= param.
+$CFG->debug = ${Number(debug) || 0};
+$CFG->debugdisplay = ${Number(debugdisplay) ? 1 : 0};
+$CFG->debugdeveloper = ${Number(debug) >= 32767 ? "true" : "false"};
 $CFG->showcrondebugging = false;
 // Enable all caching layers — the filesystem is MEMFS (pure memory) so file-backed
 // caches are fast and persist for the lifetime of the worker session.
@@ -110,7 +112,7 @@ if (!property_exists($CFG, 'langmenu')) {
 }
 
 if (!defined('NO_DEBUG_DISPLAY')) {
-    define('NO_DEBUG_DISPLAY', true);
+    define('NO_DEBUG_DISPLAY', ${Number(debugdisplay) ? "false" : "true"});
 }
 if (!defined('MOODLE_INTERNAL')) {
     define('MOODLE_INTERNAL', true);
@@ -225,11 +227,12 @@ if (!function_exists('playground_glob_polyfill_installed')) {
  * setPhpIniEntries() from @php-wasm/universal.  WP Playground hardcodes
  * /internal/shared/php.ini — writing a separate file has no effect.
  */
-export function createPhpIniEntries({ timezone = "UTC" } = {}) {
+export function createPhpIniEntries({ timezone = "UTC", debugdisplay = 0 } = {}) {
+  const showErrors = Number(debugdisplay) ? "1" : "0";
   return {
     "date.timezone": timezone,
-    display_errors: "0",
-    display_startup_errors: "0",
+    display_errors: showErrors,
+    display_startup_errors: showErrors,
     error_reporting: "32759", // E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
     html_errors: "0",
     log_errors: "1",

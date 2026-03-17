@@ -47,6 +47,43 @@ https://example.com/moodle-playground/?blueprint=eyIkc2NoZW1hIjoi...
 https://example.com/moodle-playground/?blueprint=data:application/json;base64,eyIkc2NoZW1hIjoi...
 ```
 
+## Runtime Configuration
+
+The `runtime` object controls low-level PHP/Moodle settings applied at boot time
+via `config.php`. These settings take effect before any blueprint steps execute.
+
+```json
+{
+  "runtime": {
+    "debug": 32767,
+    "debugdisplay": 1
+  }
+}
+```
+
+### Debug Settings
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `debug` | integer | `0` | Moodle debug level |
+| `debugdisplay` | integer | `0` | Display debug messages on page (`1`) or only log them (`0`) |
+
+#### Debug Levels
+
+| Value | Name | Description |
+|-------|------|-------------|
+| `0` | NONE | Do not show any errors or warnings |
+| `5` | MINIMAL | Show only fatal errors |
+| `15` | NORMAL | Show errors, warnings and notices |
+| `32767` | DEVELOPER | Extra Moodle debug messages for developers |
+
+When `debugdisplay` is `1`, PHP `display_errors` is also enabled so that PHP-level
+errors appear on the page. When `debug` is `32767` (DEVELOPER), Moodle's
+`$CFG->debugdeveloper` is set to `true`.
+
+These settings can also be changed from the Settings dialog in the playground UI
+without editing the blueprint JSON directly.
+
 ## Constants
 
 The `constants` object defines `{{KEY}}` placeholders that are substituted into

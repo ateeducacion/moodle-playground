@@ -422,6 +422,7 @@ function populateSettingsModal() {
   // Populate PHP version dropdown based on selected Moodle branch
   updatePhpVersionDropdown(currentMoodleBranch);
   els.settingsPhpVersion.value = currentPhpVersion;
+
 }
 
 function updatePhpVersionDropdown(branch) {

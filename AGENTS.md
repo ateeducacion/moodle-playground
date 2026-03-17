@@ -201,10 +201,12 @@ Prototype-specific defaults currently matter during first boot:
 - `rememberusername` is intentionally disabled by default
 - several Moodle config values are seeded manually during bootstrap
 - `sodium` is NOT available in the WASM binary; the OpenSSL fallback patch handles encryption
-- Debug is disabled (`$CFG->debug = 0`) for performance — this is a playground, not a dev environment
+- Debug defaults to disabled (`$CFG->debug = 0`) but is configurable via blueprint `runtime.debug`
+  (0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER) and `runtime.debugdisplay` (0 or 1),
+  or via the Settings dialog in the playground UI
 - `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
-- PHP `display_errors` is off; errors are still logged but not shown to the user
+- PHP `display_errors` is off by default; configurable via `runtime.debugdisplay` in blueprint
 
 If you change any of the above behavior, update:
 
