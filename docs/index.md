@@ -42,7 +42,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 - PHP 8.3 with all required extensions built-in
 - SQLite database (in-memory, no persistence needed)
 - Pre-built install snapshot for fast boot (~3s vs ~8s full install)
-- Blueprint system for configuring site title, users, courses, etc.
+- Step-based blueprint system for provisioning users, courses, enrolments, modules, and more
 - Works on GitHub Pages with subpath support
 
 ## Project links

@@ -30,12 +30,7 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 
-const required = [
-  "channel",
-  "manifest",
-  "runtimeVersion",
-  "release",
-];
+const required = ["channel", "manifest", "runtimeVersion", "release"];
 
 // Optional: --snapshot <path-to-install.sq3>
 
@@ -70,7 +65,10 @@ if (args.bundle) {
 
   manifest.bundle = {
     format: "zip",
-    path: relative(resolve(manifestPath, ".."), bundlePath).replaceAll("\\", "/"),
+    path: relative(resolve(manifestPath, ".."), bundlePath).replaceAll(
+      "\\",
+      "/",
+    ),
     fileName: basename(bundlePath),
     size: stats.size,
     sha256: sha256For(bundlePath),
@@ -88,13 +86,19 @@ if (args.imageData && args.imageIndex) {
     format: args.imageFormat || "moodle-vfs-image-v1",
     mountMode: "readonly-vfs-overlay-v1",
     data: {
-      path: relative(resolve(manifestPath, ".."), imageDataPath).replaceAll("\\", "/"),
+      path: relative(resolve(manifestPath, ".."), imageDataPath).replaceAll(
+        "\\",
+        "/",
+      ),
       fileName: basename(imageDataPath),
       size: imageDataStats.size,
       sha256: sha256For(imageDataPath),
     },
     index: {
-      path: relative(resolve(manifestPath, ".."), imageIndexPath).replaceAll("\\", "/"),
+      path: relative(resolve(manifestPath, ".."), imageIndexPath).replaceAll(
+        "\\",
+        "/",
+      ),
       fileName: basename(imageIndexPath),
       size: imageIndexStats.size,
       sha256: sha256For(imageIndexPath),
@@ -108,7 +112,10 @@ if (args.snapshot) {
   const snapshotStats = statSync(snapshotPath);
 
   manifest.snapshot = {
-    path: relative(resolve(manifestPath, ".."), snapshotPath).replaceAll("\\", "/"),
+    path: relative(resolve(manifestPath, ".."), snapshotPath).replaceAll(
+      "\\",
+      "/",
+    ),
     fileName: basename(snapshotPath),
     size: snapshotStats.size,
     sha256: sha256For(snapshotPath),

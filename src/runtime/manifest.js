@@ -3,13 +3,18 @@ import { buildManifestUrl as buildManifestUrlFromVersions } from "../shared/vers
 
 export async function fetchManifest(manifestUrl) {
   if (!manifestUrl) {
-    const base = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL("../../", import.meta.url).href;
+    const base =
+      typeof __APP_ROOT__ !== "undefined"
+        ? __APP_ROOT__
+        : new URL("../../", import.meta.url).href;
     manifestUrl = new URL("assets/manifests/latest.json", base).toString();
   }
   const response = await fetch(manifestUrl, { cache: "no-cache" });
 
   if (!response.ok) {
-    throw new Error(`Unable to load manifest: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Unable to load manifest: ${response.status} ${response.statusText}`,
+    );
   }
 
   return response.json();
@@ -37,7 +42,8 @@ export function buildBranchManifestUrl(moodleBranch, appBaseUrl) {
  * Build the fallback manifest URL (assets/manifests/latest.json).
  */
 export function buildFallbackManifestUrl(appBaseUrl) {
-  const base = appBaseUrl || (typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : "./");
+  const base =
+    appBaseUrl || (typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : "./");
   return new URL("assets/manifests/latest.json", base).toString();
 }
 
@@ -55,7 +61,10 @@ export async function resolveManifestUrl(moodleBranch, appBaseUrl) {
   }
 
   try {
-    const response = await fetch(branchUrl, { method: "HEAD", cache: "no-cache" });
+    const response = await fetch(branchUrl, {
+      method: "HEAD",
+      cache: "no-cache",
+    });
     if (response.ok) {
       return branchUrl;
     }

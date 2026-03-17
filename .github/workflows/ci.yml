@@ -1,0 +1,38 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax check
+        run: |
+          node --check sw.js
+          node --check php-worker.js
+          node --check src/runtime/bootstrap.js
+          node --check src/runtime/php-loader.js
+          node --check src/runtime/php-compat.js
+          node --check src/shell/main.js
+          node --check src/remote/main.js
+          node --check src/blueprint/index.js
+
+      - name: Run tests
+        run: make test
+
+      - name: Lint
+        run: make lint

@@ -175,8 +175,8 @@ When touching the migration/runtime path, preserve these invariants:
 4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
 5. Keep the default scope stable unless there is a deliberate migration plan
 6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
-7. CACHE_DISABLE_ALL must stay true until missing cache-store admin settings are seeded
-   in $postinstalldefaults — enabling it causes admin/index.php redirect loops
+7. CACHE_DISABLE_ALL is false (MUC enabled). Cache store plugin defaults are seeded in
+   the install snapshot, config normalizer, and install runner to prevent admin redirect loops
 
 Important files for this prototype:
 
@@ -202,7 +202,7 @@ Prototype-specific defaults currently matter during first boot:
 - several Moodle config values are seeded manually during bootstrap
 - `sodium` is NOT available in the WASM binary; the OpenSSL fallback patch handles encryption
 - Debug is disabled (`$CFG->debug = 0`) for performance — this is a playground, not a dev environment
-- `CACHE_DISABLE_ALL = true` (still required — see invariant 7 above)
+- `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
 - PHP `display_errors` is off; errors are still logged but not shown to the user
 
@@ -321,29 +321,125 @@ On GitHub Pages (`https://host/moodle-playground`), the base path is `/moodle-pl
 
 ## Blueprints
 
-Blueprints are JSON files that describe the desired state of a playground instance.
+Blueprints are step-based JSON files that describe the desired state of a playground
+instance. The format is inspired by WordPress Playground Blueprints with Moodle-native
+naming and semantics.
 
-Relevant files:
+Core modules live in `src/blueprint/`:
 
-- `assets/blueprints/default.blueprint.json`
-- `assets/blueprints/blueprint-schema.json`
-- `src/shared/blueprint.js`
+- `index.js` — public re-exports
+- `parser.js` — parse JSON / base64 / data-URL / object inputs
+- `schema.js` — hand-written validator (~120 lines, no library)
+- `constants.js` — `{{KEY}}` substitution in string values
+- `resources.js` — `ResourceRegistry` for url/base64/bundled/vfs/literal resources
+- `resolver.js` — blueprint source resolution (`?blueprint=`, `?blueprint-url=`, sessionStorage, default)
+- `storage.js` — sessionStorage save/load/clear
+- `executor.js` — sequential step runner with progress
 
-The current blueprint model is intentionally narrow and centered on:
+Step handlers in `src/blueprint/steps/`:
 
-- site title / locale / timezone
-- admin login
-- extra users
-- categories
-- starter courses
+- `filesystem.js` — mkdir, rmdir, writeFile, writeFiles, copyFile, moveFile, unzip
+- `request.js` — request, runPhpCode, runPhpScript
+- `moodle-install.js` — installMoodle (declarative marker), setAdminAccount, login
+- `moodle-config.js` — setConfig, setConfigs, setLandingPage
+- `moodle-users.js` — createUser, createUsers
+- `moodle-categories.js` — createCategory, createCategories
+- `moodle-courses.js` — createCourse, createCourses, createSection, createSections
+- `moodle-enrol.js` — enrolUser, enrolUsers
+- `moodle-modules.js` — addModule (label, folder, assign, etc.)
+- `moodle-plugins.js` — installMoodlePlugin, installTheme (downloads ZIP, extracts, runs upgrade)
 
-When changing blueprint semantics, update both the schema and the runtime code that consumes it.
+PHP code generators in `src/blueprint/php/helpers.js`.
 
-## Testing and Verification
+Assets:
 
-There is no large formal test suite in this repository today. Verification is mostly targeted.
+- `assets/blueprints/default.blueprint.json` — default step-based blueprint
+- `assets/blueprints/blueprint-schema.json` — JSON Schema for IDE autocompletion
+- `assets/blueprints/examples/` — example blueprints
 
-### Typical checks
+Tests:
+
+- `tests/blueprint/*.test.js` — run with `npm run test:blueprint`
+
+Key design decisions:
+
+- `installMoodle` is a declarative marker — the actual install runs in `bootstrap.js`
+- Provisioning steps use `php.run()` with `CLI_SCRIPT` mode (except `login` which uses HTTP)
+- Plural steps (e.g., `createUsers`) execute all entities in a single PHP script
+- No external dependencies for validation; `fflate` (existing dep) used for unzip
+- Blueprint step execution runs between config normalization (0.918) and auto-login (0.95) in `bootstrap.js`
+
+When changing blueprint semantics, update the schema, step handlers, docs, and tests.
+
+## Testing, Linting, and Formatting
+
+### Quick reference
+
+```bash
+make test      # Run all unit tests (186 tests across 45 suites)
+make lint      # Run Biome linter on src/, tests/, scripts/
+make format    # Auto-fix lint and formatting issues
+```
+
+These are also available as npm scripts:
+
+```bash
+npm test                  # All tests
+npm run test:blueprint    # Blueprint tests only
+```
+
+### Test suites
+
+Tests live in `tests/` and run with Node.js built-in `node:test` (no framework).
+
+#### Blueprint (`tests/blueprint/`)
+
+| File | What it tests |
+|------|---------------|
+| `parser.test.js` | JSON, base64, data-URL, object parsing |
+| `schema.test.js` | Blueprint validation (steps, resources, constants, landingPage) |
+| `constants.test.js` | `{{KEY}}` substitution in strings, objects, arrays |
+| `resources.test.js` | ResourceRegistry: literal, base64, data-url, @name references |
+| `executor.test.js` | Step execution order, failure handling, progress, constants |
+| `resolver.test.js` | Blueprint source resolution (inline, base64, data-URL) |
+| `steps.test.js` | Step registry: all 30 steps registered, handler dispatch |
+| `install-config.test.js` | `buildInstallConfig()` merging from installMoodle step and top-level fields |
+| `php-helpers.test.js` | PHP code generation: CLI header, escaping, Moodle API calls, batch operations |
+
+#### Version resolver (`tests/shared/`)
+
+| File | What it tests |
+|------|---------------|
+| `version-resolver.test.js` | Branch metadata, PHP/Moodle compatibility matrix, version resolution, runtimeId parsing/building, query param parsing, manifest URL building, data integrity |
+| `protocol.test.js` | BroadcastChannel naming, snapshot version constant |
+| `paths.test.js` | `joinBasePath()` path concatenation and deduplication |
+| `storage.test.js` | `buildScopeKey()` storage key construction |
+
+#### Runtime (`tests/runtime/`)
+
+| File | What it tests |
+|------|---------------|
+| `config-template.test.js` | `config.php` generation (dbtype, wwwroot, escaping, CACHE_DISABLE_ALL, autoloader), php.ini entries (timezone, limits, session paths) |
+| `php-compat.test.js` | `resolveScriptPath()` (PATH_INFO splitting, directory→index.php), `isPhpScript()`, `getMimeType()` for all supported extensions |
+| `manifest.test.js` | `buildManifestState()` extraction, fallback manifest URL building |
+
+#### Service Worker (`tests/sw/`)
+
+| File | What it tests |
+|------|---------------|
+| `sw-helpers.test.js` | HTML entity decoding (`&amp;`, `&#x2F;`, `&colon;`, Moodle URLs), scoped runtime path extraction (scope/runtime/path parsing, subpath deployments) |
+
+### Linting and formatting
+
+The project uses [Biome](https://biomejs.dev/) for linting and formatting. Configuration is in `biome.json`.
+
+- **Scope**: `src/**`, `tests/**`, `scripts/**`
+- **Formatter**: 2-space indent, auto organize imports
+- **Linter**: Recommended rules, with `noDescendingSpecificity` and `noDuplicateProperties` disabled
+
+`make lint` runs in CI on every push to `main` and on pull requests.
+
+### Syntax checks
 
 ```bash
 node --check sw.js
@@ -353,7 +449,17 @@ node --check src/runtime/php-loader.js
 node --check src/runtime/php-compat.js
 node --check src/shell/main.js
 node --check src/remote/main.js
+node --check src/blueprint/index.js
 ```
+
+### CI
+
+The `.github/workflows/ci.yml` workflow runs on push to `main` and on pull requests:
+
+1. Install dependencies
+2. Syntax check all runtime files
+3. `make test` (81 unit tests)
+4. `make lint` (Biome)
 
 ### Manual validation areas
 

@@ -71,35 +71,40 @@ Main files involved:
 - `scripts/patch-moodle-source.sh`
 - `src/runtime/bootstrap.js`
 
-## 4. CACHE_DISABLE_ALL must stay true (admin redirect loop)
+## ~~4. CACHE_DISABLE_ALL must stay true (admin redirect loop)~~ — resolved
 
 Status:
 
-- open
+- **resolved**
 
-Symptom:
+There were three interacting issues when enabling MUC (`CACHE_DISABLE_ALL = false`):
 
-- When `CACHE_DISABLE_ALL = false`, `admin/index.php` detects new unsaved cache-related
-  admin settings and redirects to `admin/index.php?cache=1` on every page load
-- Admin section navigation (e.g., clicking "Server") breaks because the redirect
-  interrupts the JavaScript admin tree initialization
+1. **Missing cache store admin settings** — cache store plugin settings (`cachestore_apcu`,
+   `cachestore_redis`) were not in the database. `any_new_admin_settings()` detected them
+   as "new" and redirected to `upgradesettings.php`.
+2. **`adminsetuppending` flag** — the CLI installer sets `adminsetuppending = 1` in
+   `mdl_config`. With MUC disabled the web admin flow cleared it; with MUC enabled the
+   stale flag caused `is_major_upgrade_required()` to redirect all pages to admin.
+3. **`moodle_needs_upgrading()` version hash mismatch** — the `allversionshash` computed
+   at runtime differs from the snapshot value (component scanning varies in WASM VFS).
+   This caused `/my/` to redirect to `/admin/index.php` on every request.
 
-Impact:
+Fix:
 
-- high (blocks admin navigation)
+- **Snapshot generation** (`scripts/generate-install-snapshot.sh`): runs
+  `admin_apply_default_settings()` at build time, seeds cache store defaults, clears
+  `adminsetuppending`
+- **Config normalizer** (`src/runtime/bootstrap.js`): seeds cache store plugin defaults
+  and clears `adminsetuppending` on every boot
+- **Admin defaults seeder** (`src/runtime/bootstrap.js`): runs
+  `admin_apply_default_settings(NULL, false)` with MUC-enabled config after the normalizer
+- **Runtime patches** (`src/runtime/bootstrap.js`): `moodle_needs_upgrading()` returns
+  `false` (ephemeral runtime, no upgrades possible); `any_new_admin_settings()` returns
+  `false` (defaults are seeded at boot)
 
-Current mitigation:
-
-- `CACHE_DISABLE_ALL = true` and `CACHE_DISABLE_STORES = true` remain enabled
-- `$CFG->cachetemplates = true` and `$CFG->langstringcache = true` are set but have
-  limited effect with MUC disabled (caching only works within a single PHP request)
-
-Where to continue:
-
-- Identify which cache-related admin settings appear when `CACHE_DISABLE_ALL = false`
-- Add those settings to `$postinstalldefaults` in `bootstrap.js`
-- Once seeded, re-enable `CACHE_DISABLE_ALL = false` for full MUC caching in MEMFS
-- The `PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE` constant is still needed
+`CACHE_DISABLE_ALL` and `CACHE_DISABLE_STORES` are now `false` in `config-template.js`.
+MUC file-based caches live in MEMFS and persist for the worker session lifetime, making
+`cachetemplates` and `langstringcache` effective across requests.
 
 ## ~~5. Large readonly bundle still puts pressure on browser memory~~ — resolved
 

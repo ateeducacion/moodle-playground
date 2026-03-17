@@ -1,8 +1,17 @@
-import { PHP, __private__dont__use, setPhpIniEntries } from "@php-wasm/universal";
+import {
+  __private__dont__use,
+  PHP,
+  setPhpIniEntries,
+} from "@php-wasm/universal";
 import { loadWebRuntime } from "@php-wasm/web";
-import { MOODLE_ROOT, createPhpIniEntries, createChdirFixPhp, CHDIR_FIX_PRELOAD_PATH } from "./config-template.js";
-import { wrapPhpInstance } from "./php-compat.js";
 import { DEFAULT_PHP_VERSION } from "../shared/version-resolver.js";
+import {
+  CHDIR_FIX_PRELOAD_PATH,
+  createChdirFixPhp,
+  createPhpIniEntries,
+  MOODLE_ROOT,
+} from "./config-template.js";
+import { wrapPhpInstance } from "./php-compat.js";
 
 const PERSIST_ROOT = "/persist";
 const TEMP_ROOT = "/tmp/moodle";
@@ -14,7 +23,10 @@ const TEMP_ROOT = "/tmp/moodle";
  * - Call refresh() to initialize the runtime (loads WASM)
  * - Then use request(), writeFile(), readFile(), etc.
  */
-export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion, webRoot } = {}) {
+export function createPhpRuntime(
+  _runtime,
+  { appBaseUrl, phpVersion, webRoot } = {},
+) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   let wrapped = null;
 
@@ -30,19 +42,42 @@ export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion, webRoot } =
       const FS = php[__private__dont__use].FS;
 
       // Ensure directories exist
-      try { FS.mkdirTree(TEMP_ROOT); } catch { /* exists */ }
-      try { FS.mkdirTree(`${TEMP_ROOT}/sessions`); } catch { /* exists */ }
-      try { FS.mkdirTree(MOODLE_ROOT); } catch { /* exists */ }
-      try { FS.mkdirTree(PERSIST_ROOT); } catch { /* exists */ }
+      try {
+        FS.mkdirTree(TEMP_ROOT);
+      } catch {
+        /* exists */
+      }
+      try {
+        FS.mkdirTree(`${TEMP_ROOT}/sessions`);
+      } catch {
+        /* exists */
+      }
+      try {
+        FS.mkdirTree(MOODLE_ROOT);
+      } catch {
+        /* exists */
+      }
+      try {
+        FS.mkdirTree(PERSIST_ROOT);
+      } catch {
+        /* exists */
+      }
 
       // Apply Moodle php.ini settings to /internal/shared/php.ini
       await setPhpIniEntries(php, createPhpIniEntries());
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
-      try { FS.mkdirTree("/internal/shared/preload"); } catch { /* exists */ }
+      try {
+        FS.mkdirTree("/internal/shared/preload");
+      } catch {
+        /* exists */
+      }
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
-      const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(/\/$/u, "");
+      const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(
+        /\/$/u,
+        "",
+      );
       wrapped = wrapPhpInstance(php, { syncFs: null, absoluteUrl, webRoot });
 
       // Copy all methods from the wrapped instance onto this deferred object
@@ -53,22 +88,38 @@ export function createPhpRuntime(_runtime, { appBaseUrl, phpVersion, webRoot } =
       }
 
       Object.defineProperty(deferred, "binary", {
-        get() { return wrapped.binary; },
+        get() {
+          return wrapped.binary;
+        },
         configurable: true,
       });
       Object.defineProperty(deferred, "_php", {
-        get() { return wrapped._php; },
+        get() {
+          return wrapped._php;
+        },
         configurable: true,
       });
     },
 
     // Placeholder methods that throw if called before refresh()
-    async request() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
-    async analyzePath() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
-    async mkdir() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
-    async writeFile() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
-    async readFile() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
-    async run() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
+    async request() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
+    async analyzePath() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
+    async mkdir() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
+    async writeFile() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
+    async readFile() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
+    async run() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
     addEventListener() {},
     removeEventListener() {},
   };
@@ -95,7 +146,11 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
       await setPhpIniEntries(php, createPhpIniEntries());
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
-      try { FS2.mkdirTree("/internal/shared/preload"); } catch { /* exists */ }
+      try {
+        FS2.mkdirTree("/internal/shared/preload");
+      } catch {
+        /* exists */
+      }
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       wrapped = wrapPhpInstance(php);
@@ -107,7 +162,9 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
       }
     },
 
-    async run() { throw new Error("PHP runtime not initialized. Call refresh() first."); },
+    async run() {
+      throw new Error("PHP runtime not initialized. Call refresh() first.");
+    },
     addEventListener() {},
     removeEventListener() {},
   };

@@ -222,7 +222,36 @@ foreach (\$normDefaults as \$name => \$value) {
     }
 }
 
+// Clear adminsetuppending — CLI install sets it but the web setup flow never runs
+unset_config('adminsetuppending');
 echo 'Post-install defaults applied.' . PHP_EOL;
+
+// Cache store plugin settings (needed when CACHE_DISABLE_ALL=false at runtime)
+\$cacheStoreDefaults = [
+    ['testperformance', 0, 'cachestore_apcu'],
+    ['test_clustermode', 0, 'cachestore_redis'],
+    ['test_server', '', 'cachestore_redis'],
+    ['test_encryption', 0, 'cachestore_redis'],
+    ['test_cafile', '', 'cachestore_redis'],
+    ['test_password', '', 'cachestore_redis'],
+    ['test_ttl', 0, 'cachestore_redis'],
+];
+foreach (\$cacheStoreDefaults as [\$key, \$val, \$plugin]) {
+    if (get_config(\$plugin, \$key) === false) {
+        set_config(\$key, \$val, \$plugin);
+    }
+}
+echo 'Cache store defaults applied.' . PHP_EOL;
+
+// Broad sweep: save defaults for ALL admin settings registered in the admin tree.
+// This catches any remaining missing defaults that would trigger upgradesettings.php.
+try {
+    require_once(\$CFG->libdir . '/adminlib.php');
+    admin_apply_default_settings(NULL, false);
+    echo 'All admin defaults applied.' . PHP_EOL;
+} catch (Throwable \$e) {
+    echo 'Warning: admin_apply_default_settings failed: ' . \$e->getMessage() . PHP_EOL;
+}
 " 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
 
 # Note: $CFG->wwwroot comes from config.php (generated at runtime), not from

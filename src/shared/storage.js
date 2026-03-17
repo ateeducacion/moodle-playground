@@ -6,7 +6,9 @@ export function buildScopeKey(scopeId, suffix) {
 
 export function getOrCreateScopeId() {
   const url = new URL(window.location.href);
-  const existing = url.searchParams.get("scope") || window.sessionStorage.getItem(`${SCOPE_PREFIX}active`);
+  const existing =
+    url.searchParams.get("scope") ||
+    window.sessionStorage.getItem(`${SCOPE_PREFIX}active`);
 
   if (existing) {
     window.sessionStorage.setItem(`${SCOPE_PREFIX}active`, existing);
@@ -19,7 +21,10 @@ export function getOrCreateScopeId() {
 }
 
 export function saveSessionState(scopeId, data) {
-  window.sessionStorage.setItem(buildScopeKey(scopeId, "state"), JSON.stringify(data));
+  window.sessionStorage.setItem(
+    buildScopeKey(scopeId, "state"),
+    JSON.stringify(data),
+  );
 }
 
 export function loadSessionState(scopeId) {

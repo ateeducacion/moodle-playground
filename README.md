@@ -52,19 +52,42 @@ All state lives in memory (Emscripten MEMFS). Closing the tab destroys everythin
 
 ## Blueprints
 
-Blueprints are JSON files that configure a playground instance before it boots.
+Blueprints are step-based JSON files that configure and provision a playground instance at boot. Inspired by [WordPress Playground Blueprints](https://wordpress.github.io/wordpress-playground/), they use Moodle-native naming and semantics.
+
+```json
+{
+  "landingPage": "/my/",
+  "steps": [
+    { "step": "installMoodle", "options": { "siteName": "My Moodle" } },
+    { "step": "login", "username": "admin" },
+    { "step": "createCategory", "name": "Science" },
+    { "step": "createCourse", "fullname": "Physics 101", "shortname": "PHYS101", "category": "Science" }
+  ]
+}
+```
 
 A default blueprint is bundled at [`assets/blueprints/default.blueprint.json`](assets/blueprints/default.blueprint.json). Override it by:
 
-- Passing `?blueprint=/path/to/file.json` in the URL
+- Passing `?blueprint=<inline-json-or-base64>` or `?blueprint-url=<url>` in the URL
 - Importing a `.json` file from the shell toolbar
 
-Blueprints can configure:
+Blueprints can provision:
 
-- Site title, locale, and timezone
-- Admin credentials
-- Additional users
-- Categories and starter courses
+- Site title, locale, timezone, and admin credentials (`installMoodle`)
+- User sessions (`login`)
+- Additional users (`createUser`, `createUsers`)
+- Course categories (`createCategory`, `createCategories`)
+- Courses and sections (`createCourse`, `createCourses`, `createSection`)
+- Enrolments (`enrolUser`, `enrolUsers`)
+- Course modules (`addModule` — label, assign, folder, etc.)
+- Plugins and themes from ZIP URLs (`installMoodlePlugin`, `installTheme`)
+- Moodle config values (`setConfig`, `setConfigs`)
+- Filesystem operations (`writeFile`, `mkdir`, `unzip`, etc.)
+- Arbitrary PHP code (`runPhpCode`, `runPhpScript`)
+
+Use `constants` for `{{PLACEHOLDER}}` substitution and `resources` for named file references.
+
+See the [Blueprint reference](docs/blueprint-json.md) for the full format, all step types, and examples. A sample blueprint is at [`blueprint-sample.json`](blueprint-sample.json).
 
 Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-schema.json).
 
@@ -78,6 +101,7 @@ Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-
 | `make serve` | Start a local server on port 8080 |
 | `make clean` | Remove generated bundle and manifest artifacts |
 | `make reset` | Full clean including vendored runtime assets |
+| `npm run test:blueprint` | Run blueprint unit tests |
 
 ### Worker bundling
 

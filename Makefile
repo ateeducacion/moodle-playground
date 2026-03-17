@@ -22,7 +22,7 @@ check-php:
 	fi
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
-.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset check-php
+.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset check-php test lint format
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
@@ -63,6 +63,15 @@ up: prepare serve
 
 up-local: bundle
 	./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)
+
+test:
+	node --test tests/**/*.test.js
+
+lint:
+	npx @biomejs/biome check
+
+format:
+	npx @biomejs/biome check --fix
 
 clean:
 	rm -rf .cache

@@ -2,87 +2,91 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ateeducacion.github.io/moodle-playground/assets/blueprints/blueprint-schema.json",
   "title": "Moodle Playground Blueprint",
+  "description": "Step-based blueprint for provisioning a Moodle Playground instance.",
   "type": "object",
   "properties": {
     "$schema": {
       "type": "string"
     },
-    "meta": {
-      "type": "object",
-      "properties": {
-        "title": { "type": "string" },
-        "author": { "type": "string" },
-        "description": { "type": "string" }
-      },
-      "additionalProperties": true
-    },
     "preferredVersions": {
       "type": "object",
       "properties": {
         "php": { "type": "string" },
-        "moodle": { "type": "string" },
-        "moodleBranch": { "type": "string" }
+        "moodle": { "type": "string" }
       },
       "additionalProperties": true
     },
     "landingPage": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^/"
     },
-    "siteOptions": {
+    "constants": {
       "type": "object",
-      "properties": {
-        "fullname": { "type": "string" },
-        "shortname": { "type": "string" },
-        "locale": { "type": "string" },
-        "timezone": { "type": "string" }
-      },
-      "additionalProperties": true
+      "additionalProperties": { "type": "string" }
     },
-    "login": {
+    "resources": {
       "type": "object",
-      "properties": {
-        "username": { "type": "string" },
-        "email": { "type": "string" },
-        "password": { "type": "string" }
-      },
-      "additionalProperties": true
-    },
-    "users": {
-      "type": "array",
-      "items": {
+      "additionalProperties": {
         "type": "object",
         "properties": {
-          "username": { "type": "string" },
-          "email": { "type": "string" },
-          "password": { "type": "string" },
-          "role": { "type": "string" }
-        },
-        "required": ["username", "email", "password"]
+          "url": { "type": "string" },
+          "base64": { "type": "string" },
+          "data-url": { "type": "string" },
+          "bundled": { "type": "string" },
+          "vfs": { "type": "string" },
+          "literal": {}
+        }
       }
     },
-    "categories": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" }
-        },
-        "required": ["name"]
-      }
+    "runtime": {
+      "type": "object",
+      "additionalProperties": true
     },
-    "courses": {
+    "steps": {
       "type": "array",
       "items": {
         "type": "object",
+        "required": ["step"],
         "properties": {
-          "fullname": { "type": "string" },
-          "shortname": { "type": "string" },
-          "category": { "type": "string" },
-          "summary": { "type": "string" }
+          "step": {
+            "type": "string",
+            "enum": [
+              "installMoodle",
+              "setAdminAccount",
+              "login",
+              "setConfig",
+              "setConfigs",
+              "setLandingPage",
+              "createUser",
+              "createUsers",
+              "createCategory",
+              "createCategories",
+              "createCourse",
+              "createCourses",
+              "createSection",
+              "createSections",
+              "enrolUser",
+              "enrolUsers",
+              "addModule",
+              "installMoodlePlugin",
+              "installTheme",
+              "mkdir",
+              "rmdir",
+              "writeFile",
+              "writeFiles",
+              "copyFile",
+              "moveFile",
+              "unzip",
+              "request",
+              "runPhpCode",
+              "runPhpScript"
+            ]
+          }
         },
-        "required": ["fullname", "shortname"]
+        "additionalProperties": true
       }
     }
   },
+  "required": ["steps"],
   "additionalProperties": true
 }

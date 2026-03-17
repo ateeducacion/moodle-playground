@@ -121,7 +121,10 @@ function phpResponseToResponse(phpResponse) {
  * control over the CGI environment. This avoids issues with PHPRequestHandler's
  * URL rewriting, directory resolution, and cookie handling.
  */
-export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://localhost:8080", webRoot } = {}) {
+export function wrapPhpInstance(
+  php,
+  { syncFs = null, absoluteUrl = "http://localhost:8080", webRoot } = {},
+) {
   const resolvedWebRoot = webRoot || DEFAULT_WEB_ROOT;
   const emscriptenModule = php[__private__dont__use];
   const parsedAbsoluteUrl = new URL(absoluteUrl);
@@ -144,7 +147,10 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       const qIdx = urlPath.indexOf("?");
       const pathname = qIdx >= 0 ? urlPath.substring(0, qIdx) : urlPath;
       const queryString = qIdx >= 0 ? urlPath.substring(qIdx + 1) : "";
-      const { scriptPath, pathInfo } = resolveScriptPath(pathname, resolvedWebRoot);
+      const { scriptPath, pathInfo } = resolveScriptPath(
+        pathname,
+        resolvedWebRoot,
+      );
 
       // Serve static files (images, CSS, JS, etc.) directly from the filesystem
       // without executing them through PHP.
@@ -169,7 +175,8 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       // SCRIPT_NAME and PHP_SELF must include the URL base path (e.g.,
       // "/moodle-playground/admin/index.php" not just "/admin/index.php")
       // so that Moodle's setup_get_remote_url() constructs correct absolute URLs.
-      const scriptRelative = scriptPath.substring(resolvedWebRoot.length) || "/index.php";
+      const scriptRelative =
+        scriptPath.substring(resolvedWebRoot.length) || "/index.php";
       const serverVars = {
         DOCUMENT_ROOT: resolvedWebRoot,
         SCRIPT_FILENAME: scriptPath,
@@ -179,7 +186,9 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
         REQUEST_METHOD: req.method || "GET",
         QUERY_STRING: queryString,
         SERVER_NAME: parsedAbsoluteUrl.hostname,
-        SERVER_PORT: parsedAbsoluteUrl.port || (parsedAbsoluteUrl.protocol === "https:" ? "443" : "80"),
+        SERVER_PORT:
+          parsedAbsoluteUrl.port ||
+          (parsedAbsoluteUrl.protocol === "https:" ? "443" : "80"),
         SERVER_PROTOCOL: "HTTP/1.1",
         HTTP_HOST: parsedAbsoluteUrl.host,
         HTTP_USER_AGENT: "MoodlePlayground/1.0 (WASM)",
@@ -222,7 +231,8 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       // Set cwd to the script's directory so relative paths (e.g.,
       // admin/index.php's `file_exists('../config.php')`) resolve correctly,
       // matching what a real web server does for CGI scripts.
-      const scriptDir = scriptPath.substring(0, scriptPath.lastIndexOf("/")) || "/";
+      const scriptDir =
+        scriptPath.substring(0, scriptPath.lastIndexOf("/")) || "/";
       try {
         // emscriptenModule may be a Promise in WP Playground — await it.
         const module = await emscriptenModule;
@@ -247,15 +257,20 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
       const setCookieKey = Object.keys(phpResponse.headers || {}).find(
         (k) => k.toLowerCase() === "set-cookie",
       );
-      const setCookieHeaders = setCookieKey ? phpResponse.headers[setCookieKey] : [];
+      const setCookieHeaders = setCookieKey
+        ? phpResponse.headers[setCookieKey]
+        : [];
       for (const header of setCookieHeaders) {
         const parts = header.split(";")[0];
         const eqIndex = parts.indexOf("=");
         if (eqIndex > 0) {
           const name = parts.substring(0, eqIndex).trim();
           const value = parts.substring(eqIndex + 1).trim();
-          if (value === "" || header.toLowerCase().includes("max-age=0")
-              || header.toLowerCase().includes("expires=thu, 01 jan 1970")) {
+          if (
+            value === "" ||
+            header.toLowerCase().includes("max-age=0") ||
+            header.toLowerCase().includes("expires=thu, 01 jan 1970")
+          ) {
             cookies.delete(name);
           } else {
             cookies.set(name, value);
@@ -282,7 +297,10 @@ export function wrapPhpInstance(php, { syncFs = null, absoluteUrl = "http://loca
           return { exists: false };
         }
         const isFolder = php.isDir(path);
-        return { exists: true, object: { isFolder, mode: isFolder ? 0o40755 : 0o100644 } };
+        return {
+          exists: true,
+          object: { isFolder, mode: isFolder ? 0o40755 : 0o100644 },
+        };
       } catch {
         return { exists: false };
       }

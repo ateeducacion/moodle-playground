@@ -1,0 +1,72 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/my/",
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Multi-User Demo"
+      }
+    },
+    {
+      "step": "createCategory",
+      "name": "Demo Courses"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Sample Course",
+      "shortname": "DEMO101",
+      "category": "Demo Courses"
+    },
+    {
+      "step": "createUsers",
+      "users": [
+        {
+          "username": "teacher1",
+          "password": "Teacher1!",
+          "email": "teacher1@example.com",
+          "firstname": "Jane",
+          "lastname": "Teacher"
+        },
+        {
+          "username": "student1",
+          "password": "Student1!",
+          "email": "student1@example.com",
+          "firstname": "John",
+          "lastname": "Student"
+        },
+        {
+          "username": "student2",
+          "password": "Student2!",
+          "email": "student2@example.com",
+          "firstname": "Alice",
+          "lastname": "Learner"
+        }
+      ]
+    },
+    {
+      "step": "enrolUsers",
+      "enrolments": [
+        { "username": "teacher1", "course": "DEMO101", "role": "editingteacher" },
+        { "username": "student1", "course": "DEMO101", "role": "student" },
+        { "username": "student2", "course": "DEMO101", "role": "student" }
+      ]
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/my/"
+    }
+  ]
+}

@@ -48,6 +48,13 @@ node --check src/runtime/php-loader.js
 node --check src/runtime/php-compat.js
 node --check src/shell/main.js
 node --check src/remote/main.js
+node --check src/blueprint/index.js
+```
+
+Run the blueprint unit tests:
+
+```bash
+npm run test:blueprint
 ```
 
 ## Building the documentation
@@ -69,11 +76,25 @@ The playground supports URL parameters to select Moodle and PHP versions:
 |-----------|---------|-------------|
 | `moodle`  | `?moodle=4.4` | Moodle version |
 | `php`     | `?php=8.3` | PHP version |
+| `blueprint` | `?blueprint=<json-or-base64>` | Inline blueprint (JSON, base64, or data-URL) |
+| `blueprint-url` | `?blueprint-url=<url>` | URL to a remote blueprint file |
 
 These can also be set via the Settings panel in the UI.
 
 ## Blueprints
 
-Blueprints are JSON files that configure the initial state of a playground instance. See the [Blueprint reference](blueprint-json.md) for details.
+Blueprints are step-based JSON files that configure and provision a playground instance at boot. They can create users, categories, courses, enrolments, course modules, and more.
 
-The default blueprint is at `assets/blueprints/default.blueprint.json`.
+```json
+{
+  "steps": [
+    { "step": "installMoodle", "options": { "siteName": "My Moodle" } },
+    { "step": "login", "username": "admin" },
+    { "step": "createCourse", "fullname": "Demo", "shortname": "DEMO1", "category": "Miscellaneous" }
+  ]
+}
+```
+
+See the [Blueprint reference](blueprint-json.md) for the full format and all step types.
+
+The default blueprint is at `assets/blueprints/default.blueprint.json`. Example blueprints are in `assets/blueprints/examples/`.
