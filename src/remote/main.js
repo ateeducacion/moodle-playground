@@ -3,6 +3,7 @@ import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
 import { saveSessionState } from "../shared/storage.js";
+import { parseRuntimeId } from "../shared/version-resolver.js";
 
 const overlayEl = document.querySelector(".remote-boot__card");
 const titleEl = document.querySelector("#remote-title");
@@ -514,9 +515,25 @@ async function bootstrapRemote() {
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   const blueprint = loadBlueprint(scopeId);
-  const runtime =
-    config.runtimes.find((entry) => entry.id === requestedRuntimeId) ||
-    getDefaultRuntime(config);
+  let runtime = config.runtimes.find(
+    (entry) => entry.id === requestedRuntimeId,
+  );
+  if (!runtime) {
+    const parsed = parseRuntimeId(requestedRuntimeId);
+    if (parsed) {
+      runtime = config.runtimes.find((entry) => {
+        const entryParsed = parseRuntimeId(entry.id);
+        return (
+          entryParsed &&
+          entryParsed.phpVersion === parsed.phpVersion &&
+          entryParsed.moodleBranch === parsed.moodleBranch
+        );
+      });
+    }
+    if (!runtime) {
+      runtime = getDefaultRuntime(config);
+    }
+  }
   setOverlayVisible(true);
 
   if (

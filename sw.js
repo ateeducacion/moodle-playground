@@ -174,7 +174,7 @@ async function serializeRequest(request) {
   };
 }
 
-function buildPhpRequest(originalRequest, forwardedUrl) {
+async function buildPhpRequest(originalRequest, forwardedUrl) {
   const init = {
     method: originalRequest.method,
     headers: new Headers(originalRequest.headers),
@@ -182,8 +182,7 @@ function buildPhpRequest(originalRequest, forwardedUrl) {
   };
 
   if (!["GET", "HEAD"].includes(originalRequest.method)) {
-    init.body = originalRequest.body;
-    init.duplex = "half";
+    init.body = await originalRequest.arrayBuffer();
   }
 
   return new Request(forwardedUrl.toString(), init);
@@ -342,55 +341,59 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   event.respondWith((async () => {
-    const url = new URL(event.request.url);
-    if (url.origin !== self.location.origin) {
-      return fetch(event.request);
-    }
+    try {
+      const url = new URL(event.request.url);
+      if (url.origin !== self.location.origin) {
+        return fetch(event.request);
+      }
 
-    const scopedRequest = await resolveScopedRequest(event, url);
-    if (!scopedRequest) {
-      return fetch(event.request);
-    }
+      const scopedRequest = await resolveScopedRequest(event, url);
+      if (!scopedRequest) {
+        return fetch(event.request);
+      }
 
-    const { scopeId, runtimeId, requestPath } = scopedRequest;
-    if (event.clientId) {
-      clientContexts.set(event.clientId, { scopeId, runtimeId });
-    }
+      const { scopeId, runtimeId, requestPath } = scopedRequest;
+      if (event.clientId) {
+        clientContexts.set(event.clientId, { scopeId, runtimeId });
+      }
 
-    const directScoped = extractScopedRuntime(url.pathname, url.search);
-    if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
-      return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
-    }
+      const directScoped = extractScopedRuntime(url.pathname, url.search);
+      if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
+        return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
+      }
 
-    const forwardedUrl = new URL(requestPath, `${url.origin}/`);
+      const forwardedUrl = new URL(requestPath, `${url.origin}/`);
 
-    await broadcastToClients({
-      kind: "sw-debug",
-      detail: `Intercepting ${event.request.method} ${url.pathname}`,
-    });
-
-    const response = await forwardToPhpWorker({
-      request: buildPhpRequest(event.request, forwardedUrl),
-      runtimeId,
-      scopeId,
-    }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
-
-    if (response.status >= 300 && response.status < 400) {
       await broadcastToClients({
         kind: "sw-debug",
-        detail: `Redirect ${response.status} from ${requestPath} → Location: ${response.headers.get("location") || "(none)"}`,
+        detail: `Intercepting ${event.request.method} ${url.pathname}`,
       });
-    }
 
-    const locationScopedResponse = rewriteScopedLocation(response, {
-      origin: url.origin,
-      scopeId,
-      runtimeId,
-    });
-    return rewriteScopedHtmlResponse(locationScopedResponse, {
-      origin: url.origin,
-      scopeId,
-      runtimeId,
-    });
+      const response = await forwardToPhpWorker({
+        request: await buildPhpRequest(event.request, forwardedUrl),
+        runtimeId,
+        scopeId,
+      }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
+
+      if (response.status >= 300 && response.status < 400) {
+        await broadcastToClients({
+          kind: "sw-debug",
+          detail: `Redirect ${response.status} from ${requestPath} → Location: ${response.headers.get("location") || "(none)"}`,
+        });
+      }
+
+      const locationScopedResponse = rewriteScopedLocation(response, {
+        origin: url.origin,
+        scopeId,
+        runtimeId,
+      });
+      return rewriteScopedHtmlResponse(locationScopedResponse, {
+        origin: url.origin,
+        scopeId,
+        runtimeId,
+      });
+    } catch (err) {
+      return buildErrorResponse(String(err?.stack || err?.message || err));
+    }
   })());
 });
