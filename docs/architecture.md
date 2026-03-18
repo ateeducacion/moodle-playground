@@ -67,8 +67,6 @@ Some patches are applied at build time (copied into the VFS), others at runtime 
 
 - `lib/dml/sqlite3_pdo_moodle_database.php` — restored deprecated SQLite PDO driver
 - `lib/ddl/sqlite_sql_generator.php` — DDL generator for SQLite
-- `lib/xmlize.php` — XML parser compatibility
-- `lib/xmldb/xmldb_file.php` — XMLDB loading fix
 - `lib/classes/encryption.php` — OpenSSL fallback (no sodium)
 
 **Runtime patches** (`bootstrap.js`):
