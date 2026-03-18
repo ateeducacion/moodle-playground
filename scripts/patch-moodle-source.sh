@@ -13,15 +13,23 @@ if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
   exit 1
 fi
 
-# Determine which patch directory to use for file copies:
-# prefer patches/shared, fall back to legacy patches/moodle
+# Determine which patch directory to use for shared file copies:
+# prefer patches/shared, fall back to legacy patches/moodle.
+# Shared patches are branch-agnostic and target lib/... paths; the script
+# adds the public/ prefix automatically for Moodle 5.1+ source trees.
 if [ -d "$SHARED_PATCH_DIR" ]; then
   PATCH_DIR="$SHARED_PATCH_DIR"
 else
   PATCH_DIR="$LEGACY_PATCH_DIR"
 fi
 
-# Per-branch patch directory (applied after shared patches)
+# Per-branch patch directory (applied after shared patches).
+# Branch patches are copied literally relative to the Moodle source root.
+# Example:
+#   patches/MOODLE_500_STABLE/lib/foo.php    -> <source>/lib/foo.php
+#   patches/main/public/lib/foo.php          -> <source>/public/lib/foo.php
+# A nested "moodle/" directory is not special-cased and would be copied
+# literally to <source>/moodle/..., so reject that layout explicitly.
 BRANCH_PATCH_DIR=""
 if [ -n "$BRANCH" ] && [ -d "$SCRIPT_DIR/../patches/$BRANCH" ]; then
   BRANCH_PATCH_DIR="$SCRIPT_DIR/../patches/$BRANCH"
@@ -319,6 +327,13 @@ if [ -n "$BRANCH_PATCH_DIR" ]; then
   echo "Applying per-branch patches from $BRANCH_PATCH_DIR" >&2
   find "$BRANCH_PATCH_DIR" -type f -name '*.php' | while IFS= read -r patchfile; do
     relpath="${patchfile#"$BRANCH_PATCH_DIR/"}"
+    case "$relpath" in
+      moodle/*)
+        echo "Error: branch patch $patchfile uses unsupported path '$relpath'." >&2
+        echo "Branch patches must be relative to the Moodle source root, e.g. lib/... or public/lib/..." >&2
+        exit 1
+        ;;
+    esac
     target_dir="$SOURCE_DIR/$(dirname "$relpath")"
     mkdir -p "$target_dir"
     cp "$patchfile" "$SOURCE_DIR/$relpath"

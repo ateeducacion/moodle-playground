@@ -93,16 +93,26 @@ Relevant defaults seeded during this work:
 
 Restored patch files:
 
-- `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
-- `patches/moodle/lib/ddl/sqlite_sql_generator.php`
+- `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
+- `patches/shared/lib/ddl/sqlite_sql_generator.php`
 
 Additional historical compatibility patches needed by Moodle 5.0 in this prototype:
 
-- `patches/moodle/lib/classes/encryption.php`
+- `patches/shared/lib/classes/encryption.php`
 
 Patch copier:
 
 - `scripts/patch-moodle-source.sh`
+
+Patch layout:
+
+- `patches/shared/` is the preferred shared patch root
+- `patches/moodle/` is a legacy fallback
+- `patches/<branch>/` contains optional branch-specific overrides copied relative to the source root
+
+For shared patches, the copier handles legacy-root vs `public/` source trees automatically.
+Branch-specific overrides should mirror the actual source-root path they target, including
+`public/` when required.
 
 Why these extra files were needed:
 
@@ -202,9 +212,9 @@ Fix:
 
 These files contain the long-lived Moodle-side prototype patches:
 
-- `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
-- `patches/moodle/lib/ddl/sqlite_sql_generator.php`
-- `patches/moodle/lib/classes/encryption.php`
+- `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
+- `patches/shared/lib/ddl/sqlite_sql_generator.php`
+- `patches/shared/lib/classes/encryption.php`
 
 These files contain runtime-only overrides and bootstrap workarounds:
 
@@ -274,9 +284,9 @@ node --check lib/config-template.js
 node --check src/remote/main.js
 node --check sw.js
 node --check lib/moodle-loader.js
-php -l patches/moodle/lib/classes/encryption.php
-php -l patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php
-php -l patches/moodle/lib/ddl/sqlite_sql_generator.php
+php -l patches/shared/lib/classes/encryption.php
+php -l patches/shared/lib/dml/sqlite3_pdo_moodle_database.php
+php -l patches/shared/lib/ddl/sqlite_sql_generator.php
 ```
 
 Bundle patching:

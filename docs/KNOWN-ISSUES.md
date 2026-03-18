@@ -37,7 +37,7 @@ The `@php-wasm/web` PHP 8.3 runtime includes most previously-missing extensions
 (`curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`) built into the WASM binary.
 
 **sodium is NOT available** in the WASM binary. The OpenSSL fallback patch in
-`patches/moodle/lib/classes/encryption.php` handles all encryption needs. The
+`patches/shared/lib/classes/encryption.php` handles all encryption needs. The
 Moodle environment check will show sodium as missing — this is cosmetic only.
 
 **OPcache cannot work** in the WASM SAPI. This is a PHP/Emscripten limitation,
@@ -63,7 +63,7 @@ Current state:
 Where to continue:
 
 - decide whether each patch should live permanently in:
-  - `patches/moodle/...`
+  - `patches/shared/...`
   - or in runtime-only overrides in `src/runtime/bootstrap.js`
 
 Main files involved:

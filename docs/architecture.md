@@ -63,11 +63,20 @@ A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) is generated
 
 Some patches are applied at build time (copied into the VFS), others at runtime (written to the writable overlay at boot):
 
-**Build-time patches** (`patches/moodle/`):
+**Build-time patches**:
+
+- `patches/shared/` — canonical shared patch root
+- `patches/moodle/` — legacy fallback root used only if `patches/shared/` is absent
+- `patches/<branch>/` — optional per-branch overrides copied relative to the source root
 
 - `lib/dml/sqlite3_pdo_moodle_database.php` — restored deprecated SQLite PDO driver
 - `lib/ddl/sqlite_sql_generator.php` — DDL generator for SQLite
 - `lib/classes/encryption.php` — OpenSSL fallback (no sodium)
+
+For shared patches, `patch-moodle-source.sh` detects whether the Moodle source tree uses
+the legacy root layout or the newer `public/` layout and writes the files to the correct
+destination automatically. Branch-specific overrides should mirror the actual source-root
+path they target, including `public/` when needed.
 
 **Runtime patches** (`bootstrap.js`):
 

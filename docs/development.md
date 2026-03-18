@@ -59,7 +59,9 @@ src/
     php/helpers.js     # PHP code generators for Moodle API calls
   shared/              # Shared utilities
   styles/app.css       # App stylesheet
-patches/moodle/        # Build-time Moodle patches
+patches/shared/        # Canonical shared build-time patches
+patches/moodle/        # Legacy fallback patch root
+patches/<branch>/      # Optional branch-specific source-root overrides
 scripts/               # Build and utility scripts
 assets/blueprints/     # Blueprint definitions and examples
 tests/blueprint/       # Blueprint unit tests
@@ -103,3 +105,21 @@ After changes, verify in a real browser:
 - Service worker updates after redeploy
 
 If a change touches routing or HTML rewriting, prefer checking real browser behavior, not only syntax.
+
+## Patch layout
+
+The patch copier uses a layered model:
+
+- `patches/shared/` is the preferred shared patch root
+- `patches/moodle/` is a legacy fallback if `patches/shared/` is absent
+- `patches/<branch>/` is an optional branch-specific override layer
+
+Shared patches are branch-agnostic and target `lib/...` paths. The script automatically
+adds the `public/` prefix when patching Moodle 5.1+ source trees.
+
+Branch-specific patches are copied literally relative to the Moodle source root:
+
+- `patches/MOODLE_500_STABLE/lib/foo.php` -> `<source>/lib/foo.php`
+- `patches/main/public/lib/foo.php` -> `<source>/public/lib/foo.php`
+
+Do not use `patches/<branch>/moodle/...`; that path is not special-cased.

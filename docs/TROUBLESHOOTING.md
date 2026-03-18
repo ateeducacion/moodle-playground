@@ -15,9 +15,9 @@ node --check src/runtime/bootstrap.js
 node --check src/runtime/php-loader.js
 node --check src/remote/main.js
 node --check lib/moodle-loader.js
-php -l patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php
-php -l patches/moodle/lib/ddl/sqlite_sql_generator.php
-php -l patches/moodle/lib/classes/encryption.php
+php -l patches/shared/lib/dml/sqlite3_pdo_moodle_database.php
+php -l patches/shared/lib/ddl/sqlite_sql_generator.php
+php -l patches/shared/lib/classes/encryption.php
 ```
 
 Bundle and runtime:
@@ -66,7 +66,7 @@ Examples:
 
 Files:
 
-- `patches/moodle/lib/ddl/sqlite_sql_generator.php`
+- `patches/shared/lib/ddl/sqlite_sql_generator.php`
 
 Notes:
 
@@ -82,7 +82,7 @@ Examples:
 
 Files:
 
-- `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
+- `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
 - runtime override in `src/runtime/bootstrap.js`
 
 ### `Invalid cache store in config` warnings everywhere
@@ -110,7 +110,7 @@ Likely cause:
 
 Files:
 
-- `patches/moodle/lib/classes/encryption.php`
+- `patches/shared/lib/classes/encryption.php`
 - runtime override in `src/runtime/bootstrap.js`
 - `src/runtime/config-template.js`
 - `lib/config-template.js`

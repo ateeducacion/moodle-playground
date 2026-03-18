@@ -105,7 +105,7 @@ The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
 `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
 
 **Note:** `sodium` is NOT available in the WASM binary despite what earlier documentation
-claimed. The OpenSSL fallback patch in `patches/moodle/lib/classes/encryption.php` handles
+claimed. The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handles
 all encryption needs.
 
 ### Responsibilities
@@ -153,6 +153,25 @@ but persists across PHP script executions within the same worker session.
 Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
 Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
 
+## Patch Layout
+
+Build-time Moodle patches use a layered layout:
+
+- `patches/shared/` — canonical shared patch root
+- `patches/moodle/` — legacy fallback if `patches/shared/` is absent
+- `patches/<branch>/` — optional branch-specific overrides
+
+Shared patches are branch-agnostic and target `lib/...` paths. `scripts/patch-moodle-source.sh`
+detects the Moodle source layout and adds the `public/` prefix automatically for 5.1+ trees.
+
+Branch-specific patches are copied literally relative to the Moodle source root:
+
+- use `patches/MOODLE_500_STABLE/lib/...` for legacy-root branches
+- use `patches/main/public/lib/...` for `public/` branches
+
+Do not put branch overrides under `patches/<branch>/moodle/...`; the script does not treat
+`moodle/` specially and would copy that path literally into the source tree.
+
 ## SQLite Prototype Invariants
 
 This repo is no longer using the old active PGlite database path for the main runtime.
@@ -195,9 +214,9 @@ Important files for this prototype:
 - `lib/moodle-loader.js`
 - `scripts/patch-moodle-source.sh`
 - `scripts/generate-install-snapshot.sh`
-- `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
-- `patches/moodle/lib/ddl/sqlite_sql_generator.php`
-- `patches/moodle/lib/classes/encryption.php`
+- `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
+- `patches/shared/lib/ddl/sqlite_sql_generator.php`
+- `patches/shared/lib/classes/encryption.php`
 
 Prototype-specific defaults currently matter during first boot:
 
