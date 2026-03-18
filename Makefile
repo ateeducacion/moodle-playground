@@ -92,7 +92,7 @@ serve:
 up: deps build-version build-worker bundle-all-pretty serve
 
 up-local: deps build-version bundle
-	./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)
+	BRANCH=$${BRANCH:-$(DEFAULT_BRANCH)} ./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)
 
 test:
 	node --test tests/**/*.test.js

@@ -104,6 +104,7 @@ Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-
 | `make bundle-all` | Rebuild all Moodle bundles; supports parallel jobs via `JOBS=...` |
 | `make bundle-all-pretty` | Rebuild all Moodle bundles with colorized per-branch output |
 | `make serve` | Start a local server on port 8080 |
+| `make up-local` | Start native `php -S` Moodle for the selected branch (`BRANCH=...`, isolated local SQLite per branch) |
 | `make clean` | Remove generated bundle and manifest artifacts |
 | `make reset` | Full clean including vendored runtime assets |
 | `npm run test:blueprint` | Run blueprint unit tests |

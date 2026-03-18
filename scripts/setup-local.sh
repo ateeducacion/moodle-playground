@@ -15,17 +15,34 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 PORT=${1:-8081}
 PHP_BIN=${2:-php}
+BRANCH=${BRANCH:-MOODLE_500_STABLE}
+BRANCH_KEY=$(printf '%s' "$BRANCH" | sed 's/[^A-Za-z0-9._-]/_/g')
 
-MOODLE_DIR="$REPO_DIR/.cache/build-moodle/stage/source/moodle"
-LOCAL_DIR="$REPO_DIR/.cache/local"
+MOODLE_DIR="$REPO_DIR/.cache/moodle/$BRANCH"
+LOCAL_DIR="$REPO_DIR/.cache/local/$BRANCH_KEY"
 MOODLEDATA_DIR="$LOCAL_DIR/moodledata"
-DB_FILE="$MOODLEDATA_DIR/moodle_local.sq3.php"
+DB_FILE="$MOODLEDATA_DIR/moodle_local_${BRANCH_KEY}.sq3.php"
+CONFIG_FILE="$MOODLE_DIR/config.php"
+DOCROOT="$MOODLE_DIR"
 
 if [ ! -d "$MOODLE_DIR" ]; then
   echo "Patched Moodle source not found at $MOODLE_DIR" >&2
-  echo "Run 'make bundle' first to download and patch Moodle." >&2
+  echo "Run 'BRANCH=$BRANCH make bundle' first to download and patch Moodle." >&2
   exit 1
 fi
+
+if [ -f "$MOODLE_DIR/public/lib/setup.php" ]; then
+  DOCROOT="$MOODLE_DIR/public"
+fi
+
+# Keep local native PHP aligned with the minimum Moodle settings used by the
+# WASM runtime and snapshot generation scripts.
+PHP_COMMON_ARGS="
+-d max_input_vars=5000
+-d memory_limit=512M
+-d post_max_size=128M
+-d upload_max_filesize=128M
+"
 
 # Check native PHP has pdo_sqlite
 if ! "$PHP_BIN" -m 2>/dev/null | grep -qi pdo_sqlite; then
@@ -42,8 +59,9 @@ mkdir -p "$MOODLEDATA_DIR/temp/sessions"
 
 WWWROOT="http://localhost:$PORT"
 
-# Write config.php into the Moodle source directory
-cat > "$MOODLE_DIR/config.php" <<CONFIGEOF
+# Write config.php into the Moodle source directory.
+# For public-root Moodle branches, public/config.php already loads ../config.php.
+cat > "$CONFIG_FILE" <<CONFIGEOF
 <?php
 unset(\$CFG);
 global \$CFG;
@@ -52,7 +70,7 @@ global \$CFG;
 \$CFG->dbtype = 'sqlite3';
 \$CFG->dblibrary = 'pdo';
 \$CFG->dbhost = 'localhost';
-\$CFG->dbname = 'moodle_local';
+\$CFG->dbname = 'moodle_local_${BRANCH_KEY}';
 \$CFG->dbuser = '';
 \$CFG->dbpass = '';
 \$CFG->prefix = 'mdl_';
@@ -115,7 +133,8 @@ CONFIGEOF
 if [ ! -f "$DB_FILE" ]; then
   echo "=== First run: installing Moodle via CLI ===" >&2
   cd "$MOODLE_DIR"
-  "$PHP_BIN" admin/cli/install_database.php \
+  # shellcheck disable=SC2086
+  "$PHP_BIN" $PHP_COMMON_ARGS admin/cli/install_database.php \
     --lang=en \
     --adminuser=admin \
     --adminpass='password' \
@@ -131,15 +150,19 @@ if [ ! -f "$DB_FILE" ]; then
 fi
 
 echo "=== Moodle local PHP setup ===" >&2
+echo "Branch:        $BRANCH" >&2
 echo "Moodle source: $MOODLE_DIR" >&2
+echo "Docroot:       $DOCROOT" >&2
+echo "Config:        $CONFIG_FILE" >&2
 echo "Moodledata:    $MOODLEDATA_DIR" >&2
 echo "Database:      $DB_FILE" >&2
 echo "URL:           $WWWROOT" >&2
 echo "" >&2
 echo "PHP binary:    $PHP_BIN ($("$PHP_BIN" -v 2>&1 | head -1))" >&2
-echo "Starting $PHP_BIN -S on port $PORT..." >&2
+echo "Starting $PHP_BIN -S on port $PORT with docroot $DOCROOT..." >&2
 echo "Open $WWWROOT in your browser." >&2
 echo "" >&2
 
 cd "$MOODLE_DIR"
-exec "$PHP_BIN" -S "localhost:$PORT"
+# shellcheck disable=SC2086
+exec "$PHP_BIN" $PHP_COMMON_ARGS -S "localhost:$PORT" -t "$DOCROOT"

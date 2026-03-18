@@ -35,6 +35,7 @@ This project uses npm, esbuild, and a small Makefile workflow.
 - npm
 - Python 3
 - Git
+- PHP 8.3 with `pdo_sqlite` for `make up-local`
 
 ### Common Commands
 
@@ -52,7 +53,14 @@ make bundle-all
 make bundle-all-pretty
 make serve
 make up
+make up-local
 ```
+
+`make up-local` starts a native `php -S` Moodle using the patched checkout in
+`.cache/moodle/<branch>`. It respects `BRANCH=...` and isolates local SQLite state per branch
+under `.cache/local/<branch>/`, so switching between `MOODLE_500_STABLE` and `main` does not
+reuse the same database or `moodledata`. For `main`, the script serves the `public/` docroot
+automatically.
 
 ### Generated Assets
 

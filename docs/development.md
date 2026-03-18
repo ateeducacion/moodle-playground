@@ -16,7 +16,21 @@ make bundle-all      # Build all Moodle bundles (use JOBS=... to parallelize)
 make bundle-all-pretty # Build all bundles with colorized per-branch output
 make serve           # Start dev server on port 8080
 make up              # Full build + serve
+make up-local        # Run a native php -S Moodle for the selected branch
 ```
+
+`make up-local` respects `BRANCH=...` and reuses the patched checkout in `.cache/moodle/<branch>`.
+Examples:
+
+```bash
+make up-local
+BRANCH=main make up-local
+BRANCH=MOODLE_500_STABLE LOCAL_PORT=8082 LOCAL_PHP=php83 make up-local
+```
+
+Local SQLite installs are isolated per branch under `.cache/local/<branch>/`, so switching
+between `MOODLE_500_STABLE` and `main` does not reuse the same database or `moodledata`.
+The local PHP binary must have `pdo_sqlite` enabled.
 
 ## Worker bundling
 
