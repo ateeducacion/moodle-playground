@@ -48,11 +48,45 @@ mkdir -p "$COMPONENT_CACHE_DIR"
 ${PHP_BIN:-php} "$SCRIPT_DIR/generate-component-cache.php" "$MOODLE_DIR" "$COMPONENT_CACHE_FILE" "/www/moodle"
 
 SNAPSHOT_DIR="$DIST_DIR/snapshot"
-echo "Generating install snapshot" >&2
-if "$SCRIPT_DIR/generate-install-snapshot.sh" "$MOODLE_DIR" "$SNAPSHOT_DIR"; then
-  echo "Snapshot generated successfully" >&2
-else
-  echo "WARNING: Snapshot generation failed (exit $?) — bundle will work without it (runtime falls back to CLI install)" >&2
+
+# Snapshot caching: compute a fingerprint from the inputs that affect the snapshot
+# (Moodle source commit + patches + snapshot/patch/component-cache scripts).
+# If a cached snapshot with a matching fingerprint exists, skip regeneration.
+SNAPSHOT_CACHE_DIR=${SNAPSHOT_CACHE_DIR:-"$REPO_DIR/.cache/snapshots"}
+SNAPSHOT_FINGERPRINT=""
+if [ -n "$BRANCH" ] && [ -d "$MOODLE_DIR/.git" ]; then
+  MOODLE_COMMIT=$(git -C "$MOODLE_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+  SCRIPTS_HASH=$(cat \
+    "$SCRIPT_DIR/generate-install-snapshot.sh" \
+    "$SCRIPT_DIR/patch-moodle-source.sh" \
+    "$SCRIPT_DIR/generate-component-cache.php" \
+    2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  PATCHES_HASH=$(find "$REPO_DIR/patches" -type f 2>/dev/null | sort | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  SNAPSHOT_FINGERPRINT="${MOODLE_COMMIT}-$(printf '%.16s' "$SCRIPTS_HASH")-$(printf '%.16s' "$PATCHES_HASH")"
+fi
+
+SNAPSHOT_CACHED=false
+if [ -n "$SNAPSHOT_FINGERPRINT" ] && [ -f "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3" ]; then
+  echo "Snapshot cache hit: $SNAPSHOT_FINGERPRINT" >&2
+  mkdir -p "$SNAPSHOT_DIR"
+  cp "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3" "$SNAPSHOT_DIR/install.sq3"
+  SNAPSHOT_CACHED=true
+fi
+
+if [ "$SNAPSHOT_CACHED" = false ]; then
+  echo "Generating install snapshot (fingerprint: ${SNAPSHOT_FINGERPRINT:-none})" >&2
+  if "$SCRIPT_DIR/generate-install-snapshot.sh" "$MOODLE_DIR" "$SNAPSHOT_DIR"; then
+    echo "Snapshot generated successfully" >&2
+    # Save to cache for future builds
+    if [ -n "$SNAPSHOT_FINGERPRINT" ] && [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
+      rm -rf "${SNAPSHOT_CACHE_DIR:?}/$BRANCH"
+      mkdir -p "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT"
+      cp "$SNAPSHOT_DIR/install.sq3" "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3"
+      echo "Snapshot cached: $SNAPSHOT_FINGERPRINT" >&2
+    fi
+  else
+    echo "WARNING: Snapshot generation failed (exit $?) — bundle will work without it (runtime falls back to CLI install)" >&2
+  fi
 fi
 
 # Moodle 5.1+ moves version.php under public/

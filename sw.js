@@ -50,6 +50,11 @@ function withAppBasePath(pathname) {
   return `${basePath}${pathname.startsWith("/") ? pathname : `/${pathname}`}`.replace(/\/{2,}/gu, "/");
 }
 
+function isStaticHostPath(pathname) {
+  const strippedPathname = stripAppBasePath(pathname);
+  return STATIC_PREFIXES.some((prefix) => strippedPathname === prefix || strippedPathname.startsWith(prefix));
+}
+
 function buildErrorResponse(message, status = 500) {
   return new Response(
     `<!doctype html><meta charset="utf-8"><title>Moodle Playground Error</title><body><pre>${message}</pre></body>`,
@@ -122,7 +127,7 @@ async function resolveScopedRequest(event, url) {
     return direct;
   }
 
-  if (STATIC_PREFIXES.some((prefix) => strippedPathname === prefix || strippedPathname.startsWith(prefix))) {
+  if (isStaticHostPath(url.pathname)) {
     return null;
   }
 
@@ -265,7 +270,7 @@ function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
       return absolutePath;
     }
 
-    if (appBasePath !== "/" && (absolute.pathname === appBasePath || absolute.pathname.startsWith(`${appBasePath}/`))) {
+    if (isStaticHostPath(absolute.pathname)) {
       return absolutePath;
     }
 
@@ -273,7 +278,16 @@ function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
       return decodedValue;
     }
 
-    return `${scopedBasePath}${absolutePath.startsWith("/") ? absolutePath : `/${absolutePath}`}`.replace(/\/{2,}/gu, "/");
+    if (
+      appBasePath !== "/"
+      && absolute.pathname !== appBasePath
+      && !absolute.pathname.startsWith(`${appBasePath}/`)
+    ) {
+      return decodedValue;
+    }
+
+    const runtimePath = `${stripAppBasePath(absolute.pathname)}${absolute.search}${absolute.hash}`;
+    return `${scopedBasePath}${runtimePath.startsWith("/") ? runtimePath : `/${runtimePath}`}`.replace(/\/{2,}/gu, "/");
   } catch {
     return decodedValue;
   }

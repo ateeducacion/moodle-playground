@@ -6,6 +6,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+const STATIC_PREFIXES = [
+  "/assets/",
+  "/src/",
+  "/vendor/",
+  "/php-worker.js",
+  "/sw.js",
+  "/remote.html",
+  "/index.html",
+  "/playground.config.json",
+  "/favicon.ico",
+  "/favicon-32x32.png",
+  "/apple-touch-icon.png",
+  "/logo.png",
+];
+
 // Replicate decodeHtmlAttributeEntities from sw.js
 function decodeHtmlAttributeEntities(value) {
   return value
@@ -21,6 +36,101 @@ function decodeHtmlAttributeEntities(value) {
     .replaceAll("&apos;", "'")
     .replaceAll("&sol;", "/")
     .replaceAll("&colon;", ":");
+}
+
+function stripAppBasePath(pathname, appBasePath = "/") {
+  if (appBasePath === "/") {
+    return pathname || "/";
+  }
+
+  if (pathname === appBasePath) {
+    return "/";
+  }
+
+  if (pathname.startsWith(`${appBasePath}/`)) {
+    return pathname.slice(appBasePath.length) || "/";
+  }
+
+  return pathname || "/";
+}
+
+function isStaticHostPath(pathname, appBasePath = "/") {
+  const strippedPathname = stripAppBasePath(pathname, appBasePath);
+  return STATIC_PREFIXES.some(
+    (prefix) =>
+      strippedPathname === prefix || strippedPathname.startsWith(prefix),
+  );
+}
+
+function rewriteHtmlAttributeUrl(
+  rawValue,
+  { origin, scopeId, runtimeId, appBasePath = "/" },
+) {
+  const decodedValue = decodeHtmlAttributeEntities(rawValue);
+  const scopedBasePath =
+    appBasePath === "/"
+      ? `/playground/${scopeId}/${runtimeId}`
+      : `${appBasePath}/playground/${scopeId}/${runtimeId}`;
+
+  if (!decodedValue) {
+    return decodedValue;
+  }
+
+  if (
+    decodedValue.startsWith("#") ||
+    decodedValue.startsWith("javascript:") ||
+    decodedValue.startsWith("data:") ||
+    decodedValue.startsWith("mailto:") ||
+    decodedValue.startsWith("tel:") ||
+    decodedValue.startsWith("//")
+  ) {
+    return decodedValue;
+  }
+
+  if (!decodedValue.startsWith("/") && !decodedValue.includes("://")) {
+    return decodedValue;
+  }
+
+  try {
+    const absolute = new URL(decodedValue, origin);
+    if (absolute.origin !== origin) {
+      return decodedValue;
+    }
+
+    const absolutePath = `${absolute.pathname}${absolute.search}${absolute.hash}`;
+    if (
+      absolute.pathname.startsWith(`${scopedBasePath}/`) ||
+      absolute.pathname === scopedBasePath
+    ) {
+      return absolutePath;
+    }
+
+    if (isStaticHostPath(absolute.pathname, appBasePath)) {
+      return absolutePath;
+    }
+
+    if (!absolute.pathname.startsWith("/")) {
+      return decodedValue;
+    }
+
+    if (
+      appBasePath !== "/" &&
+      absolute.pathname !== appBasePath &&
+      !absolute.pathname.startsWith(`${appBasePath}/`)
+    ) {
+      return decodedValue;
+    }
+
+    const runtimePath = `${stripAppBasePath(
+      absolute.pathname,
+      appBasePath,
+    )}${absolute.search}${absolute.hash}`;
+    return `${scopedBasePath}${
+      runtimePath.startsWith("/") ? runtimePath : `/${runtimePath}`
+    }`.replace(/\/{2,}/gu, "/");
+  } catch {
+    return decodedValue;
+  }
 }
 
 // Replicate extractScopedRuntime pattern from sw.js
@@ -127,5 +237,66 @@ describe("extractScopedRuntime", () => {
     assert.strictEqual(extractScopedRuntime("/assets/logo.png"), null);
     assert.strictEqual(extractScopedRuntime("/"), null);
     assert.strictEqual(extractScopedRuntime("/index.html"), null);
+  });
+});
+
+describe("rewriteHtmlAttributeUrl", () => {
+  const scope = {
+    origin: "https://ateeducacion.github.io",
+    scopeId: "main",
+    runtimeId: "php83-moodle50",
+    appBasePath: "/moodle-playground",
+  };
+
+  it("rewrites dynamic form actions under the app base path", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/moodle-playground/course/edit.php", scope),
+      "/moodle-playground/playground/main/php83-moodle50/course/edit.php",
+    );
+  });
+
+  it("rewrites javascript.php asset URLs to the runtime scope", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl(
+        "/moodle-playground/lib/javascript.php/-1/lib/requirejs/require.js",
+        scope,
+      ),
+      "/moodle-playground/playground/main/php83-moodle50/lib/javascript.php/-1/lib/requirejs/require.js",
+    );
+  });
+
+  it("rewrites theme font URLs to the runtime scope", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl(
+        "/moodle-playground/theme/font.php/boost/core/1773844643/fa-regular-400.woff2",
+        scope,
+      ),
+      "/moodle-playground/playground/main/php83-moodle50/theme/font.php/boost/core/1773844643/fa-regular-400.woff2",
+    );
+  });
+
+  it("keeps static host assets unchanged", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/moodle-playground/assets/logo.png", scope),
+      "/moodle-playground/assets/logo.png",
+    );
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/moodle-playground/sw.js", scope),
+      "/moodle-playground/sw.js",
+    );
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/moodle-playground/remote.html", scope),
+      "/moodle-playground/remote.html",
+    );
+  });
+
+  it("keeps already scoped URLs unchanged", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl(
+        "/moodle-playground/playground/main/php83-moodle50/course/edit.php?category=0",
+        scope,
+      ),
+      "/moodle-playground/playground/main/php83-moodle50/course/edit.php?category=0",
+    );
   });
 });

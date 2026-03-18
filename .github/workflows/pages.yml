@@ -39,6 +39,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Restore snapshot cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/snapshots
+          key: snapshots-${{ hashFiles('patches/**', 'scripts/generate-install-snapshot.sh', 'scripts/patch-moodle-source.sh', 'scripts/generate-component-cache.php') }}
+          restore-keys: |
+            snapshots-
+
       - name: Prepare runtime assets
         run: make prepare-all JOBS=2
 
