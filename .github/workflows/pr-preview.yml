@@ -96,3 +96,25 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  cleanup-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Netlify deploy
+        run: |
+          npm i -g netlify-cli
+          # Find the deploy by alias and delete it
+          DEPLOY_ID=$(netlify api listSiteDeploys \
+            --data '{"site_id":"'"$NETLIFY_SITE_ID"'"}' 2>/dev/null \
+            | jq -r '.[] | select(.deploy_ssl_url | test("pr-${{ github.event.pull_request.number }}--")) | .id' \
+            | head -n 1) || true
+          if [ -n "$DEPLOY_ID" ]; then
+            netlify api deleteDeploy --data '{"deploy_id":"'"$DEPLOY_ID"'"}' || true
+            echo "Deleted deploy $DEPLOY_ID"
+          else
+            echo "No deploy found for pr-${{ github.event.pull_request.number }}, skipping"
+          fi
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
