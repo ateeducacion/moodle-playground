@@ -40,10 +40,7 @@ jobs:
         run: npm install
 
       - name: Prepare runtime assets
-        run: make prepare
-
-      - name: Build moodle bundle
-        run: make bundle
+        run: make prepare-all JOBS=2
 
       - name: Install docs dependencies
         run: python -m pip install -r requirements-docs.txt

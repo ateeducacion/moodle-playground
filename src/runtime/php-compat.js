@@ -28,9 +28,24 @@ async function normalizeRequest(requestOrUrl) {
     result.headers[key] = value;
   }
 
-  if (!["GET", "HEAD"].includes(request.method) && request.body) {
-    const bodyBuffer = await request.arrayBuffer();
+  if (!["GET", "HEAD"].includes(request.method)) {
+    // Always try to read the body for non-GET/HEAD requests.
+    // Check request.body first (ReadableStream), but also try arrayBuffer()
+    // as a fallback — some browsers may have body bytes without a stream.
+    let bodyBuffer;
+    try {
+      bodyBuffer = await request.arrayBuffer();
+    } catch {
+      bodyBuffer = new ArrayBuffer(0);
+    }
     result.body = new Uint8Array(bodyBuffer);
+    result.headers["content-length"] = String(result.body.byteLength);
+    // TODO: remove debug logging after Firefox AJAX fix is verified
+    if (result.body.byteLength === 0 && request.method === "POST") {
+      console.warn(
+        `[php-compat] POST ${url.pathname} has empty body! request.body=${request.body}, content-type=${result.headers["content-type"] || "none"}`,
+      );
+    }
   }
 
   return result;

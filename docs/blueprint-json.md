@@ -65,7 +65,7 @@ via `config.php`. These settings take effect before any blueprint steps execute.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `debug` | integer | `0` | Moodle debug level |
+| `debug` | integer | `0` | Initial Moodle debug level stored at boot; editable later in Moodle administration |
 | `debugdisplay` | integer | `0` | Display debug messages on page (`1`) or only log them (`0`) |
 
 #### Debug Levels
@@ -78,11 +78,14 @@ via `config.php`. These settings take effect before any blueprint steps execute.
 | `32767` | DEVELOPER | Extra Moodle debug messages for developers |
 
 When `debugdisplay` is `1`, PHP `display_errors` is also enabled so that PHP-level
-errors appear on the page. When `debug` is `32767` (DEVELOPER), Moodle's
-`$CFG->debugdeveloper` is set to `true`.
+errors appear on the page. `debug` is not locked in `config.php`; it is seeded into
+Moodle's stored configuration at boot, so it can still be changed later from the
+site administration UI. When `debug` is `32767` (DEVELOPER), Moodle treats the
+runtime as developer mode after boot.
 
 These settings can also be changed from the Settings dialog in the playground UI
-without editing the blueprint JSON directly.
+without editing the blueprint JSON directly. The playground UI resets the initial
+boot values; Moodle's own admin settings can still change the debug level afterward.
 
 ## Constants
 

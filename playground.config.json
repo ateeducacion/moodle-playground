@@ -18,8 +18,8 @@
   },
   "runtimes": [
     {
-      "id": "php83-cgi",
-      "label": "PHP 8.3 CGI",
+      "id": "php83-moodle50",
+      "label": "PHP 8.3 + Moodle 5.0",
       "phpVersionLabel": "8.3",
       "mountStrategy": "readonly-vfs",
       "default": true

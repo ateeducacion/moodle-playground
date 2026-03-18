@@ -57,6 +57,7 @@ function buildRuntimePaths(webRoot) {
     DATAPRIVACY_SETTINGS_PATH: `${webRoot}/admin/tool/dataprivacy/settings.php`,
     LOG_SETTINGS_PATH: `${webRoot}/admin/tool/log/settings.php`,
     HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
+    THEME_CSS_WARMUP_PATH: `${webRoot}/__theme_css_warmup.php`,
   };
 }
 
@@ -78,6 +79,7 @@ function buildInternalRuntimeFiles(webRoot) {
     paths.DATAPRIVACY_SETTINGS_PATH,
     paths.LOG_SETTINGS_PATH,
     paths.HTTPSREPLACE_SETTINGS_PATH,
+    paths.THEME_CSS_WARMUP_PATH,
   ];
 }
 
@@ -297,6 +299,7 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 }
 
 function createInstallRunnerPhp(effectiveConfig) {
+  const initialDebug = Number(effectiveConfig.debug) || 0;
   const options = {
     lang: effectiveConfig.locale || "en",
     adminuser: effectiveConfig.admin.username,
@@ -622,6 +625,9 @@ $runStage = static function(string $name) use (&$options, &$version, &$release, 
                     set_config($key, $val, $plugin);
                 }
             }
+            set_config('debug', ${initialDebug});
+            $CFG->debug = ${initialDebug};
+            $CFG->debugdeveloper = (${initialDebug} >= 32767);
             echo "[playground] finalize:post-install-defaults-set\\n";
 
             // Ensure moodlecourse plugin defaults exist — course/edit_form.php reads these
@@ -675,7 +681,8 @@ if ($stage === 'themes') {
 `;
 }
 
-function createConfigNormalizerPhp() {
+function createConfigNormalizerPhp(effectiveDebug = 0) {
+  const normalizedDebug = Number(effectiveDebug) || 0;
   return `<?php
 header('content-type: application/json; charset=utf-8');
 error_reporting(E_ALL);
@@ -733,6 +740,11 @@ try {
             $CFG->{$name} = $current;
         }
     }
+
+    set_config('debug', ${normalizedDebug});
+    $result['set']['debug'] = (string) ${normalizedDebug};
+    $CFG->debug = ${normalizedDebug};
+    $CFG->debugdeveloper = (${normalizedDebug} >= 32767);
 
     $pluginDefaults = [
         'moodlecourse' => [
@@ -815,6 +827,57 @@ try {
     admin_apply_default_settings(NULL, false);
     $result['ok'] = true;
     $result['applied'] = true;
+} catch (Throwable $error) {
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+    ];
+}
+
+$buffer = ob_get_clean();
+if ($buffer !== '') {
+    $result['output'] = $buffer;
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+`;
+}
+
+function createThemeCssWarmupPhp() {
+  return `<?php
+header('content-type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+
+unset($_SERVER['REMOTE_ADDR']);
+define('CLI_SCRIPT', true);
+
+$result = ['ok' => false];
+
+try {
+    require_once('/www/moodle/config.php');
+    require_once($CFG->libdir . '/outputlib.php');
+
+    $themename = 'boost';
+    $type = 'all';
+
+    $theme = theme_config::load($themename);
+    $rev = theme_get_revision();
+
+    // Compile the full theme CSS (SCSS -> CSS).
+    $csscontent = $theme->get_css_content();
+
+    // Store in the local cache where theme/styles.php expects it.
+    $candidatedir = make_localcache_directory("theme/$rev/$themename", false);
+    file_put_contents("$candidatedir/$type.css", $csscontent);
+
+    $result = [
+        'ok' => true,
+        'rev' => (int) $rev,
+        'size' => strlen($csscontent),
+        'path' => "$candidatedir/$type.css",
+    ];
 } catch (Throwable $error) {
     $result['error'] = [
         'type' => get_class($error),
@@ -1232,6 +1295,10 @@ async function prepareMoodleRuntime({
     rp.HTTPSREPLACE_SETTINGS_PATH,
     textEncoder.encode(createPatchedHttpsreplaceSettingsPhp()),
   );
+  await php.writeFile(
+    rp.THEME_CSS_WARMUP_PATH,
+    textEncoder.encode(createThemeCssWarmupPhp()),
+  );
   const filesMs = Math.round(performance.now() - tFiles);
 
   const tPatch = performance.now();
@@ -1401,6 +1468,20 @@ async function runAdminDefaultsSeeder(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
     "/__admin_defaults_seeder.php",
+    undefined,
+    webRoot,
+  );
+  const payload = output.trim();
+  const jsonStart = payload.indexOf("{");
+  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
+
+  return jsonPayload ? JSON.parse(jsonPayload) : {};
+}
+
+async function runThemeCssWarmup(php, webRoot) {
+  const output = await requestRuntimeScript(
+    php,
+    "/__theme_css_warmup.php",
     undefined,
     webRoot,
   );
@@ -1588,7 +1669,7 @@ export async function bootstrapMoodle({
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
   const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
-  const configNormalizerPhp = createConfigNormalizerPhp();
+  const configNormalizerPhp = createConfigNormalizerPhp(effectiveConfig.debug);
   const configPhp = createMoodleConfigPhp({
     adminDirectory: ADMIN_DIRECTORY,
     componentCachePath: COMPONENT_CACHE_PATH,
@@ -1596,7 +1677,6 @@ export async function bootstrapMoodle({
     ...dbConfig,
     prefix: "mdl_",
     wwwroot,
-    debug: effectiveConfig.debug,
     debugdisplay: effectiveConfig.debugdisplay,
   });
 
@@ -1832,9 +1912,37 @@ export async function bootstrapMoodle({
     );
   }
 
+  // Pre-compile theme CSS so that theme/styles.php can serve it from cache.
+  // SCSS compilation is memory-intensive and can crash the WASM runtime if
+  // triggered lazily on the first HTTP request.  Warming the cache here
+  // (during the loading screen) avoids that runtime crash.
+  const tThemeCss = performance.now();
+  try {
+    publish("Compiling theme CSS (this may take a moment).", 0.92);
+    const themeCss = await runThemeCssWarmup(php, webRoot);
+    const themeCssMs = Math.round(performance.now() - tThemeCss);
+    if (themeCss?.ok) {
+      publish(
+        `Theme CSS compiled and cached (${themeCss.size} bytes, rev ${themeCss.rev}). [${themeCssMs}ms]`,
+        0.925,
+      );
+    } else {
+      publish(
+        `Theme CSS warmup failed: ${themeCss?.error?.message || "unknown error"}. [${themeCssMs}ms]`,
+        0.925,
+      );
+    }
+  } catch (themeCssError) {
+    const themeCssMs = Math.round(performance.now() - tThemeCss);
+    publish(
+      `Theme CSS warmup crashed (${themeCssError.message}). Pages may be unstyled. [${themeCssMs}ms]`,
+      0.925,
+    );
+  }
+
   publish(
     "Skipping custom Moodle autoload diagnostics for the current runtime strategy.",
-    0.92,
+    0.93,
   );
 
   publish(

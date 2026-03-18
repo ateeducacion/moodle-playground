@@ -23,7 +23,6 @@ export function createMoodleConfigPhp({
   dbUser,
   prefix,
   wwwroot,
-  debug = 0,
   debugdisplay = 0,
 }) {
   const resolvedComponentCachePath =
@@ -59,11 +58,8 @@ $CFG->alternative_component_cache = '${escapePhpSingleQuoted(resolvedComponentCa
 $CFG->directorypermissions = 0777;
 $CFG->sslproxy = false;
 $CFG->reverseproxy = false;
-// Debug level: 0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER.
-// Configurable via blueprint runtime.debug / runtime.debugdisplay or URL ?debug= param.
-$CFG->debug = ${Number(debug) || 0};
+// Display debug messages on page when explicitly enabled for this runtime.
 $CFG->debugdisplay = ${Number(debugdisplay) ? 1 : 0};
-$CFG->debugdeveloper = ${Number(debug) >= 32767 ? "true" : "false"};
 $CFG->showcrondebugging = false;
 // Enable all caching layers — the filesystem is MEMFS (pure memory) so file-backed
 // caches are fast and persist for the lifetime of the worker session.
@@ -74,6 +70,10 @@ $CFG->cachejs = false;
 $CFG->cachetemplates = true;
 $CFG->langstringcache = true;
 $CFG->themedesignermode = false;
+$CFG->slasharguments = 1;
+$CFG->yuicomboloading = false;
+$CFG->yui3version = '3.18.1';
+$CFG->yui2version = '2.9.0';
 if (!property_exists($CFG, 'navcourselimit')) {
     $CFG->navcourselimit = 10;
 }

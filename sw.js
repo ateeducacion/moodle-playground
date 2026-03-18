@@ -174,16 +174,15 @@ async function serializeRequest(request) {
   };
 }
 
-function buildPhpRequest(originalRequest, forwardedUrl) {
+function buildPhpRequest(originalRequest, forwardedUrl, body) {
   const init = {
     method: originalRequest.method,
     headers: new Headers(originalRequest.headers),
     redirect: "follow",
   };
 
-  if (!["GET", "HEAD"].includes(originalRequest.method)) {
-    init.body = originalRequest.body;
-    init.duplex = "half";
+  if (body !== null && body !== undefined) {
+    init.body = body;
   }
 
   return new Request(forwardedUrl.toString(), init);
@@ -342,55 +341,71 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   event.respondWith((async () => {
-    const url = new URL(event.request.url);
-    if (url.origin !== self.location.origin) {
-      return fetch(event.request);
-    }
+    try {
+      const url = new URL(event.request.url);
+      if (url.origin !== self.location.origin) {
+        return fetch(event.request);
+      }
 
-    const scopedRequest = await resolveScopedRequest(event, url);
-    if (!scopedRequest) {
-      return fetch(event.request);
-    }
+      // Read POST body immediately, before any async operations.
+      // Firefox's Service Worker may discard the request body after
+      // the handler yields to the event loop.
+      const earlyBody = !["GET", "HEAD"].includes(event.request.method)
+        ? await event.request.arrayBuffer()
+        : null;
 
-    const { scopeId, runtimeId, requestPath } = scopedRequest;
-    if (event.clientId) {
-      clientContexts.set(event.clientId, { scopeId, runtimeId });
-    }
+      const scopedRequest = await resolveScopedRequest(event, url);
+      if (!scopedRequest) {
+        // If we already consumed the body, rebuild the request so fetch()
+        // still sends it.
+        if (earlyBody !== null) {
+          return fetch(new Request(event.request, { body: earlyBody }));
+        }
+        return fetch(event.request);
+      }
 
-    const directScoped = extractScopedRuntime(url.pathname, url.search);
-    if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
-      return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
-    }
+      const { scopeId, runtimeId, requestPath } = scopedRequest;
+      if (event.clientId) {
+        clientContexts.set(event.clientId, { scopeId, runtimeId });
+      }
 
-    const forwardedUrl = new URL(requestPath, `${url.origin}/`);
+      const directScoped = extractScopedRuntime(url.pathname, url.search);
+      if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
+        return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
+      }
 
-    await broadcastToClients({
-      kind: "sw-debug",
-      detail: `Intercepting ${event.request.method} ${url.pathname}`,
-    });
+      const forwardedUrl = new URL(requestPath, `${url.origin}/`);
 
-    const response = await forwardToPhpWorker({
-      request: buildPhpRequest(event.request, forwardedUrl),
-      runtimeId,
-      scopeId,
-    }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
-
-    if (response.status >= 300 && response.status < 400) {
       await broadcastToClients({
         kind: "sw-debug",
-        detail: `Redirect ${response.status} from ${requestPath} → Location: ${response.headers.get("location") || "(none)"}`,
+        detail: `Intercepting ${event.request.method} ${url.pathname}`,
       });
-    }
 
-    const locationScopedResponse = rewriteScopedLocation(response, {
-      origin: url.origin,
-      scopeId,
-      runtimeId,
-    });
-    return rewriteScopedHtmlResponse(locationScopedResponse, {
-      origin: url.origin,
-      scopeId,
-      runtimeId,
-    });
+      const response = await forwardToPhpWorker({
+        request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
+        runtimeId,
+        scopeId,
+      }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
+
+      if (response.status >= 300 && response.status < 400) {
+        await broadcastToClients({
+          kind: "sw-debug",
+          detail: `Redirect ${response.status} from ${requestPath} → Location: ${response.headers.get("location") || "(none)"}`,
+        });
+      }
+
+      const locationScopedResponse = rewriteScopedLocation(response, {
+        origin: url.origin,
+        scopeId,
+        runtimeId,
+      });
+      return rewriteScopedHtmlResponse(locationScopedResponse, {
+        origin: url.origin,
+        scopeId,
+        runtimeId,
+      });
+    } catch (err) {
+      return buildErrorResponse(String(err?.stack || err?.message || err));
+    }
   })());
 });

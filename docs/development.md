@@ -7,8 +7,13 @@ npm install          # Install dependencies
 npm run build:worker # Bundle the PHP worker
 npm run bundle       # Full bundle (VFS + snapshot)
 
-make prepare         # Prepare Moodle source and assets
-make bundle          # Build everything
+make prepare         # Install deps and build the worker only
+make prepare-dev     # Worker + default Moodle bundle
+make prepare-dev-pretty # Worker + default bundle with colorized parallel output
+make prepare-all     # Worker + all Moodle bundles
+make bundle          # Build the default branch bundle (or BRANCH=...)
+make bundle-all      # Build all Moodle bundles (use JOBS=... to parallelize)
+make bundle-all-pretty # Build all bundles with colorized per-branch output
 make serve           # Start dev server on port 8080
 make up              # Full build + serve
 ```

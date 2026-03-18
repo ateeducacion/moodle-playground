@@ -44,7 +44,12 @@ npm run build:worker
 npm run bundle
 
 make prepare
+make prepare-dev
+make prepare-dev-pretty
+make prepare-all
 make bundle
+make bundle-all
+make bundle-all-pretty
 make serve
 make up
 ```

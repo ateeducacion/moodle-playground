@@ -756,6 +756,10 @@ button.danger:hover {
     gap: var(--space-sm);
   }
 
+  .address-form__input {
+    display: none;
+  }
+
   .browser-toolbar__actions {
     justify-content: flex-end;
   }
