@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 
 const STATIC_PREFIXES = [
   "/assets/",
+  "/dist/",
   "/src/",
   "/vendor/",
   "/php-worker.js",
@@ -59,6 +60,18 @@ function isStaticHostPath(pathname, appBasePath = "/") {
   return STATIC_PREFIXES.some(
     (prefix) =>
       strippedPathname === prefix || strippedPathname.startsWith(prefix),
+  );
+}
+
+function isSensitiveStaticPath(pathname, appBasePath = "/") {
+  const strippedPathname = stripAppBasePath(pathname, appBasePath);
+  return (
+    strippedPathname === "/" ||
+    strippedPathname === "/index.html" ||
+    strippedPathname === "/remote.html" ||
+    strippedPathname === "/playground.config.json" ||
+    strippedPathname === "/assets/build-version.json" ||
+    /^\/assets\/manifests\/[^/]+\.json$/u.test(strippedPathname)
   );
 }
 
@@ -237,6 +250,38 @@ describe("extractScopedRuntime", () => {
     assert.strictEqual(extractScopedRuntime("/assets/logo.png"), null);
     assert.strictEqual(extractScopedRuntime("/"), null);
     assert.strictEqual(extractScopedRuntime("/index.html"), null);
+  });
+});
+
+describe("isSensitiveStaticPath", () => {
+  it("marks the app root as network-first", () => {
+    assert.strictEqual(isSensitiveStaticPath("/"), true);
+  });
+
+  it("marks remote.html as network-first", () => {
+    assert.strictEqual(isSensitiveStaticPath("/remote.html"), true);
+  });
+
+  it("marks manifest JSON as network-first", () => {
+    assert.strictEqual(
+      isSensitiveStaticPath("/assets/manifests/latest.json"),
+      true,
+    );
+  });
+
+  it("marks build metadata as network-first", () => {
+    assert.strictEqual(
+      isSensitiveStaticPath("/assets/build-version.json"),
+      true,
+    );
+  });
+
+  it("does not mark regular static assets as sensitive", () => {
+    assert.strictEqual(isSensitiveStaticPath("/src/shell/main.js"), false);
+    assert.strictEqual(
+      isSensitiveStaticPath("/dist/php-worker.bundle.js"),
+      false,
+    );
   });
 });
 

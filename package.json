@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:version": "node scripts/write-build-version.mjs",
     "build:worker": "node esbuild.worker.mjs",
     "serve": "http-server . -p ${PORT:-8080} -c-1",
     "bundle:default": "sh -c 'BRANCH=\"${BRANCH:-MOODLE_500_STABLE}\" ./scripts/build-moodle-bundle.sh'",

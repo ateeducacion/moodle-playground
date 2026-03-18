@@ -24,27 +24,30 @@ check-php:
 	fi
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
-.PHONY: deps build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test lint format
+.PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test lint format
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
 	npm install
 
+build-version:
+	npm run build:version
+
 build-worker:
 	npm run build:worker
 
 # Fast prepare for local iteration: install deps and rebuild the worker bundle only.
-prepare: deps build-worker
+prepare: deps build-version build-worker
 
 # Prepare a local dev runtime: worker + one Moodle branch bundle.
-prepare-dev: deps build-worker bundle
+prepare-dev: deps build-version build-worker bundle
 
 # Prepare the local dev runtime with colorized parallel output for the worker and bundle.
-prepare-dev-pretty: deps check-php
+prepare-dev-pretty: deps build-version check-php
 	npm run prepare:dev:pretty
 
 # Full prepare for CI/release: worker + all Moodle bundles.
-prepare-all: deps build-worker bundle-all
+prepare-all: deps build-version build-worker bundle-all
 
 # Build one branch (defaults to DEFAULT_BRANCH, override with BRANCH=...).
 bundle: check-php
@@ -86,9 +89,9 @@ bundle-main:
 serve:
 	PORT=$(PORT) npm run serve
 
-up: bundle-all-pretty serve
+up: deps build-version build-worker bundle-all-pretty serve
 
-up-local: bundle
+up-local: deps build-version bundle
 	./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)
 
 test:
