@@ -26,7 +26,7 @@ Then open <http://localhost:8080>.
 
 - Node.js 18+
 - npm
-- Python 3
+- Python 3 for Moodle patch/build helpers and docs
 - Git
 
 ## How It Works
@@ -95,9 +95,14 @@ Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-
 
 | Command | Description |
 |---------|-------------|
-| `make up` | Install deps, prepare assets, build bundle, and serve locally |
-| `make prepare` | Install npm deps and build the worker + bundle |
-| `make bundle` | Rebuild the Moodle VFS bundle and manifest |
+| `make up` | Install deps, build all Moodle bundles with colorized per-branch output, and serve locally |
+| `make prepare` | Install npm deps and build the worker only |
+| `make prepare-dev` | Install npm deps, build the worker, and build the default Moodle bundle |
+| `make prepare-dev-pretty` | Build the worker and default bundle in parallel with colorized local output |
+| `make prepare-all` | Install npm deps, build the worker, and build all Moodle bundles |
+| `make bundle` | Rebuild the default Moodle VFS bundle and manifest (`BRANCH=...` to override) |
+| `make bundle-all` | Rebuild all Moodle bundles; supports parallel jobs via `JOBS=...` |
+| `make bundle-all-pretty` | Rebuild all Moodle bundles with colorized per-branch output |
 | `make serve` | Start a local server on port 8080 |
 | `make clean` | Remove generated bundle and manifest artifacts |
 | `make reset` | Full clean including vendored runtime assets |

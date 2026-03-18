@@ -103,8 +103,9 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 - Se eliminó la descarga remota desde `download.moodle.org` en runtime.
 - Ahora Moodle debe prepararse antes con:
-  - `make prepare`
-  - o `make bundle`
+  - `make prepare-dev`
+  - `make bundle`
+  - o `make bundle-all`
 
 ### Bundle y tiempo de arranque
 
@@ -227,7 +228,7 @@ Ahora mismo el problema parece estar dentro de:
 ## Comandos útiles
 
 ```bash
-make prepare
+make prepare-dev
 make serve
 ```
 
@@ -237,7 +238,7 @@ O por partes:
 npm install
 npm run sync-browser-deps
 ./scripts/build-moodle-bundle.sh
-python3 -m http.server 8080
+npm run serve
 ```
 
 ## Siguiente paso recomendado

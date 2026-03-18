@@ -73,9 +73,26 @@ describe("createMoodleConfigPhp", () => {
     assert.ok(config.includes("define('CACHE_DISABLE_STORES', false)"));
   });
 
-  it("disables debug by default", () => {
+  it("enables slash arguments", () => {
     const config = createMoodleConfigPhp(baseParams);
-    assert.ok(config.includes("$CFG->debug = 0"));
+    assert.ok(config.includes("$CFG->slasharguments = 1"));
+  });
+
+  it("disables YUI combo loading", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("$CFG->yuicomboloading = false"));
+  });
+
+  it("sets YUI version constants", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("$CFG->yui3version = '3.18.1'"));
+    assert.ok(config.includes("$CFG->yui2version = '2.9.0'"));
+  });
+
+  it("does not lock Moodle debug level in config.php", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(!config.includes("$CFG->debug ="));
+    assert.ok(!config.includes("$CFG->debugdeveloper ="));
   });
 
   it("requires lib/setup.php", () => {

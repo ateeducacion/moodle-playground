@@ -5,6 +5,6 @@ node_modules/
 .env
 vendor/moodle/
 assets/moodle/
-assets/manifests/latest.json
+assets/manifests/*.json
 .playwright-mcp/
 vendor/

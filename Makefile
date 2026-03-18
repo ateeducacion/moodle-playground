@@ -1,6 +1,8 @@
 PORT ?= 8080
 LOCAL_PORT ?= 8081
 LOCAL_PHP ?= php84
+DEFAULT_BRANCH ?= MOODLE_500_STABLE
+JOBS ?= 2
 # Auto-detect PHP 8.3 binary: check Homebrew paths (Apple Silicon, Intel), then system php
 PHP_BIN ?= $(or \
   $(wildcard /opt/homebrew/opt/php@8.3/bin/php),\
@@ -22,7 +24,7 @@ check-php:
 	fi
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
-.PHONY: deps build-worker bundle bundle-legacy prepare serve up up-local clean reset check-php test lint format
+.PHONY: deps build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test lint format
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
@@ -31,8 +33,35 @@ deps:
 build-worker:
 	npm run build:worker
 
-# Build all branches (default)
-bundle: check-php bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
+# Fast prepare for local iteration: install deps and rebuild the worker bundle only.
+prepare: deps build-worker
+
+# Prepare a local dev runtime: worker + one Moodle branch bundle.
+prepare-dev: deps build-worker bundle
+
+# Prepare the local dev runtime with colorized parallel output for the worker and bundle.
+prepare-dev-pretty: deps check-php
+	npm run prepare:dev:pretty
+
+# Full prepare for CI/release: worker + all Moodle bundles.
+prepare-all: deps build-worker bundle-all
+
+# Build one branch (defaults to DEFAULT_BRANCH, override with BRANCH=...).
+bundle: check-php
+	BRANCH=$${BRANCH:-$(DEFAULT_BRANCH)} npm run bundle
+
+# Build all branches; use independent per-branch targets so recursive make can parallelize safely.
+bundle-all: check-php
+	$(MAKE) --no-print-directory -j $(JOBS) \
+		bundle-MOODLE_404_STABLE \
+		bundle-MOODLE_405_STABLE \
+		bundle-MOODLE_500_STABLE \
+		bundle-MOODLE_501_STABLE \
+		bundle-main
+
+# Colorized multi-branch build for local use.
+bundle-all-pretty: deps check-php
+	npm run bundle:all:pretty
 
 # Legacy single-branch build via CHANNEL (backward compat)
 bundle-legacy:
@@ -54,12 +83,10 @@ bundle-MOODLE_501_STABLE:
 bundle-main:
 	BRANCH=main npm run bundle
 
-prepare: deps build-worker bundle
-
 serve:
-	python3 -m http.server $(PORT)
+	PORT=$(PORT) npm run serve
 
-up: prepare serve
+up: bundle-all-pretty serve
 
 up-local: bundle
 	./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)

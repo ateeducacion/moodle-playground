@@ -174,15 +174,15 @@ async function serializeRequest(request) {
   };
 }
 
-async function buildPhpRequest(originalRequest, forwardedUrl) {
+function buildPhpRequest(originalRequest, forwardedUrl, body) {
   const init = {
     method: originalRequest.method,
     headers: new Headers(originalRequest.headers),
     redirect: "follow",
   };
 
-  if (!["GET", "HEAD"].includes(originalRequest.method)) {
-    init.body = await originalRequest.arrayBuffer();
+  if (body !== null && body !== undefined) {
+    init.body = body;
   }
 
   return new Request(forwardedUrl.toString(), init);
@@ -347,8 +347,20 @@ self.addEventListener("fetch", (event) => {
         return fetch(event.request);
       }
 
+      // Read POST body immediately, before any async operations.
+      // Firefox's Service Worker may discard the request body after
+      // the handler yields to the event loop.
+      const earlyBody = !["GET", "HEAD"].includes(event.request.method)
+        ? await event.request.arrayBuffer()
+        : null;
+
       const scopedRequest = await resolveScopedRequest(event, url);
       if (!scopedRequest) {
+        // If we already consumed the body, rebuild the request so fetch()
+        // still sends it.
+        if (earlyBody !== null) {
+          return fetch(new Request(event.request, { body: earlyBody }));
+        }
         return fetch(event.request);
       }
 
@@ -370,7 +382,7 @@ self.addEventListener("fetch", (event) => {
       });
 
       const response = await forwardToPhpWorker({
-        request: await buildPhpRequest(event.request, forwardedUrl),
+        request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
         runtimeId,
         scopeId,
       }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));

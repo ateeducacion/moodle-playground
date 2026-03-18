@@ -4,7 +4,7 @@
 
 - Node.js 18+
 - npm
-- Python 3
+- Python 3 for Moodle build helpers and docs
 - Git
 
 ## Local setup
@@ -18,11 +18,14 @@ npm install
 ## Building the runtime
 
 ```bash
-# Prepare Moodle source, apply patches, build VFS bundle
+# Install deps and build the worker bundle
 make prepare
 
-# Build the full bundle (VFS image + install snapshot)
+# Build the default Moodle bundle (VFS image + install snapshot)
 make bundle
+
+# Build all Moodle bundles (parallelizable via JOBS=...)
+make bundle-all JOBS=2
 
 # Build just the PHP worker bundle
 npm run build:worker
