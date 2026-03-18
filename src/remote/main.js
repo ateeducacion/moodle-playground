@@ -2,6 +2,7 @@ import { loadBlueprint } from "../blueprint/index.js";
 import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
+import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
 import { saveSessionState } from "../shared/storage.js";
 import { parseRuntimeId } from "../shared/version-resolver.js";
 
@@ -95,34 +96,13 @@ function emit(scopeId, message) {
   channel.close();
 }
 
-function buildServiceWorkerVersionToken(bundleVersion, scopeId, runtimeId) {
-  const currentUrl = new URL(window.location.href);
-  if (currentUrl.searchParams.get("clean") === "1") {
-    return `${bundleVersion}:${scopeId}:${runtimeId}:${Date.now()}`;
-  }
-
-  return bundleVersion;
-}
-
-async function registerRuntimeServiceWorker(scopeId, runtimeId, config) {
-  if (navigator.serviceWorker.controller) {
-    return navigator.serviceWorker.ready;
-  }
-
-  const swUrl = new URL("../../sw.js", import.meta.url);
-  swUrl.searchParams.set(
-    "v",
-    buildServiceWorkerVersionToken(config.bundleVersion, scopeId, runtimeId),
+async function registerRuntimeServiceWorker() {
+  const registration = await registerVersionedServiceWorker(
+    new URL("../../sw.js", import.meta.url),
+    {
+      scope: "./",
+    },
   );
-  swUrl.searchParams.set("scope", scopeId);
-  swUrl.searchParams.set("runtime", runtimeId);
-
-  const registration = await navigator.serviceWorker.register(swUrl, {
-    scope: "./",
-    type: "module",
-    updateViaCache: "none",
-  });
-
   await navigator.serviceWorker.ready;
   return registration;
 }
@@ -195,34 +175,18 @@ async function resetRuntimeIndexedDb({
   return cleared;
 }
 
-async function resetRuntimeCaching(
-  bundleVersion,
-  { scopeId, runtimeId, includePersistentOverlay = false } = {},
-) {
-  const resetKey = `${SW_RESET_KEY_PREFIX}:${bundleVersion}:${scopeId}:${runtimeId}:${includePersistentOverlay ? "full" : "soft"}`;
+async function resetRuntimeStorage({
+  scopeId,
+  runtimeId,
+  includePersistentOverlay = false,
+  resetNonce = "",
+} = {}) {
+  const resetKey = `${SW_RESET_KEY_PREFIX}:${scopeId}:${runtimeId}:${includePersistentOverlay ? "full" : "soft"}:${resetNonce}`;
   if (window.sessionStorage.getItem(resetKey) === "1") {
     return false;
   }
 
-  const currentUrl = new URL(window.location.href);
-  const scopeBase = `${currentUrl.origin}${new URL("./", currentUrl).pathname}`;
-  const registrations = await navigator.serviceWorker.getRegistrations();
   let cleared = false;
-
-  for (const registration of registrations) {
-    if (!registration.scope.startsWith(scopeBase)) {
-      continue;
-    }
-
-    await registration.unregister();
-    cleared = true;
-  }
-
-  const cacheNames = await caches.keys();
-  for (const cacheName of cacheNames) {
-    await caches.delete(cacheName);
-    cleared = true;
-  }
 
   if (scopeId && runtimeId) {
     const clearedIndexedDb = await resetRuntimeIndexedDb({
@@ -510,6 +474,7 @@ async function bootstrapRemote() {
   const requestedRuntimeId = url.searchParams.get("runtime");
   const requestedPath = url.searchParams.get("path") || "/";
   const cleanBoot = url.searchParams.get("clean") === "1";
+  const resetNonce = url.searchParams.get("reload") || "";
   const phpVersion = url.searchParams.get("phpVersion") || null;
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
   activePath = requestedPath;
@@ -537,10 +502,11 @@ async function bootstrapRemote() {
   setOverlayVisible(true);
 
   if (
-    await resetRuntimeCaching(config.bundleVersion, {
+    await resetRuntimeStorage({
       scopeId,
       runtimeId: runtime.id,
       includePersistentOverlay: cleanBoot,
+      resetNonce,
     })
   ) {
     window.location.reload();
@@ -554,7 +520,7 @@ async function bootstrapRemote() {
     progress: 0.08,
   });
 
-  await registerRuntimeServiceWorker(scopeId, runtime.id, config);
+  await registerRuntimeServiceWorker();
   if (ensureRemoteServiceWorkerControl(scopeId, runtime.id)) {
     return;
   }

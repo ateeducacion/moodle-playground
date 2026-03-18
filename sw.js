@@ -3,8 +3,12 @@ import { createPhpBridgeChannel, createWorkerRequestId } from "./src/shared/prot
 const bridges = new Map();
 const pending = new Map();
 const clientContexts = new Map();
+const BUILD_VERSION = new URL(self.location.href).searchParams.get("build") || "dev";
+const STATIC_CACHE_PREFIX = "moodle-playground-static";
+const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
 const STATIC_PREFIXES = [
   "/assets/",
+  "/dist/",
   "/src/",
   "/vendor/",
   "/php-worker.js",
@@ -53,6 +57,102 @@ function withAppBasePath(pathname) {
 function isStaticHostPath(pathname) {
   const strippedPathname = stripAppBasePath(pathname);
   return STATIC_PREFIXES.some((prefix) => strippedPathname === prefix || strippedPathname.startsWith(prefix));
+}
+
+function isSensitiveStaticPath(pathname) {
+  const strippedPathname = stripAppBasePath(pathname);
+  return (
+    strippedPathname === "/"
+    || strippedPathname === "/index.html"
+    || strippedPathname === "/remote.html"
+    || strippedPathname === "/playground.config.json"
+    || strippedPathname === "/assets/build-version.json"
+    || /^\/assets\/manifests\/[^/]+\.json$/u.test(strippedPathname)
+  );
+}
+
+function shouldHandleStaticRequest(request, url) {
+  if (!["GET", "HEAD"].includes(request.method)) {
+    return false;
+  }
+
+  const strippedPathname = stripAppBasePath(url.pathname);
+  if (strippedPathname === "/sw.js") {
+    return false;
+  }
+
+  return isSensitiveStaticPath(url.pathname) || isStaticHostPath(url.pathname);
+}
+
+function buildStaticCacheKey(request) {
+  const url = new URL(request.url);
+  url.search = "";
+  return url.toString();
+}
+
+function buildFreshRequest(request) {
+  return new Request(request, {
+    cache: "no-store",
+  });
+}
+
+async function openStaticCache() {
+  return caches.open(STATIC_CACHE_NAME);
+}
+
+async function cacheStaticResponse(cache, cacheKey, response) {
+  if (!response.ok) {
+    return;
+  }
+
+  try {
+    await cache.put(cacheKey, response.clone());
+  } catch {
+    // CacheStorage is an optimization. Runtime routing must continue without it.
+  }
+}
+
+async function cacheFirstStaticFetch(request) {
+  const cache = await openStaticCache();
+  const cacheKey = buildStaticCacheKey(request);
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(buildFreshRequest(request));
+  await cacheStaticResponse(cache, cacheKey, response);
+  return response;
+}
+
+async function networkFirstStaticFetch(request) {
+  const cache = await openStaticCache();
+  const cacheKey = buildStaticCacheKey(request);
+  const cached = await cache.match(cacheKey);
+
+  try {
+    const response = await fetch(buildFreshRequest(request));
+    await cacheStaticResponse(cache, cacheKey, response);
+    if (!response.ok && cached) {
+      return cached;
+    }
+    return response;
+  } catch (error) {
+    if (cached) {
+      return cached;
+    }
+
+    throw error;
+  }
+}
+
+async function purgeOldStaticCaches() {
+  const cacheNames = await caches.keys();
+  await Promise.all(
+    cacheNames
+      .filter((cacheName) => cacheName.startsWith(`${STATIC_CACHE_PREFIX}-`) && cacheName !== STATIC_CACHE_NAME)
+      .map((cacheName) => caches.delete(cacheName)),
+  );
 }
 
 function buildErrorResponse(message, status = 500) {
@@ -350,7 +450,10 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    await self.clients.claim();
+    await purgeOldStaticCaches();
+  })());
 });
 
 self.addEventListener("fetch", (event) => {
@@ -361,22 +464,25 @@ self.addEventListener("fetch", (event) => {
         return fetch(event.request);
       }
 
+      const scopedRequest = await resolveScopedRequest(event, url);
+      if (!scopedRequest) {
+        if (shouldHandleStaticRequest(event.request, url)) {
+          if (isSensitiveStaticPath(url.pathname)) {
+            return networkFirstStaticFetch(event.request);
+          }
+
+          return cacheFirstStaticFetch(event.request);
+        }
+
+        return fetch(event.request);
+      }
+
       // Read POST body immediately, before any async operations.
       // Firefox's Service Worker may discard the request body after
       // the handler yields to the event loop.
       const earlyBody = !["GET", "HEAD"].includes(event.request.method)
         ? await event.request.arrayBuffer()
         : null;
-
-      const scopedRequest = await resolveScopedRequest(event, url);
-      if (!scopedRequest) {
-        // If we already consumed the body, rebuild the request so fetch()
-        // still sends it.
-        if (earlyBody !== null) {
-          return fetch(new Request(event.request, { body: earlyBody }));
-        }
-        return fetch(event.request);
-      }
 
       const { scopeId, runtimeId, requestPath } = scopedRequest;
       if (event.clientId) {

@@ -9,7 +9,7 @@ export async function fetchManifest(manifestUrl) {
         : new URL("../../", import.meta.url).href;
     manifestUrl = new URL("assets/manifests/latest.json", base).toString();
   }
-  const response = await fetch(manifestUrl, { cache: "no-cache" });
+  const response = await fetch(manifestUrl, { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(
@@ -63,7 +63,7 @@ export async function resolveManifestUrl(moodleBranch, appBaseUrl) {
   try {
     const response = await fetch(branchUrl, {
       method: "HEAD",
-      cache: "no-cache",
+      cache: "no-store",
     });
     if (response.ok) {
       return branchUrl;

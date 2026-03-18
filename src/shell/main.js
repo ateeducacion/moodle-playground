@@ -7,6 +7,7 @@ import {
 import { loadPlaygroundConfig } from "../shared/config.js";
 import { resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
+import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
 import {
   clearScopeSession,
   getOrCreateScopeId,
@@ -107,16 +108,12 @@ async function ensureRuntimeServiceWorker() {
     return;
   }
 
-  const swUrl = new URL("../../sw.js", import.meta.url);
-  swUrl.searchParams.set("v", config.bundleVersion);
-  swUrl.searchParams.set("scope", scopeId);
-  swUrl.searchParams.set("runtime", currentRuntimeId);
-
-  await navigator.serviceWorker.register(swUrl, {
-    scope: "./",
-    type: "module",
-    updateViaCache: "none",
-  });
+  await registerVersionedServiceWorker(
+    new URL("../../sw.js", import.meta.url),
+    {
+      scope: "./",
+    },
+  );
   await navigator.serviceWorker.ready;
 
   if (!navigator.serviceWorker.controller) {

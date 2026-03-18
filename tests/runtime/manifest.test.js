@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildFallbackManifestUrl,
   buildManifestState,
+  fetchManifest,
 } from "../../src/runtime/manifest.js";
 
 describe("buildManifestState", () => {
@@ -41,5 +42,30 @@ describe("buildFallbackManifestUrl", () => {
     const url = buildFallbackManifestUrl("https://example.com/playground/");
     assert.ok(url.includes("assets/manifests/latest.json"));
     assert.ok(url.startsWith("https://example.com/"));
+  });
+});
+
+describe("fetchManifest", () => {
+  it("requests manifests with cache:no-store", async () => {
+    const originalFetch = globalThis.fetch;
+    let seenInit = null;
+
+    globalThis.fetch = async (_url, init = {}) => {
+      seenInit = init;
+      return {
+        ok: true,
+        async json() {
+          return { release: "2024-01-01" };
+        },
+      };
+    };
+
+    try {
+      await fetchManifest("https://example.com/assets/manifests/latest.json");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.strictEqual(seenInit?.cache, "no-store");
   });
 });

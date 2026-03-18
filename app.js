@@ -1,12 +1,11 @@
-import {
-  DEFAULT_BOOT_OPTIONS,
-  MOODLE_BASE_PATH,
-  OPTIONAL_EXTENSION_NOTES,
-  PHP_WORKER_URL,
-  SERVICE_WORKER_URL,
-} from "./lib/constants.js";
+import { DEFAULT_BOOT_OPTIONS } from "./lib/constants.js";
+import { registerVersionedServiceWorker } from "./src/shared/service-worker-version.js";
 
 const ENABLE_DIRECT_PHP_PROBE = false;
+const MOODLE_BASE_PATH = "/moodle";
+const OPTIONAL_EXTENSION_NOTES = [];
+const PHP_WORKER_URL = "./php-worker.js";
+const SERVICE_WORKER_URL = "./sw.js";
 const phpWorker = new Worker(new URL(PHP_WORKER_URL, window.location.href), { type: "module" });
 const pendingWorkerCalls = new Map();
 
@@ -180,25 +179,12 @@ async function registerServiceWorker() {
     throw new Error("This browser does not support Service Workers.");
   }
 
-  const registrations = await navigator.serviceWorker.getRegistrations();
-
-  for (const existing of registrations) {
-    if (!existing.active?.scriptURL?.includes("/sw.js")) {
-      continue;
-    }
-
-    appendLog(`Unregistering previous Service Worker: ${existing.scope}`);
-    await existing.unregister();
-  }
-
-  const swUrl = new URL(SERVICE_WORKER_URL, window.location.href);
-  swUrl.searchParams.set("ts", String(Date.now()));
-
-  const registration = await navigator.serviceWorker.register(swUrl, {
-    scope: "./",
-    type: "module",
-    updateViaCache: "none",
-  });
+  const registration = await registerVersionedServiceWorker(
+    new URL(SERVICE_WORKER_URL, window.location.href),
+    {
+      scope: "./",
+    },
+  );
 
   monitorWorker(registration);
   appendLog(`Service Worker ready: ${registration.scope}`);
