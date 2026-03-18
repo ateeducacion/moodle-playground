@@ -62,7 +62,7 @@ if [ -n "$BRANCH" ] && [ -d "$MOODLE_DIR/.git" ]; then
     "$SCRIPT_DIR/generate-component-cache.php" \
     2>/dev/null | shasum -a 256 | cut -d' ' -f1)
   PATCHES_HASH=$(find "$REPO_DIR/patches" -type f 2>/dev/null | sort | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
-  SNAPSHOT_FINGERPRINT="${MOODLE_COMMIT}-${SCRIPTS_HASH:0:16}-${PATCHES_HASH:0:16}"
+  SNAPSHOT_FINGERPRINT="${MOODLE_COMMIT}-$(printf '%.16s' "$SCRIPTS_HASH")-$(printf '%.16s' "$PATCHES_HASH")"
 fi
 
 SNAPSHOT_CACHED=false
