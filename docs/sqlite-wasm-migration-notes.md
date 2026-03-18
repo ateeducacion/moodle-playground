@@ -98,8 +98,6 @@ Restored patch files:
 
 Additional historical compatibility patches needed by Moodle 5.0 in this prototype:
 
-- `patches/moodle/lib/xmlize.php`
-- `patches/moodle/lib/xmldb/xmldb_file.php`
 - `patches/moodle/lib/classes/encryption.php`
 
 Patch copier:
@@ -111,9 +109,6 @@ Why these extra files were needed:
 - `sqlite_sql_generator.php`
   - the old generator signature did not match current `sql_generator`
   - the current prototype needs a temp-table compatible implementation
-- `xmlize.php` / `xmldb_file.php`
-  - the wasm runtime was fragile around the original XML parser callback path
-  - XMLDB loading was patched to avoid getting stuck before schema generation
 - `encryption.php`
   - current Moodle assumes `sodium` is always present
   - this wasm runtime does not currently ship `sodium`
@@ -209,8 +204,6 @@ These files contain the long-lived Moodle-side prototype patches:
 
 - `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
 - `patches/moodle/lib/ddl/sqlite_sql_generator.php`
-- `patches/moodle/lib/xmlize.php`
-- `patches/moodle/lib/xmldb/xmldb_file.php`
 - `patches/moodle/lib/classes/encryption.php`
 
 These files contain runtime-only overrides and bootstrap workarounds:

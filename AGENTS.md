@@ -197,8 +197,6 @@ Important files for this prototype:
 - `scripts/generate-install-snapshot.sh`
 - `patches/moodle/lib/dml/sqlite3_pdo_moodle_database.php`
 - `patches/moodle/lib/ddl/sqlite_sql_generator.php`
-- `patches/moodle/lib/xmlize.php`
-- `patches/moodle/lib/xmldb/xmldb_file.php`
 - `patches/moodle/lib/classes/encryption.php`
 
 Prototype-specific defaults currently matter during first boot:

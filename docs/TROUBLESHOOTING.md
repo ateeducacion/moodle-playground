@@ -50,16 +50,12 @@ The most useful files for runtime debugging are:
 
 Likely cause:
 
-- old Moodle XML bootstrap path calling into a wasm-hostile XML callback path
-
-Files:
-
-- `patches/moodle/lib/xmlize.php`
-- `patches/moodle/lib/xmldb/xmldb_file.php`
+- malformed or unreadable `install.xml`
+- a regression in the XML/runtime path outside the current common patch set
 
 Notes:
 
-- if this happens during schema load, check that the patched `xmldb_file.php` and `xmlize.php` are actually present in the built Moodle source
+- if this happens during schema load, inspect the `install.xml` file first and re-run the XMLDB load checks against the current unpatched Moodle sources
 
 ### Fatal in `sqlite_sql_generator`
 

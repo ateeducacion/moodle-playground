@@ -40,8 +40,6 @@ CACHEPHP="$SOURCE_DIR/${PUB}cache/classes/cache.php"
 INSTALL_LANG_EN="$SOURCE_DIR/${PUB}lang/en/install.php"
 PDO_SQLITE_DRIVER_PATCH="$PATCH_DIR/lib/dml/sqlite3_pdo_moodle_database.php"
 SQLITE_GENERATOR_PATCH="$PATCH_DIR/lib/ddl/sqlite_sql_generator.php"
-XMLIZE_PATCH="$PATCH_DIR/lib/xmlize.php"
-XMLDB_FILE_PATCH="$PATCH_DIR/lib/xmldb/xmldb_file.php"
 ENCRYPTION_PATCH="$PATCH_DIR/lib/classes/encryption.php"
 COMPONENTPHP="$SOURCE_DIR/${PUB}lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/${PUB}lib/setuplib.php"
@@ -168,16 +166,6 @@ fi
 if [ -f "$SQLITE_GENERATOR_PATCH" ]; then
   mkdir -p "$SOURCE_DIR/${PUB}lib/ddl"
   cp "$SQLITE_GENERATOR_PATCH" "$SOURCE_DIR/${PUB}lib/ddl/sqlite_sql_generator.php"
-fi
-
-if [ -f "$XMLIZE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/${PUB}lib"
-  cp "$XMLIZE_PATCH" "$SOURCE_DIR/${PUB}lib/xmlize.php"
-fi
-
-if [ -f "$XMLDB_FILE_PATCH" ]; then
-  mkdir -p "$SOURCE_DIR/${PUB}lib/xmldb"
-  cp "$XMLDB_FILE_PATCH" "$SOURCE_DIR/${PUB}lib/xmldb/xmldb_file.php"
 fi
 
 if [ -f "$ENCRYPTION_PATCH" ]; then
