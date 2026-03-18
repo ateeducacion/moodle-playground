@@ -1,0 +1,13 @@
+[build]
+  publish = "dist-preview"
+  command = "echo 'Build happens on GitHub Actions'"
+
+[[headers]]
+  for = "/dist/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

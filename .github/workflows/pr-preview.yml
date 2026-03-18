@@ -1,0 +1,94 @@
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Restore snapshot cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/snapshots
+          key: snapshots-${{ hashFiles('patches/**', 'scripts/generate-install-snapshot.sh', 'scripts/patch-moodle-source.sh', 'scripts/generate-component-cache.php') }}
+          restore-keys: |
+            snapshots-
+
+      - name: Build worker bundle
+        run: npm run build:worker
+
+      - name: Build Moodle bundle (single branch)
+        run: make bundle BRANCH=MOODLE_500_STABLE
+
+      - name: Assemble preview artifact
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview
+          rsync -a ./ ./dist-preview/ \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".venv/" \
+            --exclude ".cache/" \
+            --exclude "dist-preview/" \
+            --exclude "docs/" \
+            --exclude "node_modules/" \
+            --exclude "site/" \
+            --exclude "tests/" \
+            --exclude "patches/" \
+            --exclude "scripts/"
+          # Remove VFS binaries to reduce deploy size (~376MB savings)
+          find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
+          find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
+
+      - name: Strip VFS from manifests
+        run: |
+          node -e "
+            const fs = require('fs');
+            for (const f of [
+              'dist-preview/assets/manifests/MOODLE_500_STABLE.json',
+              'dist-preview/assets/manifests/latest.json'
+            ]) {
+              if (fs.existsSync(f)) {
+                const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+                delete m.vfs;
+                fs.writeFileSync(f, JSON.stringify(m, null, 2) + '\n');
+              }
+            }
+          "
+
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: ./dist-preview
+          production-deploy: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}"
+          alias: pr-${{ github.event.pull_request.number }}
+          enable-pull-request-comment: true
+          enable-commit-comment: false
+          overwrites-pull-request-comment: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
