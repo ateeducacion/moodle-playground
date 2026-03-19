@@ -269,6 +269,8 @@ export function parseQueryParams(urlOrSearchParams) {
     php: params.get("php") || null,
     moodle: params.get("moodle") || null,
     moodleBranch: params.get("moodleBranch") || null,
+    debug: params.get("debug") || null,
+    profile: params.get("profile") || null,
   };
 }
 

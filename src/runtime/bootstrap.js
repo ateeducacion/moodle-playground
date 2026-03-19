@@ -51,6 +51,14 @@ function buildRuntimePaths(webRoot) {
     CONFIG_NORMALIZER_PATH: `${webRoot}/__config_normalizer.php`,
     ADMIN_DEFAULTS_SEEDER_PATH: `${webRoot}/__admin_defaults_seeder.php`,
     CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
+    CACHE_ADMIN_HELPER_PATH: `${webRoot}/cache/classes/administration_helper.php`,
+    ADMIN_INDEX_PATH: `${webRoot}/admin/index.php`,
+    ADMIN_SEARCH_PATH: `${webRoot}/admin/search.php`,
+    ADMIN_ENVIRONMENT_PATH: `${webRoot}/admin/environment.xml`,
+    MY_INDEX_PATH: `${webRoot}/my/index.php`,
+    MY_COURSES_PATH: `${webRoot}/my/courses.php`,
+    CODE_MANAGER_PATH: `${webRoot}/lib/classes/update/code_manager.php`,
+    PLUGIN_MANAGER_PATH: `${webRoot}/lib/classes/plugin_manager.php`,
     COMPONENT_CLASS_PATH: `${webRoot}/lib/classes/component.php`,
     ADMINLIB_PATH: `${webRoot}/lib/adminlib.php`,
     MOODLELIB_PATH: `${webRoot}/lib/moodlelib.php`,
@@ -65,6 +73,7 @@ function buildInternalRuntimeFiles(webRoot) {
   const paths = buildRuntimePaths(webRoot);
   return [
     `${MOODLE_ROOT}/config.php`,
+    COMPONENT_CACHE_PATH,
     paths.AUTOLOAD_CHECK_PATH,
     paths.INSTALL_CHECK_PATH,
     paths.INSTALL_RUNNER_PATH,
@@ -72,6 +81,14 @@ function buildInternalRuntimeFiles(webRoot) {
     paths.PDO_DDL_PROBE_PATH,
     paths.CONFIG_NORMALIZER_PATH,
     paths.CACHE_CONFIG_PATH,
+    paths.CACHE_ADMIN_HELPER_PATH,
+    paths.ADMIN_INDEX_PATH,
+    paths.ADMIN_SEARCH_PATH,
+    paths.ADMIN_ENVIRONMENT_PATH,
+    paths.MY_INDEX_PATH,
+    paths.MY_COURSES_PATH,
+    paths.CODE_MANAGER_PATH,
+    paths.PLUGIN_MANAGER_PATH,
     paths.COMPONENT_CLASS_PATH,
     paths.ADMINLIB_PATH,
     paths.MOODLELIB_PATH,
@@ -774,6 +791,53 @@ try {
         }
     }
 
+    $sitename = get_config('core', 'fullname');
+    if ($sitename === false || $sitename === null || $sitename === '') {
+        $sitename = 'Moodle Playground';
+        set_config('fullname', $sitename);
+        $result['set']['fullname'] = $sitename;
+    } else {
+        $result['kept']['fullname'] = $sitename;
+    }
+
+    $siteshortname = get_config('core', 'shortname');
+    if ($siteshortname === false || $siteshortname === null || $siteshortname === '') {
+        $siteshortname = $sitename ?: 'Playground';
+        set_config('shortname', $siteshortname);
+        $result['set']['shortname'] = $siteshortname;
+    } else {
+        $result['kept']['shortname'] = $siteshortname;
+    }
+
+    try {
+        $sitecourse = $DB->get_record('course', ['format' => 'site'], 'id,shortname,fullname', IGNORE_MULTIPLE);
+        if ($sitecourse) {
+            if (empty($sitecourse->shortname)) {
+                $DB->set_field('course', 'shortname', (string)$siteshortname, ['id' => $sitecourse->id]);
+                $result['set']['sitecourse.shortname'] = (string)$siteshortname;
+            }
+            if (empty($sitecourse->fullname)) {
+                $DB->set_field('course', 'fullname', (string)$sitename, ['id' => $sitecourse->id]);
+                $result['set']['sitecourse.fullname'] = (string)$sitename;
+            }
+        }
+    } catch (Throwable $sitecourseerror) {
+        $result['warning']['sitecourse'] = $sitecourseerror->getMessage();
+    }
+
+    // Seed allversionshash to the current codebase hash. This prevents a fresh
+    // snapshot from looking "upgrade pending" on normal boot, while still
+    // allowing plugin installs to trigger a real upgrade later in the session
+    // because the stored hash will then differ from the updated code.
+    $currentversionshash = core_component::get_all_versions_hash();
+    if (empty($CFG->allversionshash) || $CFG->allversionshash !== $currentversionshash) {
+        set_config('allversionshash', $currentversionshash);
+        $CFG->allversionshash = $currentversionshash;
+        $result['set']['allversionshash'] = 'updated';
+    } else {
+        $result['kept']['allversionshash'] = 'current';
+    }
+
     // Clear adminsetuppending — the snapshot sets this during CLI install
     // (admin/index.php line 726) and it never gets cleared because the web-based
     // admin setup flow doesn't run. With MUC enabled, this flag causes
@@ -804,10 +868,13 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 }
 
 /**
- * Generate a PHP script that applies ALL admin default settings with
- * CACHE_DISABLE_ALL = false, matching the runtime configuration.
- * This catches cache-store plugin settings and any other admin settings
- * that are only registered when MUC is active.
+ * Historically this tried to call admin_apply_default_settings() again after
+ * bootstrap with MUC enabled. In the WASM runtime that can leave cache store
+ * mappings in a partial state, which later breaks
+ * cache\\administration_helper on /admin/index.php.
+ *
+ * We already patch any_new_admin_settings() to short-circuit the admin
+ * redirect loop, so this extra seeding pass is no longer required.
  */
 function createAdminDefaultsSeederPhp() {
   return `<?php
@@ -819,20 +886,11 @@ ob_start();
 unset($_SERVER['REMOTE_ADDR']);
 define('CLI_SCRIPT', true);
 
-$result = ['ok' => false];
-
-try {
-    require_once('/www/moodle/config.php');
-    require_once($CFG->libdir . '/adminlib.php');
-    admin_apply_default_settings(NULL, false);
-    $result['ok'] = true;
-    $result['applied'] = true;
-} catch (Throwable $error) {
-    $result['error'] = [
-        'type' => get_class($error),
-        'message' => $error->getMessage(),
-    ];
-}
+$result = [
+    'ok' => true,
+    'applied' => false,
+    'skipped' => 'PLAYGROUND: admin defaults seeder disabled to avoid partial MUC mappings',
+];
 
 $buffer = ob_get_clean();
 if ($buffer !== '') {
@@ -1118,7 +1176,7 @@ async function patchRuntimePhpSources(php, webRoot) {
     let next = current;
     for (const [search, replace] of replacers) {
       if (next.includes(search)) {
-        next = next.replace(search, replace);
+        next = next.split(search).join(replace);
       }
     }
     if (next !== current) {
@@ -1147,24 +1205,313 @@ async function patchRuntimePhpSources(php, webRoot) {
     ],
   ]);
 
+  await patchFile(rp.CODE_MANAGER_PATH, [
+    [
+      `    public function list_plugin_folder_files($folderpath) {
+
+        $folder = new RecursiveDirectoryIterator($folderpath);
+        $iterator = new RecursiveIteratorIterator($folder);
+        $folderpathinfo = new SplFileInfo($folderpath);
+        $strip = strlen($folderpathinfo->getPathInfo()->getRealPath()) + 1;
+        $files = array();
+        foreach ($iterator as $fileinfo) {
+            if ($fileinfo->getFilename() === '..') {
+                continue;
+            }
+            if (strpos($fileinfo->getRealPath(), $folderpathinfo->getRealPath()) !== 0) {
+                throw new moodle_exception('unexpected_filepath_mismatch', 'core_plugin');
+            }
+            $key = substr($fileinfo->getRealPath(), $strip);
+            if ($fileinfo->isDir() and substr($key, -1) !== '/') {
+                $key .= '/';
+            }
+            $files[str_replace(DIRECTORY_SEPARATOR, '/', $key)] = str_replace(DIRECTORY_SEPARATOR, '/', $fileinfo->getRealPath());
+        }
+        return $files;
+    }`,
+      `    public function list_plugin_folder_files($folderpath) {
+
+        $folder = new RecursiveDirectoryIterator($folderpath, \\FilesystemIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($folder, RecursiveIteratorIterator::SELF_FIRST);
+        $rootname = basename($folderpath);
+        $parentpath = str_replace(DIRECTORY_SEPARATOR, '/', dirname($folderpath));
+        $strip = strlen($parentpath) + 1;
+        $files = array($rootname . '/' => $folderpath);
+        foreach ($iterator as $fileinfo) {
+            $pathname = str_replace(DIRECTORY_SEPARATOR, '/', $fileinfo->getPathname());
+            if (strpos($pathname, $parentpath . '/') !== 0) {
+                throw new moodle_exception('unexpected_filepath_mismatch', 'core_plugin');
+            }
+            $key = ltrim(substr($pathname, $strip), '/');
+            if ($key === '') {
+                continue;
+            }
+            if ($fileinfo->isDir() and substr($key, -1) !== '/') {
+                $key .= '/';
+            }
+            $files[$key] = $pathname;
+        }
+        return $files;
+    }`,
+    ],
+    [
+      `        if ($actualname !== $expectedname) {
+            // This should not happen.
+            throw new moodle_exception('unexpected_archive_structure', 'core_plugin');
+        }`,
+      `        if ($actualname !== $expectedname) {
+            // This should not happen.
+            throw new moodle_exception('unexpected_archive_structure', 'core_plugin');
+        }`,
+    ],
+    [
+      `    protected function move_extracted_plugin_files($sourcedir, $targetdir, array $files) {
+        global $CFG;
+
+        $rootdirs = array();
+        foreach (array_keys($files) as $file) {
+            $trimmed = trim($file, '/');
+            if ($trimmed === '') {
+                continue;
+            }
+            $parts = explode('/', $trimmed);
+            $rootdirs[$parts[0]] = true;
+        }
+        foreach (array_keys($rootdirs) as $rootdir) {
+            $rootpath = $targetdir . '/' . $rootdir;
+            if (!is_dir($rootpath)) {
+                mkdir($rootpath, $CFG->directorypermissions, true);
+            }
+        }
+
+        // Iterate sorted file list (to ensure directories precede files within them).
+        core_collator::ksort($files);
+        foreach ($files as $file => $status) {
+            if ($status !== true) {
+                throw new moodle_exception('corrupted_archive_structure', 'core_plugin', '', $file, $status);
+            }
+
+            $source = $sourcedir.'/'.$file;
+            $target = $targetdir.'/'.$file;
+
+            if (is_dir($source)) {
+                mkdir($target, $CFG->directorypermissions, true);
+            } else {
+                rename($source, $target);
+            }
+        }
+    }`,
+      `    protected function move_extracted_plugin_files($sourcedir, $targetdir, array $files) {
+        global $CFG;
+
+        // Iterate sorted file list (to ensure directories precede files within them).
+        core_collator::ksort($files);
+        foreach ($files as $file => $status) {
+            if ($status !== true) {
+                throw new moodle_exception('corrupted_archive_structure', 'core_plugin', '', $file, $status);
+            }
+
+            $source = $sourcedir.'/'.$file;
+            $target = $targetdir.'/'.$file;
+
+            if (is_dir($source)) {
+                if (!is_dir($target)) {
+                    mkdir($target, $CFG->directorypermissions, true);
+                }
+            } else {
+                $parent = dirname($target);
+                if (!is_dir($parent)) {
+                    mkdir($parent, $CFG->directorypermissions, true);
+                }
+                if (file_exists($target) && is_dir($target)) {
+                    remove_dir($target);
+                }
+                rename($source, $target);
+            }
+        }
+    }`,
+    ],
+  ]);
+
+  await patchFile(rp.PLUGIN_MANAGER_PATH, [
+    [
+      `        remove_dir($plugin->rootdir);
+        clearstatcache();
+        if (function_exists('opcache_reset')) {
+            opcache_reset();
+        }`,
+      `        $renamedroot = rename_to_unused_name($plugin->rootdir);
+        if ($renamedroot === false) {
+            remove_dir($plugin->rootdir);
+        }
+        clearstatcache();
+        if (function_exists('opcache_reset')) {
+            opcache_reset();
+        }`,
+    ],
+  ]);
+
+  await patchFile(rp.PLUGIN_MANAGER_PATH, [
+    [
+      `        if (function_exists('opcache_reset')) {
+            opcache_reset();
+        }
+
+        return true;`,
+      `        if (function_exists('opcache_reset')) {
+            opcache_reset();
+        }
+        foreach ($plugins as $plugin) {
+            [$plugintype, $pluginname] = core_component::normalize_component($plugin->component);
+            core_component::playground_refresh_installed_plugin_cache(
+                $plugin->component,
+                $this->get_plugintype_root($plugintype) . '/' . $pluginname
+            );
+        }
+        self::reset_caches();
+        core_component::reset();
+        set_config('allversionshash', '');
+
+        return true;`,
+    ],
+  ]);
+
   // In WASM, the filesystem scan triggered by IGNORE_COMPONENT_CACHE produces an
   // incomplete component registry (missing plugins, themes, lang strings, classes).
-  // Patch core_component::init() to skip the scan and fall through to the prebuilt
-  // alternative_component_cache when PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE is set.
+  // Patch core_component::init() to keep using the prebuilt
+  // alternative_component_cache in normal requests, but allow a real rescan on
+  // admin/index.php?cache=0 where Moodle decides whether upgrades are needed.
   await patchFile(rp.COMPONENT_CLASS_PATH, [
     [
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE) {\n            self::fill_all_caches();\n            return;\n        }",
       "if (defined('IGNORE_COMPONENT_CACHE') && IGNORE_COMPONENT_CACHE\n                && !(defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE') && PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE)) {\n            self::fill_all_caches();\n            return;\n        }",
     ],
-  ]);
-
-  // PLAYGROUND: the ephemeral runtime never needs upgrading — the VFS image
-  // and the snapshot are built together. moodle_needs_upgrading() returns true
-  // when allversionshash is missing or stale, causing /my/ to redirect to admin.
-  await patchFile(rp.MOODLELIB_PATH, [
     [
-      "function moodle_needs_upgrading($checkupgradeflag = true) {",
-      "function moodle_needs_upgrading($checkupgradeflag = true) {\n    return false; // PLAYGROUND: ephemeral runtime, no upgrades possible",
+      "        if (!empty($CFG->alternative_component_cache)) {\n            // Hack for heavily clustered sites that want to manage component cache invalidation manually.\n            $cachefile = $CFG->alternative_component_cache;",
+      "        if (!empty($CFG->alternative_component_cache)) {\n            // Hack for heavily clustered sites that want to manage component cache invalidation manually.\n            $cachefile = $CFG->alternative_component_cache;",
+    ],
+    [
+      "    public static function get_all_versions_hash() {\n        return sha1(serialize(self::get_all_versions()));\n    }",
+      `    /**
+     * PLAYGROUND: refresh the alternative component cache after installing a new plugin.
+     *
+     * @param string $component frankenstyle component name
+     * @param string $fulldir absolute plugin directory
+     * @return void
+     */
+    public static function playground_refresh_installed_plugin_cache(string $component, string $fulldir): void {
+        global $CFG;
+
+        if (empty($CFG->alternative_component_cache) || !is_dir($fulldir)) {
+            return;
+        }
+
+        self::init();
+
+        [$plugintype, $pluginname] = self::normalize_component($component);
+        if (empty($plugintype) || empty($pluginname)) {
+            return;
+        }
+
+        if (!isset(self::$plugins[$plugintype]) || !is_array(self::$plugins[$plugintype])) {
+            self::$plugins[$plugintype] = [];
+        }
+        self::$plugins[$plugintype][$pluginname] = $fulldir;
+        ksort(self::$plugins[$plugintype]);
+
+        self::playground_drop_plugin_cache_entries($component, $plugintype, $pluginname, $fulldir);
+        self::load_classes($component, $fulldir . '/classes');
+        self::load_legacy_classes($fulldir);
+        self::load_renamed_classes($fulldir);
+        self::playground_refresh_plugin_filemap($plugintype, $pluginname, $fulldir);
+
+        if (is_array(self::$classmap)) {
+            ksort(self::$classmap);
+        }
+        if (is_array(self::$classmaprenames)) {
+            ksort(self::$classmaprenames);
+        }
+
+        file_put_contents($CFG->alternative_component_cache, self::get_cache_content());
+        clearstatcache(true, $CFG->alternative_component_cache);
+    }
+
+    /**
+     * Drop stale cache entries for a plugin before re-adding them.
+     *
+     * @param string $component frankenstyle component name
+     * @param string $plugintype plugin type
+     * @param string $pluginname plugin name
+     * @param string $fulldir absolute plugin directory
+     * @return void
+     */
+    protected static function playground_drop_plugin_cache_entries(
+        string $component,
+        string $plugintype,
+        string $pluginname,
+        string $fulldir,
+    ): void {
+        if (is_array(self::$classmap)) {
+            foreach (self::$classmap as $classname => $classpath) {
+                if (str_starts_with($classname, $component . '\\\\')
+                        || str_starts_with($classname, $component . '_')
+                        || str_starts_with($classpath, $fulldir . '/')) {
+                    unset(self::$classmap[$classname]);
+                }
+            }
+        }
+
+        if (is_array(self::$classmaprenames)) {
+            foreach (self::$classmaprenames as $oldclass => $newclass) {
+                if (str_starts_with((string)$newclass, $component . '\\\\')
+                        || str_starts_with((string)$newclass, $component . '_')) {
+                    unset(self::$classmaprenames[$oldclass]);
+                }
+            }
+        }
+
+        if (is_array(self::$filemap)) {
+            foreach (self::$filestomap as $file) {
+                if (isset(self::$filemap[$file][$plugintype][$pluginname])) {
+                    unset(self::$filemap[$file][$plugintype][$pluginname]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Refresh filemap entries for a plugin.
+     *
+     * @param string $plugintype plugin type
+     * @param string $pluginname plugin name
+     * @param string $fulldir absolute plugin directory
+     * @return void
+     */
+    protected static function playground_refresh_plugin_filemap(
+        string $plugintype,
+        string $pluginname,
+        string $fulldir,
+    ): void {
+        if (!is_array(self::$filemap)) {
+            self::$filemap = [];
+        }
+
+        foreach (self::$filestomap as $file) {
+            if (!isset(self::$filemap[$file])) {
+                self::$filemap[$file] = [];
+            }
+            if (!isset(self::$filemap[$file][$plugintype])) {
+                self::$filemap[$file][$plugintype] = [];
+            }
+            if (file_exists($fulldir . '/' . $file)) {
+                self::$filemap[$file][$plugintype][$pluginname] = $fulldir . '/' . $file;
+            }
+        }
+    }
+
+    public static function get_all_versions_hash() {
+        return sha1(serialize(self::get_all_versions()));
+    }`,
     ],
   ]);
 
@@ -1187,6 +1534,78 @@ async function patchRuntimePhpSources(php, webRoot) {
     [
       "        foreach (glob($CFG->dirroot.'/'.$CFG->admin.'/settings/*.php') as $file) {\n            if ($file == $CFG->dirroot.'/'.$CFG->admin.'/settings/top.php') {\n                continue;\n            }\n            if ($file == $CFG->dirroot.'/'.$CFG->admin.'/settings/plugins.php') {\n            // plugins are loaded last - they may insert pages anywhere\n                continue;\n            }\n            require($file);",
       "        $__settingsdir = $CFG->dirroot.'/'.$CFG->admin.'/settings';\n        foreach (['ai','analytics','appearance','badges','competency','courses','development','fileredact','frontpage','grades','h5p','language','license','location','messaging','mnet','moodlenet','payment','reportbuilder','security','server','subsystems','userfeedback','users'] as $__sf) {\n            $file = $__settingsdir . '/' . $__sf . '.php';\n            if (!file_exists($file)) { continue; }\n            require($file);",
+    ],
+  ]);
+
+  await patchFile(rp.CACHE_ADMIN_HELPER_PATH, [
+    [
+      `            $mode = $definition['mode'];
+            // Get the store name of the default mapping from the mode.
+            $index = array_search($mode, array_column($modemappings, 'mode'));
+            $store = $modemappings[$index]['store'];
+            $return[$store]['mappings']++;`,
+      `            $mode = $definition['mode'];
+            // Get the store name of the default mapping from the mode.
+            $index = array_search($mode, array_column($modemappings, 'mode'));
+            if ($index === false || empty($modemappings[$index]['store'])) {
+                continue;
+            }
+            $store = $modemappings[$index]['store'];
+            if (!array_key_exists($store, $return)) {
+                continue;
+            }
+            $return[$store]['mappings']++;`,
+    ],
+  ]);
+
+  // PLAYGROUND: sodium is not present in the current PHP WASM binary, but
+  // core\encryption is already patched to fall back to OpenSSL. Downgrade the
+  // environment check so upgrades are not blocked by a cosmetic runtime gap.
+  await patchFile(rp.ADMIN_ENVIRONMENT_PATH, [
+    [
+      '<PHP_EXTENSION name="sodium" level="required"/>',
+      '<PHP_EXTENSION name="sodium" level="optional"/>',
+    ],
+  ]);
+
+  const navigationUpgradeRedirectPatch = [
+    [
+      `if ($hassiteconfig && moodle_needs_upgrading()) {
+    redirect(new moodle_url('/admin/index.php'));
+}`,
+      `if ($hassiteconfig && moodle_needs_upgrading()
+        && !(defined('PLAYGROUND_SKIP_NAV_UPGRADE_REDIRECTS') && PLAYGROUND_SKIP_NAV_UPGRADE_REDIRECTS)) {
+    redirect(new moodle_url('/admin/index.php'));
+}`,
+    ],
+  ];
+
+  await patchFile(
+    `${webRoot}/admin/search.php`,
+    navigationUpgradeRedirectPatch,
+  );
+  await patchFile(`${webRoot}/my/index.php`, navigationUpgradeRedirectPatch);
+  await patchFile(`${webRoot}/my/courses.php`, navigationUpgradeRedirectPatch);
+
+  await patchFile(`${webRoot}/admin/index.php`, [
+    [
+      `if (!$cache) {
+    redirect(new moodle_url('/admin/index.php', array('cache' => 1)));
+}`,
+      `if (!$cache) {
+    $playgroundmodlist = core_component::get_plugin_list('mod');
+    $playgroundcomputedhash = core_component::get_all_versions_hash();
+    $playgroundstoredhash = $CFG->allversionshash ?? '';
+    redirect(new moodle_url('/admin/index.php', array(
+        'cache' => 1,
+        'pgsh' => substr((string)$playgroundstoredhash, 0, 12),
+        'pgch' => substr((string)$playgroundcomputedhash, 0, 12),
+        'pgmm' => (int)($playgroundstoredhash !== $playgroundcomputedhash),
+        'pgxe' => isset($playgroundmodlist['exeweb']) ? 1 : 0,
+        'pgmc' => count($playgroundmodlist),
+        'pgac' => !empty($CFG->alternative_component_cache) ? 1 : 0,
+    )));
+}`,
     ],
   ]);
 }
@@ -1253,6 +1672,18 @@ async function prepareMoodleRuntime({
   }
   const mountMs = Math.round(performance.now() - tMount);
 
+  const tComponentCache = performance.now();
+  const bundledComponentCachePath = `${MOODLE_ROOT}/.playground/core_component.php`;
+  const bundledComponentCache = await php.analyzePath(
+    bundledComponentCachePath,
+  );
+  const writableComponentCache = await php.analyzePath(COMPONENT_CACHE_PATH);
+  if (bundledComponentCache?.exists && !writableComponentCache?.exists) {
+    const componentCacheBytes = await php.readFile(bundledComponentCachePath);
+    await php.writeFile(COMPONENT_CACHE_PATH, componentCacheBytes);
+  }
+  const componentCacheMs = Math.round(performance.now() - tComponentCache);
+
   const tFiles = performance.now();
   await php.writeFile(
     `${MOODLE_ROOT}/config.php`,
@@ -1306,7 +1737,7 @@ async function prepareMoodleRuntime({
   const patchMs = Math.round(performance.now() - tPatch);
 
   publish(
-    `Prepare sub-timings: dirs=${dirsMs}ms mount=${mountMs}ms files=${filesMs}ms patches=${patchMs}ms`,
+    `Prepare sub-timings: dirs=${dirsMs}ms mount=${mountMs}ms componentCache=${componentCacheMs}ms files=${filesMs}ms patches=${patchMs}ms`,
     0.83,
   );
 
@@ -1537,6 +1968,7 @@ async function requestRuntimeScript(
 export async function bootstrapMoodle({
   config,
   blueprint,
+  debug,
   php,
   publish,
   runtimeId,
@@ -1550,14 +1982,43 @@ export async function bootstrapMoodle({
     config.runtimes.find((entry) => entry.id === runtimeId) ||
     config.runtimes[0];
   const blueprintOverlay = buildInstallConfig(blueprint);
+  const normalizeDebugOverride = (value) => {
+    if (value == null) {
+      return null;
+    }
+    const raw = String(value).trim().toLowerCase();
+    if (!raw || raw === "false" || raw === "0" || raw === "off") {
+      return { debug: 0, debugdisplay: 0 };
+    }
+    if (raw === "true" || raw === "1" || raw === "on" || raw === "developer") {
+      return { debug: 32767, debugdisplay: 1 };
+    }
+    if (raw === "normal" || raw === "15") {
+      return { debug: 15, debugdisplay: 1 };
+    }
+    if (raw === "minimal" || raw === "5") {
+      return { debug: 5, debugdisplay: 1 };
+    }
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return {
+        debug: numeric,
+        debugdisplay: numeric > 0 ? 1 : 0,
+      };
+    }
+    return null;
+  };
+  const debugOverride = normalizeDebugOverride(debug);
   // Extract debug settings from blueprint runtime section
   const blueprintRuntime = blueprint?.runtime || {};
   const effectiveDebug =
-    blueprintRuntime.debug != null ? Number(blueprintRuntime.debug) : 0;
+    debugOverride?.debug ??
+    (blueprintRuntime.debug != null ? Number(blueprintRuntime.debug) : 0);
   const effectiveDebugDisplay =
-    blueprintRuntime.debugdisplay != null
+    debugOverride?.debugdisplay ??
+    (blueprintRuntime.debugdisplay != null
       ? Number(blueprintRuntime.debugdisplay)
-      : 0;
+      : 0);
   const effectiveConfig = {
     ...config,
     ...(blueprintOverlay.siteTitle

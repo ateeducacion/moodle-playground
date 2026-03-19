@@ -211,10 +211,11 @@ describe("parseRuntimeId", () => {
 
 describe("parseQueryParams", () => {
   it("parses URLSearchParams", () => {
-    const params = new URLSearchParams("php=8.3&moodle=5.0");
+    const params = new URLSearchParams("php=8.3&moodle=5.0&debug=true");
     const result = parseQueryParams(params);
     assert.strictEqual(result.php, "8.3");
     assert.strictEqual(result.moodle, "5.0");
+    assert.strictEqual(result.debug, "true");
   });
 
   it("parses URL string", () => {
@@ -235,6 +236,7 @@ describe("parseQueryParams", () => {
     assert.strictEqual(result.php, null);
     assert.strictEqual(result.moodle, null);
     assert.strictEqual(result.moodleBranch, null);
+    assert.strictEqual(result.debug, null);
   });
 });
 

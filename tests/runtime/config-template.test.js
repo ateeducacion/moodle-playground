@@ -73,6 +73,12 @@ describe("createMoodleConfigPhp", () => {
     assert.ok(config.includes("define('CACHE_DISABLE_STORES', false)"));
   });
 
+  it("disables remote update checks in Playground", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("$CFG->disableupdatenotifications = true"));
+    assert.ok(config.includes("$CFG->updateautocheck = false"));
+  });
+
   it("enables slash arguments", () => {
     const config = createMoodleConfigPhp(baseParams);
     assert.ok(config.includes("$CFG->slasharguments = 1"));

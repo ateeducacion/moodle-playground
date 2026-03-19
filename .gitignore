@@ -10,3 +10,4 @@ assets/build-version.json
 src/generated/
 .playwright-mcp/
 vendor/
+test-results/

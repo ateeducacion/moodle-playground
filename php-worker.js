@@ -12,12 +12,160 @@ const scopeId = workerUrl.searchParams.get("scope");
 const runtimeId = workerUrl.searchParams.get("runtime");
 const phpVersion = workerUrl.searchParams.get("phpVersion") || null;
 const moodleBranch = workerUrl.searchParams.get("moodleBranch") || null;
+const debug = workerUrl.searchParams.get("debug") || null;
+const profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
 let activeBlueprint = null;
 let activeRuntimeConfig = null;
 let phpInfoCapturePromise = null;
+let automaticPhpInfoAttempted = false;
+
+function normalizeProfileFlags(value) {
+  return new Set(
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function installVfsTraceHook() {
+  const flags = normalizeProfileFlags(profile);
+  if (!flags.has("vfs") && !flags.has("vfs-plugins")) {
+    return;
+  }
+
+  const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
+  const webRoot = branchMeta?.webRoot || "/www/moodle";
+  const pluginRoots = [
+    `${webRoot}/mod/`,
+    `${webRoot}/blocks/`,
+    `${webRoot}/theme/`,
+    `${webRoot}/local/`,
+    `${webRoot}/report/`,
+    `${webRoot}/auth/`,
+    `${webRoot}/filter/`,
+    `${webRoot}/grade/export/`,
+    `${webRoot}/grade/import/`,
+    `${webRoot}/grade/report/`,
+    `${webRoot}/message/output/`,
+    `${webRoot}/admin/tool/`,
+    `${webRoot}/user/profile/field/`,
+    `${webRoot}/mod/quiz/report/`,
+    `${webRoot}/plagiarism/`,
+    `${webRoot}/portfolio/`,
+    `${webRoot}/repository/`,
+    `${webRoot}/search/`,
+    `${webRoot}/reportbuilder/source/`,
+    `${webRoot}/payment/gateway/`,
+    `${webRoot}/enrol/`,
+    `${webRoot}/mod/assign/feedback/`,
+    `${webRoot}/mod/assign/submission/`,
+    `${webRoot}/mod/quiz/accessrule/`,
+    `${webRoot}/mod/workshop/allocation/`,
+    `${webRoot}/mod/workshop/assessment/`,
+    `${webRoot}/mod/workshop/form/`,
+    `${webRoot}/question/type/`,
+    `${webRoot}/question/behaviour/`,
+    `${webRoot}/question/format/`,
+    `${webRoot}/lib/editor/`,
+    `${webRoot}/lib/editor/tiny/plugins/`,
+    `${webRoot}/lib/editor/atto/plugins/`,
+    `${webRoot}/lib/editor/tinymce/plugins/`,
+    `${webRoot}/availability/condition/`,
+    `${webRoot}/mod/data/field/`,
+    `${webRoot}/mod/data/preset/`,
+    `${webRoot}/mod/scorm/report/`,
+    `${webRoot}/mod/lti/source/`,
+    `${webRoot}/contentbank/contenttype/`,
+    `${webRoot}/course/format/`,
+    `${webRoot}/customfield/field/`,
+    `${webRoot}/analytics/indicator/`,
+    `${webRoot}/ai/provider/`,
+    `${webRoot}/ai/placement/`,
+    `${webRoot}/cache/lock/`,
+    `${webRoot}/cache/stores/`,
+    `${webRoot}/search/engine/`,
+    `${webRoot}/local/cache/`,
+    `${webRoot}/admin/tool/log/store/`,
+  ];
+  const requestDirPrefix = "/tmp/moodle/requestdir/";
+  const trackedPluginPaths = new Set();
+  const trackPluginFromRequestDir = (text) => {
+    const match = text.match(/\/tmp\/moodle\/requestdir\/[^/\s]+\/[^/\s]+\/[^/\s]+\/([^/\s]+)\//);
+    if (!match?.[1]) {
+      return;
+    }
+
+    const pluginName = match[1];
+    let added = false;
+
+    for (const prefix of pluginRoots) {
+      const candidate = `${prefix}${pluginName}`;
+      if (!trackedPluginPaths.has(candidate)) {
+        trackedPluginPaths.add(candidate);
+        added = true;
+      }
+    }
+
+    if (added) {
+      postShell({
+        kind: "trace",
+        detail: `[vfs] tracking plugin path candidates for ${pluginName}`,
+      });
+    }
+  };
+  let traceCount = 0;
+  let traceDropped = false;
+  const TRACE_LIMIT = 10000;
+
+  globalThis.__moodleFsDebugHook = (detail) => {
+    const text = String(detail || "");
+    if (flags.has("vfs-plugins")) {
+      if (text.includes(requestDirPrefix)) {
+        trackPluginFromRequestDir(text);
+      }
+
+      const matchesTrackedPlugin = [...trackedPluginPaths].some(
+        (prefix) => text.includes(prefix) || text.includes(`${prefix}/`),
+      );
+      const matchesInstallScratch =
+        text.includes(requestDirPrefix) ||
+        text.includes("/_temp_") ||
+        text.includes("cross-mount rename");
+
+      if (!matchesTrackedPlugin && !matchesInstallScratch) {
+        return;
+      }
+    }
+
+    if (traceCount >= TRACE_LIMIT) {
+      if (!traceDropped) {
+        traceDropped = true;
+        postShell({
+          kind: "trace",
+          detail: `[vfs] trace limit reached (${TRACE_LIMIT}); suppressing further VFS logs`,
+        });
+      }
+      return;
+    }
+
+    traceCount += 1;
+    postShell({
+      kind: "trace",
+      detail: `[vfs] ${text}`,
+    });
+  };
+
+  postShell({
+    kind: "trace",
+    detail: `[vfs] tracing enabled with profile=${profile}`,
+  });
+}
+
+installVfsTraceHook();
 
 function postShell(message) {
   const channel = new BroadcastChannel(createShellChannel(scopeId));
@@ -199,6 +347,7 @@ async function getRuntimeState() {
         appBaseUrl: appRootUrl,
         config,
         blueprint: activeBlueprint,
+        debug,
         php,
         publish,
         runtimeId,
@@ -208,7 +357,10 @@ async function getRuntimeState() {
         webRoot,
       });
     } catch (error) {
-      await publishPhpInfo(runtime, "bootstrap-error");
+      if (!automaticPhpInfoAttempted) {
+        automaticPhpInfoAttempted = true;
+        void publishPhpInfo(runtime, "bootstrap-error");
+      }
       throw error;
     }
     const bootstrapMs = Math.round(performance.now() - t2);

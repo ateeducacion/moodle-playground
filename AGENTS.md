@@ -234,6 +234,9 @@ Prototype-specific defaults currently matter during first boot:
 - Debug defaults to disabled (`$CFG->debug = 0`) but is configurable via blueprint `runtime.debug`
   (0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER) and `runtime.debugdisplay` (0 or 1),
   or via the Settings dialog in the playground UI
+- For browser/runtime debugging, prefer opening the app with `?debug=true` first.
+  This forces `DEBUG_DEVELOPER`, `debugdisplay=1`, and PHP `display_errors=1`
+  for the booted runtime without editing the blueprint.
 - `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
 - PHP `display_errors` is off by default; configurable via `runtime.debugdisplay` in blueprint

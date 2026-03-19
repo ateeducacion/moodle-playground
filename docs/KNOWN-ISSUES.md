@@ -38,7 +38,8 @@ The `@php-wasm/web` PHP 8.3 runtime includes most previously-missing extensions
 
 **sodium is NOT available** in the WASM binary. The OpenSSL fallback patch in
 `patches/shared/lib/classes/encryption.php` handles all encryption needs. The
-Moodle environment check will show sodium as missing — this is cosmetic only.
+runtime also downgrades the `admin/environment.xml` sodium check from `required`
+to `optional`, so plugin upgrades are no longer blocked by this mismatch.
 
 **OPcache cannot work** in the WASM SAPI. This is a PHP/Emscripten limitation,
 not something that can be fixed in this project. The environment check warning

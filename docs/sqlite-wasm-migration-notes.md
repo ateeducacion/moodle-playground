@@ -123,6 +123,7 @@ Why these extra files were needed:
   - current Moodle assumes `sodium` is always present
   - this wasm runtime does not currently ship `sodium`
   - a local OpenSSL fallback was restored so login/session-related encryption can work in the prototype
+  - runtime bootstrap also downgrades the `admin/environment.xml` sodium requirement to optional so upgrades can proceed
 
 ## Runtime bootstrap changes
 
@@ -150,6 +151,7 @@ Important runtime-local overrides added during debugging:
 - cache config warnings are suppressed when `CACHE_DISABLE_ALL` is active
 - the deprecated SQLite driver is patched in-place to handle current PHP/Moodle behavior
 - `lib/classes/encryption.php` is patched in-place to add the OpenSSL fallback
+- `admin/environment.xml` is patched in-place to avoid blocking upgrades on the missing `sodium` extension
 - plugin settings files with brittle `$ADMIN->locate(...)` assumptions are patched so install does not abort
 - install/finalize logic hydrates `$CFG` from database-backed config during the special bootstrap path
 

@@ -22,6 +22,7 @@ The PHP 8.3 WASM binary includes all required extensions built-in: `sqlite3`, `p
 
 !!! note
     `sodium` is **not** available in the WASM binary. The OpenSSL fallback patch handles all encryption needs.
+    The runtime also downgrades Moodle's environment check for `sodium` so upgrades are not blocked.
 
 ## Storage model
 

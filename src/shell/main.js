@@ -65,6 +65,8 @@ let config;
 let currentRuntimeId;
 let currentPhpVersion = DEFAULT_PHP_VERSION;
 let currentMoodleBranch = null;
+let currentDebugParam = null;
+let currentProfileParam = null;
 let currentPath = "/";
 let channel;
 let serviceWorkerReady = null;
@@ -138,6 +140,8 @@ async function updateFrame() {
   const url = resolveRemoteUrl(scopeId, currentRuntimeId, currentPath, {
     phpVersion: currentPhpVersion,
     moodleBranch: currentMoodleBranch,
+    debug: currentDebugParam,
+    profile: currentProfileParam,
   });
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
@@ -386,6 +390,9 @@ function bindShellChannel() {
         setPhpInfoContent(message.html || "");
         appendLog(message.detail || "Captured PHP runtime diagnostics.");
         break;
+      case "trace":
+        appendLog(message.detail || "[trace]");
+        break;
       default:
         break;
     }
@@ -528,6 +535,8 @@ async function main() {
     moodle: urlParams.moodle || blueprintVersions.moodle,
     moodleBranch: urlParams.moodleBranch,
   });
+  currentDebugParam = urlParams.debug;
+  currentProfileParam = urlParams.profile;
   currentPhpVersion = resolved.phpVersion;
   currentMoodleBranch = resolved.moodleBranch;
   currentRuntimeId = buildRuntimeId(currentPhpVersion, currentMoodleBranch);

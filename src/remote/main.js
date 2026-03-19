@@ -477,6 +477,8 @@ async function bootstrapRemote() {
   const resetNonce = url.searchParams.get("reload") || "";
   const phpVersion = url.searchParams.get("phpVersion") || null;
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
+  const debug = url.searchParams.get("debug") || null;
+  const profile = url.searchParams.get("profile") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   const blueprint = loadBlueprint(scopeId);
@@ -539,6 +541,12 @@ async function bootstrapRemote() {
     }
     if (moodleBranch) {
       workerUrl.searchParams.set("moodleBranch", moodleBranch);
+    }
+    if (debug) {
+      workerUrl.searchParams.set("debug", debug);
+    }
+    if (profile) {
+      workerUrl.searchParams.set("profile", profile);
     }
     phpWorker = new Worker(workerUrl, { type: "module" });
     phpWorker.addEventListener("error", (event) => {
