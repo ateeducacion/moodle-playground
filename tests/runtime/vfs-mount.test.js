@@ -519,6 +519,8 @@ describe("mountReadonlyVfs", () => {
     );
   });
 
+  // White-box test: intentionally checks internal vfsRecord state to verify
+  // that the lazy copy optimization avoids buffer duplication during rename.
   it("uses lazy references during rename without duplicating file buffers", () => {
     const root = mountTestVfs([
       ["/mod/exeweb/version.php", "old-version"],
@@ -547,6 +549,7 @@ describe("mountReadonlyVfs", () => {
     assert.strictEqual(readFile(clonedVersion), "old-version");
   });
 
+  // White-box test: verifies copy-on-write detachment of shared buffers.
   it("detaches shared buffer on write (copy-on-write)", () => {
     const root = mountTestVfs([["/mod/exeweb/version.php", "old-ver"]]);
     const modDir = lookupPath(root, "/www/moodle/mod");

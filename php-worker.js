@@ -448,13 +448,14 @@ function installBridgeListener() {
 
     requestQueue = requestQueue.then(async () => {
       try {
-        // Preventive rotation: restart runtime after threshold of heavy requests
+        // Preventive rotation: restart runtime once the request threshold is reached.
+        // requestQueue ensures sequential processing, so no concurrent race conditions.
         requestCount += 1;
         if (requestCount >= HEAVY_REQUEST_THRESHOLD && restartCount < MAX_RESTARTS) {
-          const rotated = resetRuntime(`preventive rotation after ${requestCount} requests`);
-          if (rotated) {
-            // Fall through to getRuntimeState() which will create a fresh runtime
-          }
+          resetRuntime(`preventive rotation after ${requestCount} requests`);
+          // Fall through to getRuntimeState() which will create a fresh runtime.
+          // If resetRuntime() returned false (restart limit), we proceed with
+          // the existing runtime to serve the request best-effort.
         }
 
         const state = await getRuntimeState();
