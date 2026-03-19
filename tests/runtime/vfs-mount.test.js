@@ -518,4 +518,116 @@ describe("mountReadonlyVfs", () => {
       "dir",
     );
   });
+
+  it("uses lazy references during rename without duplicating file buffers", () => {
+    const root = mountTestVfs([
+      ["/mod/exeweb/version.php", "old-version"],
+      ["/mod/exeweb/lib.php", "old-lib"],
+    ]);
+    const modDir = lookupPath(root, "/www/moodle/mod");
+    const exewebDir = lookupPath(root, "/www/moodle/mod/exeweb");
+
+    // Materialize the original file to get a reference to its contents buffer
+    const origVersion = lookupPath(root, "/www/moodle/mod/exeweb/version.php");
+    const origContents = origVersion.vfsRecord.contents;
+
+    // Rename the directory (should create lazy clones, not deep copies)
+    exewebDir.node_ops.rename(exewebDir, modDir, "_temp_lazy");
+
+    // The cloned file record at the new path should share the original buffer
+    const clonedVersion = lookupPath(
+      root,
+      "/www/moodle/mod/_temp_lazy/version.php",
+    );
+    assert.strictEqual(clonedVersion.vfsRecord._shared, true);
+    // The contents should be the same reference (not a copy)
+    assert.strictEqual(clonedVersion.vfsRecord.contents, origContents);
+
+    // Reading should still work correctly
+    assert.strictEqual(readFile(clonedVersion), "old-version");
+  });
+
+  it("detaches shared buffer on write (copy-on-write)", () => {
+    const root = mountTestVfs([["/mod/exeweb/version.php", "old-ver"]]);
+    const modDir = lookupPath(root, "/www/moodle/mod");
+    const exewebDir = lookupPath(root, "/www/moodle/mod/exeweb");
+
+    // Materialize and get the original buffer
+    const origVersion = lookupPath(root, "/www/moodle/mod/exeweb/version.php");
+    const origContents = origVersion.vfsRecord.contents;
+
+    // Rename to create lazy clone
+    exewebDir.node_ops.rename(exewebDir, modDir, "_temp_cow");
+    const clonedVersion = lookupPath(
+      root,
+      "/www/moodle/mod/_temp_cow/version.php",
+    );
+
+    // Verify shared before write
+    assert.strictEqual(clonedVersion.vfsRecord._shared, true);
+
+    // Write to the cloned file (same length to fully overwrite)
+    const stream = { node: clonedVersion, position: 0 };
+    const newBytes = new TextEncoder().encode("new-ver");
+    clonedVersion.stream_ops.open(stream);
+    clonedVersion.stream_ops.write(stream, newBytes, 0, newBytes.byteLength, 0);
+
+    // After write, buffer should be detached (no longer shared)
+    assert.strictEqual(clonedVersion.vfsRecord._shared, false);
+    // And the contents should be different from the original buffer
+    assert.notStrictEqual(clonedVersion.vfsRecord.contents, origContents);
+    assert.strictEqual(readFile(clonedVersion), "new-ver");
+  });
+
+  it("does not grow memory when repeatedly renaming and deleting subtrees", () => {
+    const root = mountTestVfs([
+      ["/mod/exeweb/version.php", "version-data-here"],
+      ["/mod/exeweb/lib.php", "lib-data-here"],
+      ["/mod/exeweb/lang/en/exeweb.php", "lang-data-here"],
+    ]);
+    const modDir = lookupPath(root, "/www/moodle/mod");
+
+    // Simulate repeated plugin replace cycles
+    for (let i = 0; i < 5; i++) {
+      const pluginDir = lookupPath(root, "/www/moodle/mod/exeweb");
+      const tempName = `_temp_cycle_${i}`;
+
+      // Rename existing to temp (lazy, no copy)
+      pluginDir.node_ops.rename(pluginDir, modDir, tempName);
+
+      // Delete the temp tree
+      const tempDir = lookupPath(root, `/www/moodle/mod/${tempName}`);
+      removeTree(tempDir);
+      modDir.node_ops.rmdir(modDir, tempName);
+
+      // Recreate plugin directory with fresh files
+      const recreated = modDir.node_ops.mkdir(modDir, "exeweb", 0o40755);
+      mkdirs(root, "/www/moodle/mod/exeweb/lang/en");
+      writeFile(recreated, "version.php", `version-${i}`);
+      writeFile(recreated, "lib.php", `lib-${i}`);
+      writeFile(
+        lookupPath(root, "/www/moodle/mod/exeweb/lang/en"),
+        "exeweb.php",
+        `lang-${i}`,
+      );
+    }
+
+    // Final state should be correct
+    assert.strictEqual(
+      readFile(lookupPath(root, "/www/moodle/mod/exeweb/version.php")),
+      "version-4",
+    );
+    assert.strictEqual(
+      readFile(lookupPath(root, "/www/moodle/mod/exeweb/lib.php")),
+      "lib-4",
+    );
+
+    // Temp trees should be gone
+    for (let i = 0; i < 5; i++) {
+      assert.throws(
+        () => lookupPath(root, `/www/moodle/mod/_temp_cycle_${i}`),
+        /Errno/,
+      );
+    }
+  });
 });

@@ -22,6 +22,12 @@ let activeRuntimeConfig = null;
 let phpInfoCapturePromise = null;
 let automaticPhpInfoAttempted = false;
 
+// --- Runtime rotation state ---
+const MAX_RESTARTS = 3;
+const HEAVY_REQUEST_THRESHOLD = 20;
+let requestCount = 0;
+let restartCount = 0;
+
 function normalizeProfileFlags(value) {
   return new Set(
     String(value || "")
@@ -93,7 +99,12 @@ function installVfsTraceHook() {
   ];
   const requestDirPrefix = "/tmp/moodle/requestdir/";
   const trackedPluginPaths = new Set();
+  const TRACKED_PLUGIN_LIMIT = 200;
   const trackPluginFromRequestDir = (text) => {
+    if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
+      return;
+    }
+
     const match = text.match(/\/tmp\/moodle\/requestdir\/[^/\s]+\/[^/\s]+\/[^/\s]+\/([^/\s]+)\//);
     if (!match?.[1]) {
       return;
@@ -103,6 +114,9 @@ function installVfsTraceHook() {
     let added = false;
 
     for (const prefix of pluginRoots) {
+      if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
+        break;
+      }
       const candidate = `${prefix}${pluginName}`;
       if (!trackedPluginPaths.has(candidate)) {
         trackedPluginPaths.add(candidate);
@@ -294,6 +308,45 @@ function formatErrorDetail(error) {
   }
 }
 
+function isFatalWasmError(error) {
+  if (!error) {
+    return false;
+  }
+
+  const message = String(error.message || error);
+  return (
+    error instanceof WebAssembly.RuntimeError ||
+    message.includes("memory access out of bounds") ||
+    message.includes("unreachable") ||
+    message.includes("RuntimeError")
+  );
+}
+
+function resetRuntime(reason) {
+  if (restartCount >= MAX_RESTARTS) {
+    postShell({
+      kind: "error",
+      detail: `[runtime] restart limit reached (${MAX_RESTARTS}), not restarting. Reason: ${reason}`,
+    });
+    return false;
+  }
+
+  restartCount += 1;
+  requestCount = 0;
+  runtimeStatePromise = null;
+  phpInfoCapturePromise = null;
+  automaticPhpInfoAttempted = false;
+
+  postShell({
+    kind: "progress",
+    title: "Runtime rotation",
+    detail: `[runtime] restarting (${restartCount}/${MAX_RESTARTS}): ${reason}`,
+    progress: 0.01,
+  });
+
+  return true;
+}
+
 async function getRuntimeState() {
   if (runtimeStatePromise) {
     return runtimeStatePromise;
@@ -395,6 +448,15 @@ function installBridgeListener() {
 
     requestQueue = requestQueue.then(async () => {
       try {
+        // Preventive rotation: restart runtime after threshold of heavy requests
+        requestCount += 1;
+        if (requestCount >= HEAVY_REQUEST_THRESHOLD && restartCount < MAX_RESTARTS) {
+          const rotated = resetRuntime(`preventive rotation after ${requestCount} requests`);
+          if (rotated) {
+            // Fall through to getRuntimeState() which will create a fresh runtime
+          }
+        }
+
         const state = await getRuntimeState();
         const response = await state.php.request(deserializeRequest(data.request));
         respond({
@@ -403,6 +465,21 @@ function installBridgeListener() {
           response: await serializeResponse(response),
         });
       } catch (error) {
+        // Reactive rotation: restart on fatal WASM errors
+        if (isFatalWasmError(error) && resetRuntime(`fatal WASM error: ${error.message}`)) {
+          const detail = formatErrorDetail(error);
+          const response = buildLoadingResponse(
+            `Runtime restarting after crash. Please retry.\n\n${detail}`,
+            503,
+          );
+          respond({
+            kind: "http-response",
+            id: data.id,
+            response: await serializeResponse(response),
+          });
+          return;
+        }
+
         const detail = formatErrorDetail(error);
         const response = buildLoadingResponse(detail, 500);
         respond({
