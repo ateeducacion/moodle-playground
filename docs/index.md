@@ -51,6 +51,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 - [Getting started](getting-started.md)
 - [Architecture](architecture.md)
 - [Blueprint reference](blueprint-json.md)
+- [Plugin install notes for this branch](plugin-install-branch-notes.md)
 
 ---
 
