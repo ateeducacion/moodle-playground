@@ -78,6 +78,7 @@ let latestPhpInfoHtml = "";
 let phpInfoCapturePromise = null;
 let activeProgressLogLine = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
+const MAX_LOG_LINES = 400;
 
 function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
@@ -100,7 +101,7 @@ function appendLog(message, isError = false, { replaceProgress = false } = {}) {
   els.logPanel.append(span);
   activeProgressLogLine = replaceProgress ? span : null;
 
-  while (els.logPanel.childNodes.length > 400) {
+  while (els.logPanel.childNodes.length > MAX_LOG_LINES) {
     els.logPanel.firstChild?.remove();
   }
   els.logPanel.scrollTop = els.logPanel.scrollHeight;

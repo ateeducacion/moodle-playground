@@ -8,13 +8,13 @@ const outputDir = process.env.PLAYWRIGHT_OUTPUT_DIR || "test-results";
 const reportDir = process.env.PLAYWRIGHT_REPORT_DIR || "playwright-report";
 const serverLog = process.env.PLAYWRIGHT_SERVER_LOG;
 
-function shellQuote(value) {
+function quoteForShell(value) {
   return JSON.stringify(String(value));
 }
 
-let webServerCommand = `npx http-server ${shellQuote(webRoot)} -p ${port} -c-1`;
+let webServerCommand = `npx http-server ${quoteForShell(webRoot)} -p ${port} -c-1`;
 if (serverLog) {
-  webServerCommand += ` > ${shellQuote(serverLog)} 2>&1`;
+  webServerCommand += ` > ${quoteForShell(serverLog)} 2>&1`;
 }
 
 export default defineConfig({

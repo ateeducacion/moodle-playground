@@ -27,6 +27,8 @@ function getAppBasePath() {
   return pathname.endsWith("/") ? pathname.slice(0, -1) || "/" : pathname || "/";
 }
 
+// Keep these helpers inlined because the service worker must also run as a
+// classic script for Firefox validation, so it cannot import shared ESM helpers.
 function createPhpBridgeChannel(scopeId) {
   return `${PHP_BRIDGE_CHANNEL_PREFIX}:${scopeId}`;
 }

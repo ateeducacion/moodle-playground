@@ -238,7 +238,9 @@ export async function fillFirstVisible(locatorFactories, value) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
-  throw new Error(`Unable to find a visible field for value ${value}`);
+  throw new Error(
+    `Unable to find a visible field for value ${value}. Tried ${locatorFactories.length} selector(s).`,
+  );
 }
 
 export async function tryFillFirstVisible(locatorFactories, value) {

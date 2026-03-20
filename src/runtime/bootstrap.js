@@ -28,6 +28,8 @@ import { buildManifestState, resolveManifestUrl } from "./manifest.js";
 
 const DOCROOT = "/www";
 const CONFIG_ROOT = "/persist/config";
+const FALLBACK_PROGRESS_MIN_RATIO_DELTA = 0.02;
+const FALLBACK_PROGRESS_MIN_INTERVAL_MS = 250;
 const MANIFEST_STATE_PATH = `${CONFIG_ROOT}/moodle-playground-manifest.json`;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -1253,8 +1255,8 @@ async function prepareMoodleRuntime({
       const now = performance.now();
       const shouldPublish =
         ratio >= 1 ||
-        ratio - lastWriteRatio >= 0.02 ||
-        now - lastWritePublishAt >= 250;
+        ratio - lastWriteRatio >= FALLBACK_PROGRESS_MIN_RATIO_DELTA ||
+        now - lastWritePublishAt >= FALLBACK_PROGRESS_MIN_INTERVAL_MS;
       if (!shouldPublish) {
         return;
       }

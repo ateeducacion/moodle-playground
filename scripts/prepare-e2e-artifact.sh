@@ -8,6 +8,8 @@ cd "$repo_root"
 
 strip_vfs_from_manifest() {
   local manifest_path="$1"
+  # Strip VFS references so preview E2E uses the same smaller deployable artifact
+  # that the Netlify preview deploy publishes.
   node --input-type=module -e '
     import { readFileSync, writeFileSync, existsSync } from "node:fs";
 

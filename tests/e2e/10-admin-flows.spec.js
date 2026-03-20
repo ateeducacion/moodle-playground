@@ -18,7 +18,9 @@ test("creates a course and a user, then renders an admin system information page
   const diagnostics = createDiagnosticsCollector(page);
   const suffix = uniqueSuffix(testInfo);
   const courseName = `Playwright Course ${suffix}`;
+  // Keep generated identifiers short for readability in Moodle admin tables.
   const courseShortName = `PW-${Date.now()}`.slice(0, 20);
+  // Moodle accepts much longer usernames, but a compact value keeps test data readable.
   const username = `pwuser_${Date.now()}`.slice(0, 30);
   const userPassword = "TempPassword1!";
   const userFirstName = "Playwright";
