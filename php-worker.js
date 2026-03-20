@@ -336,6 +336,7 @@ function resetRuntime(reason) {
   runtimeStatePromise = null;
   phpInfoCapturePromise = null;
   automaticPhpInfoAttempted = false;
+  activeRuntimeConfig = null;
 
   postShell({
     kind: "progress",
@@ -458,12 +459,10 @@ function installBridgeListener() {
       try {
         // Preventive rotation: restart runtime once the request threshold is reached.
         // requestQueue ensures sequential processing, so no concurrent race conditions.
+        // resetRuntime resets requestCount to 0, so this only fires once per cycle.
         requestCount += 1;
         if (requestCount >= HEAVY_REQUEST_THRESHOLD && restartCount < MAX_RESTARTS) {
           resetRuntime(`preventive rotation after ${requestCount} requests`);
-          // Fall through to getRuntimeState() which will create a fresh runtime.
-          // If resetRuntime() returned false (restart limit), we proceed with
-          // the existing runtime to serve the request best-effort.
         }
 
         const state = await getRuntimeState();
