@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Moodle Playground Runtime Host</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="stylesheet" href="./src/styles/app.css">
+  </head>
+  <body data-app="remote">
+    <div class="remote-boot">
+      <iframe id="remote-frame" title="Moodle Site Host"></iframe>
+      <div class="remote-boot__card">
+        <strong id="remote-title">Preparing Moodle Playground</strong>
+        <div class="remote-boot__progress">
+          <div class="progress-bar" aria-hidden="true">
+            <div class="progress-bar__fill" id="progress-fill"></div>
+          </div>
+          <span class="progress-percent" id="progress-percent">0%</span>
+          <span class="loading-copy" id="remote-status">Initializing…</span>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./src/remote/main.js"></script>
+  </body>
+</html>

@@ -85,6 +85,66 @@ jobs:
             }
           "
 
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Prepare preview validation outputs
+        run: |
+          rm -rf playwright-artifacts
+          mkdir -p playwright-artifacts/pr-preview-chromium
+          mkdir -p playwright-artifacts/pr-preview-firefox
+
+      - name: Validate preview build in Chromium
+        id: validate_chromium
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_WEB_ROOT: dist-preview
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/
+          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pr-preview-chromium/server.log
+          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pr-preview-chromium/test-results
+          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pr-preview-chromium/playwright-report
+          PLAYWRIGHT_WORKFLOW_LABEL: pr-preview
+        run: npx playwright test --project=chromium
+
+      - name: Validate preview build in Firefox
+        id: validate_firefox
+        if: always()
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_WEB_ROOT: dist-preview
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/
+          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pr-preview-firefox/server.log
+          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pr-preview-firefox/test-results
+          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pr-preview-firefox/playwright-report
+          PLAYWRIGHT_WORKFLOW_LABEL: pr-preview
+        run: npx playwright test --project=firefox
+
+      - name: Upload Chromium Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-pr-preview-chromium
+          path: playwright-artifacts/pr-preview-chromium
+          if-no-files-found: warn
+
+      - name: Upload Firefox Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-pr-preview-firefox
+          path: playwright-artifacts/pr-preview-firefox
+          if-no-files-found: warn
+
+      - name: Enforce browser validation success
+        if: always()
+        run: |
+          if [ "${{ steps.validate_chromium.outcome }}" != "success" ] || [ "${{ steps.validate_firefox.outcome }}" != "success" ]; then
+            echo "Browser validation failed."
+            echo "Chromium: ${{ steps.validate_chromium.outcome }}"
+            echo "Firefox: ${{ steps.validate_firefox.outcome }}"
+            exit 1
+          fi
+
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3
         with:
