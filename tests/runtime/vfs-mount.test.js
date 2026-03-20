@@ -549,6 +549,8 @@ describe("mountReadonlyVfs", () => {
     // After read, contents are still not eagerly cached on the record
     // (reads use resolveRecordSource which returns a subarray view)
     assert.strictEqual(versionNode.vfsRecord.contents, undefined);
+    assert.strictEqual(libNode.vfsRecord.contents, undefined);
+    assert.strictEqual(langNode.vfsRecord.contents, undefined);
   });
 
   // White-box test: intentionally checks internal vfsRecord state to verify

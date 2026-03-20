@@ -481,6 +481,10 @@ function installBridgeListener() {
     }
 
     requestQueue = requestQueue.then(async () => {
+      // Safety net: if this request was externally re-dispatched with
+      // _retried=true, skip the auto-retry path to prevent loops.
+      // In the current implementation, retry happens in-handler (below),
+      // so this is always false — but it guards against future changes.
       const isRetry = Boolean(data._retried);
 
       try {

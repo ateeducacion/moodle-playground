@@ -187,10 +187,10 @@ describe("crash recovery request handler", () => {
       runtimeBootCount += 1;
       if (crashOnBootstrap) {
         crashOnBootstrap = false; // Only crash once by default
-        const err = new Error("RuntimeError: memory access out of bounds");
-        // Mirror real code: just clear runtimeStatePromise, don't call
-        // resetRuntime here — the bridge handler manages restart counts.
-        throw err;
+        // In the real code, the bootstrap catch block clears
+        // runtimeStatePromise so the next call builds a fresh runtime.
+        // This mock doesn't cache promises, so no clearing is needed.
+        throw new Error("RuntimeError: memory access out of bounds");
       }
       return {
         php: {
