@@ -70,7 +70,7 @@ export const ALL_PHP_VERSIONS = ["8.1", "8.2", "8.3", "8.4", "8.5"];
 export const DEFAULT_PHP_VERSION = "8.3";
 export const DEFAULT_MOODLE_BRANCH = "MOODLE_500_STABLE";
 
-function normalizeOptionalParam(value) {
+function normalizeStringParam(value) {
   if (value == null) {
     return null;
   }
@@ -180,7 +180,7 @@ export function resolveVersions({
 
   // Resolve PHP version: explicit > compatible default
   let resolvedPhp =
-    normalizeOptionalParam(phpVersion) || normalizeOptionalParam(php);
+    normalizeStringParam(phpVersion) || normalizeStringParam(php);
   if (!resolvedPhp && parsedRuntime?.phpVersion) {
     resolvedPhp = parsedRuntime.phpVersion;
   }
@@ -252,7 +252,7 @@ export function resolveRuntimeConfig(config, selection) {
 }
 
 export function shouldTraceRuntimeSelection({ debug, profile } = {}) {
-  const normalizedDebug = normalizeOptionalParam(debug)?.toLowerCase();
+  const normalizedDebug = normalizeStringParam(debug)?.toLowerCase();
   if (
     normalizedDebug &&
     !["0", "false", "off", "no"].includes(normalizedDebug)

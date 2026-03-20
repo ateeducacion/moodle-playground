@@ -1985,6 +1985,9 @@ export async function bootstrapMoodle({
   const selection = resolveRuntimeSelection({ runtimeId, moodleBranch });
   const resolvedRuntimeId = selection.runtimeId;
   const runtime = resolveRuntimeConfig(config, selection);
+  if (!runtime) {
+    throw new Error("Unable to resolve a runtime configuration.");
+  }
   const blueprintOverlay = buildInstallConfig(blueprint);
   const normalizeDebugOverride = (value) => {
     if (value == null) {
@@ -2044,7 +2047,7 @@ export async function bootstrapMoodle({
   };
   if (shouldTraceRuntimeSelection({ debug, profile })) {
     publish(
-      `[runtime-selection][bootstrap:resolved] runtimeId=${resolvedRuntimeId} moodleBranch=${selection.moodleBranch} runtimeConfig=${runtime?.id || "null"}`,
+      `[runtime-selection][bootstrap:resolved] runtimeId=${resolvedRuntimeId} moodleBranch=${selection.moodleBranch}`,
       0.145,
     );
   }

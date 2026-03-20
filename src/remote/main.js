@@ -503,12 +503,15 @@ async function bootstrapRemote() {
     moodleBranch,
   });
   const runtime = resolveRuntimeConfig(config, selection);
+  if (!runtime) {
+    throw new Error("Unable to resolve a runtime configuration.");
+  }
   traceRuntimeSelection(
     scopeId,
     debug,
     profile,
     "resolved",
-    `requestedRuntimeId=${requestedRuntimeId || "null"} requestedPhp=${phpVersion || "null"} requestedMoodleBranch=${moodleBranch || "null"} -> runtimeId=${selection.runtimeId} php=${selection.phpVersion} moodleBranch=${selection.moodleBranch} runtimeConfig=${runtime?.id || "null"}`,
+    `requestedRuntimeId=${requestedRuntimeId || "null"} requestedPhp=${phpVersion || "null"} requestedMoodleBranch=${moodleBranch || "null"} -> runtimeId=${selection.runtimeId} php=${selection.phpVersion} moodleBranch=${selection.moodleBranch} runtimeConfig=${runtime.id}`,
   );
   setOverlayVisible(true);
 

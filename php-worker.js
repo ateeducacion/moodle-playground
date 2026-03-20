@@ -246,6 +246,9 @@ async function publishPhpInfo(runtimeConfig, reason) {
   if (!resolvedRuntimeConfig) {
     const config = await loadPlaygroundConfig();
     resolvedRuntimeConfig = resolveRuntimeConfig(config, selection);
+    if (!resolvedRuntimeConfig) {
+      throw new Error("Unable to resolve a runtime configuration.");
+    }
     activeRuntimeConfig = resolvedRuntimeConfig;
   }
 
@@ -328,12 +331,15 @@ async function getRuntimeState() {
     const configMs = Math.round(performance.now() - t0);
 
     const runtime = resolveRuntimeConfig(config, selection);
+    if (!runtime) {
+      throw new Error("Unable to resolve a runtime configuration.");
+    }
     activeRuntimeConfig = runtime;
     const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
     const webRoot = branchMeta?.webRoot || "/www/moodle";
     traceRuntimeSelection(
       "resolved",
-      `runtimeId=${runtimeId} php=${phpVersion} moodleBranch=${moodleBranch} runtimeConfig=${runtime?.id || "null"}`,
+      `runtimeId=${runtimeId} php=${phpVersion} moodleBranch=${moodleBranch} runtimeConfig=${runtime.id}`,
     );
     const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl, phpVersion, webRoot });
 
