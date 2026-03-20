@@ -1,6 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
+import { isFatalWasmError, isSafeToReplay, formatErrorDetail } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import {
   getBranchMetadata,
@@ -33,6 +34,24 @@ let phpInfoCapturePromise = null;
 let automaticPhpInfoAttempted = false;
 
 // --- Runtime rotation state ---
+// The PHP WASM runtime can crash with "memory access out of bounds",
+// "unreachable", or resource exhaustion ("No file descriptors available").
+//
+// Recovery strategy:
+//   1. VFS lazy materialization (lib/vfs-mount.js) reduces memory pressure
+//      by deferring file content allocation until read.
+//   2. Preventive rotation restarts the runtime every HEAVY_REQUEST_THRESHOLD
+//      requests to prevent slow memory leaks from accumulating.
+//   3. Reactive rotation detects fatal WASM errors (isFatalWasmError) and
+//      discards the corrupted runtime, then replays idempotent requests once.
+//   4. Bootstrap crashes reset the runtime promise so the next request
+//      triggers a clean bootstrap on a fresh WASM instance.
+//
+// Remaining root-cause limitations:
+//   - WebAssembly.Memory cannot be shrunk; once grown, the pages are
+//     permanent until the entire module is discarded.
+//   - Resource exhaustion (FD limits, /internal/shared/ paths) may indicate
+//     upstream @php-wasm issues that rotation can only mitigate, not fix.
 const MAX_RESTARTS = 3;
 const HEAVY_REQUEST_THRESHOLD = 20;
 let requestCount = 0;
@@ -312,40 +331,6 @@ function buildLoadingResponse(message, status = 503) {
   );
 }
 
-function formatErrorDetail(error) {
-  if (!error) {
-    return "Unknown error";
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (error instanceof Error) {
-    return String(error.stack || error.message || error);
-  }
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return String(error);
-  }
-}
-
-function isFatalWasmError(error) {
-  if (!error) {
-    return false;
-  }
-
-  const message = String(error.message || error);
-  return (
-    error instanceof WebAssembly.RuntimeError ||
-    message.includes("memory access out of bounds") ||
-    message.includes("unreachable") ||
-    message.includes("RuntimeError")
-  );
-}
-
 function resetRuntime(reason) {
   if (restartCount >= MAX_RESTARTS) {
     postShell({
@@ -448,12 +433,12 @@ async function getRuntimeState() {
         void publishPhpInfo(runtime, "bootstrap-error");
       }
 
-      // Attempt runtime rotation on fatal WASM errors during bootstrap.
-      // Clear the runtimeStatePromise so the next request creates a fresh
-      // runtime instead of re-throwing the cached rejection.
-      if (isFatalWasmError(error)) {
-        resetRuntime(`fatal WASM error during bootstrap: ${error.message}`);
-      }
+      // Clear the cached runtimeStatePromise so the next caller of
+      // getRuntimeState() creates a fresh runtime instead of re-throwing
+      // this cached rejection.  The actual restart-count bookkeeping and
+      // retry decision live in the bridge listener (installBridgeListener),
+      // not here, to avoid double-counting restarts.
+      runtimeStatePromise = null;
 
       throw error;
     }
@@ -479,6 +464,14 @@ async function getRuntimeState() {
   return runtimeStatePromise;
 }
 
+/**
+ * Execute a single HTTP request against the PHP runtime, returning the
+ * Response object.  Throws on fatal errors.
+ */
+async function executePhpRequest(state, serializedRequest) {
+  return state.php.request(deserializeRequest(serializedRequest));
+}
+
 function installBridgeListener() {
   bridgeChannel.addEventListener("message", (event) => {
     const data = event.data;
@@ -488,6 +481,8 @@ function installBridgeListener() {
     }
 
     requestQueue = requestQueue.then(async () => {
+      const isRetry = Boolean(data._retried);
+
       try {
         // Preventive rotation: restart runtime once the request threshold is reached.
         // requestQueue ensures sequential processing, so no concurrent race conditions.
@@ -498,20 +493,40 @@ function installBridgeListener() {
         }
 
         const state = await getRuntimeState();
-        const response = await state.php.request(deserializeRequest(data.request));
+        const response = await executePhpRequest(state, data.request);
         respond({
           kind: "http-response",
           id: data.id,
           response: await serializeResponse(response),
         });
       } catch (error) {
-        // Reactive rotation: restart on fatal WASM errors
-        if (isFatalWasmError(error) && resetRuntime(`fatal WASM error: ${error.message}`)) {
+        if (!isFatalWasmError(error)) {
+          // Non-fatal error: return 500 without runtime rotation.
           const detail = formatErrorDetail(error);
-          const response = buildLoadingResponse(
-            `Runtime restarting after crash. Please retry.\n\n${detail}`,
-            503,
-          );
+          const response = buildLoadingResponse(detail, 500);
+          respond({
+            kind: "http-response",
+            id: data.id,
+            response: await serializeResponse(response),
+          });
+          postShell({ kind: "error", detail });
+          return;
+        }
+
+        // --- Fatal WASM error path ---
+        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
+
+        // If we already retried this request, or the request is not
+        // idempotent, or we hit the restart limit — give up.
+        if (isRetry || !isSafeToReplay(data.request) || !didReset) {
+          const detail = formatErrorDetail(error);
+          const status = didReset || isRetry ? 503 : 500;
+          const message = isRetry
+            ? `Runtime crashed again on retry. Manual reload required.\n\n${detail}`
+            : !isSafeToReplay(data.request)
+              ? `Runtime restarting after crash. Non-idempotent request was not retried.\n\n${detail}`
+              : `Runtime restart limit reached.\n\n${detail}`;
+          const response = buildLoadingResponse(message, status);
           respond({
             kind: "http-response",
             id: data.id,
@@ -520,17 +535,38 @@ function installBridgeListener() {
           return;
         }
 
-        const detail = formatErrorDetail(error);
-        const response = buildLoadingResponse(detail, 500);
-        respond({
-          kind: "http-response",
-          id: data.id,
-          response: await serializeResponse(response),
-        });
+        // Automatic retry: boot a fresh runtime and replay the safe request.
         postShell({
-          kind: "error",
-          detail,
+          kind: "progress",
+          title: "Crash recovery",
+          detail: "[runtime] replaying request on fresh runtime…",
+          progress: 0.02,
         });
+
+        try {
+          const freshState = await getRuntimeState();
+          const retryResponse = await executePhpRequest(freshState, data.request);
+          respond({
+            kind: "http-response",
+            id: data.id,
+            response: await serializeResponse(retryResponse),
+          });
+        } catch (retryError) {
+          // The retry itself failed — report but don't loop.
+          if (isFatalWasmError(retryError)) {
+            resetRuntime(`fatal WASM error on retry: ${retryError.message}`);
+          }
+          const detail = formatErrorDetail(retryError);
+          const response = buildLoadingResponse(
+            `Runtime crashed again on retry. Manual reload required.\n\n${detail}`,
+            503,
+          );
+          respond({
+            kind: "http-response",
+            id: data.id,
+            response: await serializeResponse(response),
+          });
+        }
       }
     });
   });
