@@ -47,15 +47,23 @@ let automaticPhpInfoAttempted = false;
 //   4. Bootstrap crashes reset the runtime promise so the next request
 //      triggers a clean bootstrap on a fresh WASM instance.
 //
+// Preventive and reactive restarts are tracked separately so that healthy
+// maintenance rotations do not consume the crash-recovery budget.  Without
+// this separation, preventive restarts (every HEAVY_REQUEST_THRESHOLD
+// requests) would exhaust MAX_REACTIVE_RESTARTS after only a few page loads,
+// leaving the runtime unable to recover from real WASM crashes.
+//
 // Remaining root-cause limitations:
 //   - WebAssembly.Memory cannot be shrunk; once grown, the pages are
 //     permanent until the entire module is discarded.
 //   - Resource exhaustion (FD limits, /internal/shared/ paths) may indicate
 //     upstream @php-wasm issues that rotation can only mitigate, not fix.
-const MAX_RESTARTS = 3;
-const HEAVY_REQUEST_THRESHOLD = 20;
+const MAX_REACTIVE_RESTARTS = 5;
+const MAX_PREVENTIVE_RESTARTS = 20;
+const HEAVY_REQUEST_THRESHOLD = 40;
 let requestCount = 0;
-let restartCount = 0;
+let reactiveRestartCount = 0;
+let preventiveRestartCount = 0;
 
 function normalizeProfileFlags(value) {
   return new Set(
@@ -331,26 +339,35 @@ function buildLoadingResponse(message, status = 503) {
   );
 }
 
-function resetRuntime(reason) {
-  if (restartCount >= MAX_RESTARTS) {
+function resetRuntime(reason, kind = "reactive") {
+  const isPreventive = kind === "preventive";
+  const count = isPreventive ? preventiveRestartCount : reactiveRestartCount;
+  const limit = isPreventive ? MAX_PREVENTIVE_RESTARTS : MAX_REACTIVE_RESTARTS;
+
+  if (count >= limit) {
     postShell({
       kind: "error",
-      detail: `[runtime] restart limit reached (${MAX_RESTARTS}), not restarting. Reason: ${reason}`,
+      detail: `[runtime] ${kind} restart limit reached (${count}/${limit}), not restarting. Reason: ${reason}`,
     });
     return false;
   }
 
-  restartCount += 1;
+  if (isPreventive) {
+    preventiveRestartCount += 1;
+  } else {
+    reactiveRestartCount += 1;
+  }
   requestCount = 0;
   runtimeStatePromise = null;
   phpInfoCapturePromise = null;
   automaticPhpInfoAttempted = false;
   activeRuntimeConfig = null;
 
+  const total = preventiveRestartCount + reactiveRestartCount;
   postShell({
     kind: "progress",
     title: "Runtime rotation",
-    detail: `[runtime] restarting (${restartCount}/${MAX_RESTARTS}): ${reason}`,
+    detail: `[runtime] ${kind} restart (${count + 1}/${limit}, total=${total}): ${reason}`,
     progress: 0.01,
   });
 
@@ -492,8 +509,8 @@ function installBridgeListener() {
         // requestQueue ensures sequential processing, so no concurrent race conditions.
         // resetRuntime resets requestCount to 0, so this only fires once per cycle.
         requestCount += 1;
-        if (requestCount >= HEAVY_REQUEST_THRESHOLD && restartCount < MAX_RESTARTS) {
-          resetRuntime(`preventive rotation after ${requestCount} requests`);
+        if (requestCount >= HEAVY_REQUEST_THRESHOLD && preventiveRestartCount < MAX_PREVENTIVE_RESTARTS) {
+          resetRuntime(`preventive rotation after ${requestCount} requests`, "preventive");
         }
 
         const state = await getRuntimeState();

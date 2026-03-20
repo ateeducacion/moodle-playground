@@ -156,10 +156,16 @@ describe("crash recovery request handler", () => {
    * This replicates the retry logic from installBridgeListener()
    * using the same isFatalWasmError / isSafeToReplay / resetRuntime
    * decision points, but with injectable runtime behavior.
+   *
+   * Preventive and reactive restarts are tracked separately, matching
+   * the real worker: preventive rotations do not consume the crash-
+   * recovery budget (MAX_REACTIVE_RESTARTS).
    */
   function createMockWorker() {
-    const MAX = 3;
-    let restartCount = 0;
+    const MAX_REACTIVE = 5;
+    const MAX_PREVENTIVE = 20;
+    let reactiveRestartCount = 0;
+    let preventiveRestartCount = 0;
     let requestCount = 0;
     let runtimeBootCount = 0;
     const messages = [];
@@ -169,17 +175,29 @@ describe("crash recovery request handler", () => {
     let crashOnBootstrap = false;
     let crashOnRetry = false;
 
-    function resetRuntime(reason) {
-      if (restartCount >= MAX) {
+    function resetRuntime(reason, kind = "reactive") {
+      const isPreventive = kind === "preventive";
+      const count = isPreventive
+        ? preventiveRestartCount
+        : reactiveRestartCount;
+      const limit = isPreventive ? MAX_PREVENTIVE : MAX_REACTIVE;
+      if (count >= limit) {
         messages.push({
           kind: "error",
-          detail: `restart limit reached: ${reason}`,
+          detail: `${kind} restart limit reached: ${reason}`,
         });
         return false;
       }
-      restartCount += 1;
+      if (isPreventive) {
+        preventiveRestartCount += 1;
+      } else {
+        reactiveRestartCount += 1;
+      }
       requestCount = 0;
-      messages.push({ kind: "progress", detail: `restarting: ${reason}` });
+      messages.push({
+        kind: "progress",
+        detail: `${kind} restarting: ${reason}`,
+      });
       return true;
     }
 
@@ -273,8 +291,14 @@ describe("crash recovery request handler", () => {
     return {
       handleRequest,
       resetRuntime,
-      get restartCount() {
-        return restartCount;
+      get reactiveRestartCount() {
+        return reactiveRestartCount;
+      },
+      get preventiveRestartCount() {
+        return preventiveRestartCount;
+      },
+      get totalRestartCount() {
+        return reactiveRestartCount + preventiveRestartCount;
       },
       get requestCount() {
         return requestCount;
@@ -305,7 +329,7 @@ describe("crash recovery request handler", () => {
     });
     assert.strictEqual(result.status, 200);
     assert.strictEqual(result.retried, false);
-    assert.strictEqual(worker.restartCount, 0);
+    assert.strictEqual(worker.reactiveRestartCount, 0);
   });
 
   it("auto-retries a failed GET request on fatal WASM error", async () => {
@@ -317,7 +341,7 @@ describe("crash recovery request handler", () => {
     });
     assert.strictEqual(result.status, 200);
     assert.strictEqual(result.retried, true);
-    assert.strictEqual(worker.restartCount, 1);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
     // Two boots: first crash, then fresh runtime
     assert.strictEqual(worker.runtimeBootCount, 2);
   });
@@ -332,7 +356,7 @@ describe("crash recovery request handler", () => {
     assert.strictEqual(result.status, 503);
     assert.ok(result.body.includes("crashed again on retry"));
     assert.strictEqual(result.retried, true);
-    assert.strictEqual(worker.restartCount, 1);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
   });
 
   it("does NOT auto-retry POST requests", async () => {
@@ -345,7 +369,7 @@ describe("crash recovery request handler", () => {
     });
     assert.strictEqual(result.status, 503);
     assert.ok(result.body.includes("Non-idempotent"));
-    assert.strictEqual(worker.restartCount, 1);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
   });
 
   it("does NOT auto-retry PUT requests", async () => {
@@ -371,16 +395,18 @@ describe("crash recovery request handler", () => {
     assert.ok(result.body.includes("crashed again on retry"));
     assert.strictEqual(result.retried, true);
     // Two restarts: one for initial crash, one for retry crash
-    assert.strictEqual(worker.restartCount, 2);
+    assert.strictEqual(worker.reactiveRestartCount, 2);
   });
 
-  it("respects restart limit", async () => {
+  it("respects reactive restart limit", async () => {
     const worker = createMockWorker();
-    // Exhaust restart limit
+    // Exhaust the reactive restart limit (MAX_REACTIVE = 5)
     worker.resetRuntime("test 1");
     worker.resetRuntime("test 2");
     worker.resetRuntime("test 3");
-    assert.strictEqual(worker.restartCount, 3);
+    worker.resetRuntime("test 4");
+    worker.resetRuntime("test 5");
+    assert.strictEqual(worker.reactiveRestartCount, 5);
 
     worker.setCrashOnRequest(true);
     const result = await worker.handleRequest({
@@ -390,7 +416,7 @@ describe("crash recovery request handler", () => {
     // resetRuntime returns false, so no retry
     assert.strictEqual(result.status, 503);
     assert.ok(result.body.includes("restart limit"));
-    assert.strictEqual(worker.restartCount, 3); // Not incremented
+    assert.strictEqual(worker.reactiveRestartCount, 5); // Not incremented
   });
 
   it("non-fatal errors do NOT trigger runtime rotation", () => {
@@ -399,7 +425,7 @@ describe("crash recovery request handler", () => {
 
     // Non-fatal errors should not be detected as WASM crashes
     assert.strictEqual(isFatalWasmError(nonFatalError), false);
-    assert.strictEqual(worker.restartCount, 0);
+    assert.strictEqual(worker.reactiveRestartCount, 0);
   });
 
   it("handles bootstrap crash with recovery", async () => {
@@ -412,7 +438,7 @@ describe("crash recovery request handler", () => {
     // Bootstrap crash → resetRuntime → retry → fresh boot succeeds
     assert.strictEqual(result.status, 200);
     assert.strictEqual(result.retried, true);
-    assert.strictEqual(worker.restartCount, 1);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
     // Two boots: crashed bootstrap + successful retry
     assert.strictEqual(worker.runtimeBootCount, 2);
   });
@@ -441,6 +467,31 @@ describe("crash recovery request handler", () => {
     });
     assert.strictEqual(result.status, 200);
     assert.strictEqual(result.retried, true);
-    assert.strictEqual(worker.restartCount, 1);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
+  });
+
+  it("preventive restarts do NOT consume the reactive restart budget", async () => {
+    const worker = createMockWorker();
+    // Simulate many preventive restarts (like a long browsing session)
+    for (let i = 0; i < 10; i++) {
+      assert.strictEqual(
+        worker.resetRuntime(`preventive #${i + 1}`, "preventive"),
+        true,
+      );
+    }
+    assert.strictEqual(worker.preventiveRestartCount, 10);
+    // Reactive budget should be untouched
+    assert.strictEqual(worker.reactiveRestartCount, 0);
+
+    // Now trigger a real crash — should still be recoverable
+    worker.setCrashOnRequest(true);
+    const result = await worker.handleRequest({
+      method: "GET",
+      url: "http://localhost/page",
+    });
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(result.retried, true);
+    assert.strictEqual(worker.reactiveRestartCount, 1);
+    assert.strictEqual(worker.preventiveRestartCount, 10); // Unchanged
   });
 });
