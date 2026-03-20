@@ -143,9 +143,13 @@ function installVfsTraceHook() {
         trackPluginFromRequestDir(text);
       }
 
-      const matchesTrackedPlugin = [...trackedPluginPaths].some(
-        (prefix) => text.includes(prefix) || text.includes(`${prefix}/`),
-      );
+      let matchesTrackedPlugin = false;
+      for (const prefix of trackedPluginPaths) {
+        if (text.includes(prefix)) {
+          matchesTrackedPlugin = true;
+          break;
+        }
+      }
       const matchesInstallScratch =
         text.includes(requestDirPrefix) ||
         text.includes("/_temp_") ||
