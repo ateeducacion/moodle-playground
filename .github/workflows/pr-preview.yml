@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy-preview:
+  build-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
@@ -50,100 +50,74 @@ jobs:
         run: make bundle BRANCH=MOODLE_500_STABLE
 
       - name: Assemble preview artifact
-        run: |
-          rm -rf dist-preview
-          mkdir -p dist-preview
-          rsync -a ./ ./dist-preview/ \
-            --exclude ".git/" \
-            --exclude ".github/" \
-            --exclude ".venv/" \
-            --exclude ".cache/" \
-            --exclude "dist-preview/" \
-            --exclude "docs/" \
-            --exclude "node_modules/" \
-            --exclude "site/" \
-            --exclude "tests/" \
-            --exclude "patches/" \
-            --exclude "scripts/"
-          # Remove VFS binaries to reduce deploy size (~376MB savings)
-          find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
-          find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
+        run: ./scripts/prepare-e2e-artifact.sh preview
 
-      - name: Strip VFS from manifests
-        run: |
-          node -e "
-            const fs = require('fs');
-            for (const f of [
-              'dist-preview/assets/manifests/MOODLE_500_STABLE.json',
-              'dist-preview/assets/manifests/latest.json'
-            ]) {
-              if (fs.existsSync(f)) {
-                const m = JSON.parse(fs.readFileSync(f, 'utf8'));
-                delete m.vfs;
-                fs.writeFileSync(f, JSON.stringify(m, null, 2) + '\n');
-              }
-            }
-          "
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox
+  browser-validation:
+    if: github.event.action != 'closed'
+    needs: build-preview
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            make_target: test-e2e-chrome
+          - browser: firefox
+            make_target: test-e2e-firefox
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Prepare preview validation outputs
-        run: |
-          rm -rf playwright-artifacts
-          mkdir -p playwright-artifacts/pr-preview-chromium
-          mkdir -p playwright-artifacts/pr-preview-firefox
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
 
-      - name: Validate preview build in Chromium
-        id: validate_chromium
-        continue-on-error: true
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview
+
+      - name: Validate preview build in ${{ matrix.browser }}
         env:
-          PLAYWRIGHT_WEB_ROOT: dist-preview
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/
-          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pr-preview-chromium/server.log
-          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pr-preview-chromium/test-results
-          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pr-preview-chromium/playwright-report
-          PLAYWRIGHT_WORKFLOW_LABEL: pr-preview
-        run: npx playwright test --project=chromium
+          E2E_ARTIFACT: preview
+          E2E_REUSE_ARTIFACT: 1
+          E2E_OUTPUT_PREFIX: pr-preview
+          E2E_WORKFLOW_LABEL: pr-preview
+        run: make ${{ matrix.make_target }}
 
-      - name: Validate preview build in Firefox
-        id: validate_firefox
-        if: always()
-        continue-on-error: true
-        env:
-          PLAYWRIGHT_WEB_ROOT: dist-preview
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/
-          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pr-preview-firefox/server.log
-          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pr-preview-firefox/test-results
-          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pr-preview-firefox/playwright-report
-          PLAYWRIGHT_WORKFLOW_LABEL: pr-preview
-        run: npx playwright test --project=firefox
-
-      - name: Upload Chromium Playwright diagnostics
+      - name: Upload Playwright diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-pr-preview-chromium
-          path: playwright-artifacts/pr-preview-chromium
+          name: playwright-pr-preview-${{ matrix.browser }}
+          path: playwright-artifacts/pr-preview-${{ matrix.browser }}
           if-no-files-found: warn
 
-      - name: Upload Firefox Playwright diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
+  deploy-preview:
+    if: github.event.action != 'closed'
+    needs:
+      - build-preview
+      - browser-validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
         with:
-          name: playwright-pr-preview-firefox
-          path: playwright-artifacts/pr-preview-firefox
-          if-no-files-found: warn
-
-      - name: Enforce browser validation success
-        if: always()
-        run: |
-          if [ "${{ steps.validate_chromium.outcome }}" != "success" ] || [ "${{ steps.validate_firefox.outcome }}" != "success" ]; then
-            echo "Browser validation failed."
-            echo "Chromium: ${{ steps.validate_chromium.outcome }}"
-            echo "Firefox: ${{ steps.validate_firefox.outcome }}"
-            exit 1
-          fi
+          name: preview-site
+          path: dist-preview
 
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3

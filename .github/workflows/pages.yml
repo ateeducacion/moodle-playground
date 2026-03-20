@@ -57,94 +57,74 @@ jobs:
         run: python -m pip install -r requirements-docs.txt
 
       - name: Assemble Pages artifact
-        run: |
-          rm -rf dist-pages
-          mkdir -p dist-pages/docs
-          rsync -a ./ ./dist-pages/ \
-            --exclude ".git/" \
-            --exclude ".github/" \
-            --exclude ".venv/" \
-            --exclude ".cache/" \
-            --exclude "dist-pages/" \
-            --exclude "docs/" \
-            --exclude "node_modules/" \
-            --exclude "site/"
-          mkdocs build --strict --site-dir dist-pages/docs
-          touch dist-pages/.nojekyll
+        run: ./scripts/prepare-e2e-artifact.sh pages
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox
-
-      - name: Prepare Pages validation root
-        run: |
-          rm -rf validate-root playwright-artifacts
-          mkdir -p validate-root/moodle-playground
-          mkdir -p playwright-artifacts/pages-chromium
-          mkdir -p playwright-artifacts/pages-firefox
-          rsync -a dist-pages/ validate-root/moodle-playground/
-
-      - name: Validate Pages build in Chromium
-        id: validate_chromium
-        continue-on-error: true
-        env:
-          PLAYWRIGHT_WEB_ROOT: validate-root
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/moodle-playground/
-          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pages-chromium/server.log
-          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pages-chromium/test-results
-          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pages-chromium/playwright-report
-          PLAYWRIGHT_WORKFLOW_LABEL: pages
-        run: npx playwright test --project=chromium
-
-      - name: Validate Pages build in Firefox
-        id: validate_firefox
-        if: always()
-        continue-on-error: true
-        env:
-          PLAYWRIGHT_WEB_ROOT: validate-root
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173/moodle-playground/
-          PLAYWRIGHT_SERVER_LOG: playwright-artifacts/pages-firefox/server.log
-          PLAYWRIGHT_OUTPUT_DIR: playwright-artifacts/pages-firefox/test-results
-          PLAYWRIGHT_REPORT_DIR: playwright-artifacts/pages-firefox/playwright-report
-          PLAYWRIGHT_WORKFLOW_LABEL: pages
-        run: npx playwright test --project=firefox
-
-      - name: Upload Chromium Playwright diagnostics
-        if: always()
+      - name: Upload Pages E2E root
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-pages-chromium
-          path: playwright-artifacts/pages-chromium
-          if-no-files-found: warn
-
-      - name: Upload Firefox Playwright diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-pages-firefox
-          path: playwright-artifacts/pages-firefox
-          if-no-files-found: warn
-
-      - name: Enforce browser validation success
-        if: always()
-        run: |
-          if [ "${{ steps.validate_chromium.outcome }}" != "success" ] || [ "${{ steps.validate_firefox.outcome }}" != "success" ]; then
-            echo "Browser validation failed."
-            echo "Chromium: ${{ steps.validate_chromium.outcome }}"
-            echo "Firefox: ${{ steps.validate_firefox.outcome }}"
-            exit 1
-          fi
+          name: pages-e2e-root
+          path: validate-root
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: dist-pages
 
+  browser-validation:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            make_target: test-e2e-chrome
+          - browser: firefox
+            make_target: test-e2e-firefox
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Download Pages E2E root
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-e2e-root
+          path: validate-root
+
+      - name: Validate Pages build in ${{ matrix.browser }}
+        env:
+          E2E_ARTIFACT: pages
+          E2E_REUSE_ARTIFACT: 1
+          E2E_OUTPUT_PREFIX: pages
+          E2E_WORKFLOW_LABEL: pages
+        run: make ${{ matrix.make_target }}
+
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-pages-${{ matrix.browser }}
+          path: playwright-artifacts/pages-${{ matrix.browser }}
+          if-no-files-found: warn
+
   deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - build
+      - browser-validation
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4

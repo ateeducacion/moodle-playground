@@ -10,6 +10,9 @@ assets/build-version.json
 src/generated/
 .playwright-mcp/
 vendor/
+dist-pages/
+dist-preview/
+validate-root/
 playwright-artifacts/
 playwright-report/
 test-results/
