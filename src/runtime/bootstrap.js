@@ -1379,6 +1379,26 @@ async function patchRuntimePhpSources(php, webRoot) {
     ],
   ]);
 
+  // Guard against null $plugininfo when reinstalling over an existing plugin.
+  // After core_component::reset() during upgrade, get_plugin_info() may return null
+  // for the old plugin. Fall back to direct remove_dir() in that case.
+  await patchFile(rp.PLUGIN_MANAGER_PATH, [
+    [
+      `            if (file_exists($target . '/' . $pluginname)) {
+                $this->remove_plugin_folder($this->get_plugin_info($plugin->component));
+            }`,
+      `            if (file_exists($target . '/' . $pluginname)) {
+                $plugininfo = $this->get_plugin_info($plugin->component);
+                if ($plugininfo !== null) {
+                    $this->remove_plugin_folder($plugininfo);
+                } else {
+                    remove_dir($target . '/' . $pluginname);
+                    clearstatcache();
+                }
+            }`,
+    ],
+  ]);
+
   // In WASM, the filesystem scan triggered by IGNORE_COMPONENT_CACHE produces an
   // incomplete component registry (missing plugins, themes, lang strings, classes).
   // Patch core_component::init() to keep using the prebuilt
@@ -1424,7 +1444,9 @@ async function patchRuntimePhpSources(php, webRoot) {
 
         self::playground_drop_plugin_cache_entries($component, $plugintype, $pluginname, $fulldir);
         self::load_classes($component, $fulldir . '/classes');
-        self::load_legacy_classes($fulldir);
+        if (method_exists(static::class, 'load_legacy_classes')) {
+            self::load_legacy_classes($fulldir);
+        }
         self::load_renamed_classes($fulldir);
         self::playground_refresh_plugin_filemap($plugintype, $pluginname, $fulldir);
 
