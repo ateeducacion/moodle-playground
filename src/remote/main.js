@@ -278,7 +278,7 @@ async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
         return;
       }
 
-      if (message.scopeId !== scopeId || message.runtimeId !== runtimeId) {
+      if (message.scopeId !== scopeId) {
         return;
       }
 
@@ -618,6 +618,14 @@ async function bootstrapRemote() {
   phpWorker.postMessage({
     kind: "configure-blueprint",
     blueprint,
+    runtimeParams: {
+      scopeId,
+      runtimeId: selection.runtimeId,
+      phpVersion: selection.phpVersion,
+      moodleBranch: selection.moodleBranch,
+      debug,
+      profile,
+    },
   });
   await workerReadyPromise;
 

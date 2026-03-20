@@ -13,17 +13,22 @@ const workerUrl = new URL(self.location.href);
 // __APP_ROOT__ is injected by esbuild and points to the project root.
 // Falls back to self.location for unbundled contexts.
 const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL("./", self.location.href).toString();
-const scopeId = workerUrl.searchParams.get("scope");
-const selection = resolveRuntimeSelection({
+// Runtime params are initially read from the worker URL as defaults,
+// then overridden by the configure-blueprint message from remote.js.
+// This is necessary because the Service Worker caches the worker bundle
+// by URL path (stripping query params), so self.location.href may reflect
+// stale params from a previously cached response.
+let scopeId = workerUrl.searchParams.get("scope");
+let selection = resolveRuntimeSelection({
   runtimeId: workerUrl.searchParams.get("runtime"),
   phpVersion: workerUrl.searchParams.get("phpVersion"),
   moodleBranch: workerUrl.searchParams.get("moodleBranch"),
 });
-const runtimeId = selection.runtimeId;
-const phpVersion = selection.phpVersion;
-const moodleBranch = selection.moodleBranch;
-const debug = workerUrl.searchParams.get("debug") || null;
-const profile = workerUrl.searchParams.get("profile") || null;
+let runtimeId = selection.runtimeId;
+let phpVersion = selection.phpVersion;
+let moodleBranch = selection.moodleBranch;
+let debug = workerUrl.searchParams.get("debug") || null;
+let profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
@@ -460,6 +465,25 @@ function installMessageListener() {
       return;
     }
 
+    // Override URL-derived runtime params with authoritative values
+    // from remote.js, which has the correct user-selected runtime.
+    const params = event.data.runtimeParams;
+    if (params) {
+      if (params.scopeId !== undefined) scopeId = params.scopeId;
+      selection = resolveRuntimeSelection({
+        runtimeId: params.runtimeId,
+        phpVersion: params.phpVersion,
+        moodleBranch: params.moodleBranch,
+      });
+      runtimeId = selection.runtimeId;
+      phpVersion = selection.phpVersion;
+      moodleBranch = selection.moodleBranch;
+      if (params.debug !== undefined) debug = params.debug;
+      if (params.profile !== undefined) profile = params.profile;
+      // Reset any cached runtime state so it boots with the new params
+      runtimeStatePromise = null;
+    }
+
     activeBlueprint = event.data.blueprint || null;
 
     self.postMessage({
@@ -470,25 +494,12 @@ function installMessageListener() {
   });
 }
 
-function signalWorkerReady() {
-  respond({
-    kind: "worker-ready",
-    scopeId,
-    runtimeId,
-  });
-
-  self.postMessage({
-    kind: "worker-ready",
-    scopeId,
-    runtimeId,
-  });
-}
-
 try {
   bridgeChannel = new BroadcastChannel(createPhpBridgeChannel(scopeId));
   installBridgeListener();
   installMessageListener();
-  signalWorkerReady();
+  // Do not signal readiness here — wait for configure-blueprint message
+  // which carries authoritative runtime params from remote.js.
 } catch (error) {
   self.postMessage({
     kind: "worker-startup-error",
