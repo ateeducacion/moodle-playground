@@ -2,16 +2,26 @@ import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
-import { getBranchMetadata } from "./src/shared/version-resolver.js";
+import {
+  getBranchMetadata,
+  resolveRuntimeConfig,
+  resolveRuntimeSelection,
+  shouldTraceRuntimeSelection,
+} from "./src/shared/version-resolver.js";
 
 const workerUrl = new URL(self.location.href);
 // __APP_ROOT__ is injected by esbuild and points to the project root.
 // Falls back to self.location for unbundled contexts.
 const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL("./", self.location.href).toString();
 const scopeId = workerUrl.searchParams.get("scope");
-const runtimeId = workerUrl.searchParams.get("runtime");
-const phpVersion = workerUrl.searchParams.get("phpVersion") || null;
-const moodleBranch = workerUrl.searchParams.get("moodleBranch") || null;
+const selection = resolveRuntimeSelection({
+  runtimeId: workerUrl.searchParams.get("runtime"),
+  phpVersion: workerUrl.searchParams.get("phpVersion"),
+  moodleBranch: workerUrl.searchParams.get("moodleBranch"),
+});
+const runtimeId = selection.runtimeId;
+const phpVersion = selection.phpVersion;
+const moodleBranch = selection.moodleBranch;
 const debug = workerUrl.searchParams.get("debug") || null;
 const profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
@@ -187,6 +197,17 @@ function postShell(message) {
   channel.close();
 }
 
+function traceRuntimeSelection(stage, detail) {
+  if (!shouldTraceRuntimeSelection({ debug, profile })) {
+    return;
+  }
+
+  postShell({
+    kind: "trace",
+    detail: `[runtime-selection][worker:${stage}] ${detail}`,
+  });
+}
+
 function respond(payload) {
   bridgeChannel.postMessage(payload);
 }
@@ -238,7 +259,10 @@ async function publishPhpInfo(runtimeConfig, reason) {
   let resolvedRuntimeConfig = runtimeConfig;
   if (!resolvedRuntimeConfig) {
     const config = await loadPlaygroundConfig();
-    resolvedRuntimeConfig = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
+    resolvedRuntimeConfig = resolveRuntimeConfig(config, selection);
+    if (!resolvedRuntimeConfig) {
+      throw new Error("Unable to resolve a runtime configuration.");
+    }
     activeRuntimeConfig = resolvedRuntimeConfig;
   }
 
@@ -360,10 +384,17 @@ async function getRuntimeState() {
     const config = await loadPlaygroundConfig();
     const configMs = Math.round(performance.now() - t0);
 
-    const runtime = config.runtimes.find((entry) => entry.id === runtimeId) || config.runtimes[0];
+    const runtime = resolveRuntimeConfig(config, selection);
+    if (!runtime) {
+      throw new Error("Unable to resolve a runtime configuration.");
+    }
     activeRuntimeConfig = runtime;
     const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
     const webRoot = branchMeta?.webRoot || "/www/moodle";
+    traceRuntimeSelection(
+      "resolved",
+      `runtimeId=${runtimeId} php=${phpVersion} moodleBranch=${moodleBranch} runtimeConfig=${runtime.id}`,
+    );
     const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl, phpVersion, webRoot });
 
     postShell({
@@ -408,6 +439,7 @@ async function getRuntimeState() {
         scopeId,
         origin: self.location.origin,
         moodleBranch,
+        profile,
         webRoot,
       });
     } catch (error) {
