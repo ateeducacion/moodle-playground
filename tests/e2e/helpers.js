@@ -198,8 +198,8 @@ export async function waitForMoodlePath(page, expectedPath) {
     .pathname;
   await expect
     .poll(
-      () =>
-        page.frames().some((frame) => {
+      async () => {
+        const frameMatched = page.frames().some((frame) => {
           const parent = frame.parentFrame();
           if (!parent || !parent.url().includes("/remote.html")) {
             return false;
@@ -210,7 +210,26 @@ export async function waitForMoodlePath(page, expectedPath) {
           } catch {
             return false;
           }
-        }),
+        });
+        if (frameMatched) {
+          return true;
+        }
+
+        const remoteFrameSrc = await getRemoteHost(page)
+          .locator("#remote-frame")
+          .getAttribute("src");
+        if (!remoteFrameSrc) {
+          return false;
+        }
+
+        try {
+          return new URL(remoteFrameSrc, page.url()).pathname.endsWith(
+            expectedPathname,
+          );
+        } catch {
+          return false;
+        }
+      },
       { timeout: readyTimeoutMs },
     )
     .toBeTruthy();

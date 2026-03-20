@@ -276,6 +276,16 @@ function installBridgeListener() {
 
 function installMessageListener() {
   self.addEventListener("message", (event) => {
+    if (event.data?.kind === "bootstrap-runtime") {
+      void getRuntimeState().catch((error) => {
+        postShell({
+          kind: "error",
+          detail: formatErrorDetail(error),
+        });
+      });
+      return;
+    }
+
     if (event.data?.kind !== "configure-blueprint") {
       if (event.data?.kind === "capture-phpinfo") {
         void publishPhpInfo(activeRuntimeConfig, "manual");

@@ -119,6 +119,25 @@ jobs:
           name: preview-site
           path: dist-preview
 
+      - name: Strip VFS from deploy preview artifact
+        run: |
+          find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
+          find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync, existsSync } from "node:fs";
+            for (const manifestPath of [
+              "dist-preview/assets/manifests/MOODLE_500_STABLE.json",
+              "dist-preview/assets/manifests/latest.json",
+            ]) {
+              if (!existsSync(manifestPath)) {
+                continue;
+              }
+              const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+              delete manifest.vfs;
+              writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+            }
+          '
+
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3
         with:

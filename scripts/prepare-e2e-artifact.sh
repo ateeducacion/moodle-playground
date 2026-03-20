@@ -43,10 +43,6 @@ case "$artifact" in
       --exclude "tests/" \
       --exclude "patches/" \
       --exclude "scripts/"
-    find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
-    find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
-    strip_vfs_from_manifest "dist-preview/assets/manifests/MOODLE_500_STABLE.json"
-    strip_vfs_from_manifest "dist-preview/assets/manifests/latest.json"
     ;;
   pages)
     rm -rf dist-pages validate-root
