@@ -1,10 +1,14 @@
 import { loadBlueprint } from "../blueprint/index.js";
-import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
+import { loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
 import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
 import { saveSessionState } from "../shared/storage.js";
-import { parseRuntimeId } from "../shared/version-resolver.js";
+import {
+  resolveRuntimeConfig,
+  resolveRuntimeSelection,
+  shouldTraceRuntimeSelection,
+} from "../shared/version-resolver.js";
 
 const overlayEl = document.querySelector(".remote-boot__card");
 const titleEl = document.querySelector("#remote-title");
@@ -94,6 +98,17 @@ function emit(scopeId, message) {
   const channel = new BroadcastChannel(createShellChannel(scopeId));
   channel.postMessage(message);
   channel.close();
+}
+
+function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
+  if (!shouldTraceRuntimeSelection({ debug, profile })) {
+    return;
+  }
+
+  emit(scopeId, {
+    kind: "trace",
+    detail: `[runtime-selection][remote:${stage}] ${detail}`,
+  });
 }
 
 async function registerRuntimeServiceWorker() {
@@ -482,31 +497,25 @@ async function bootstrapRemote() {
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   const blueprint = loadBlueprint(scopeId);
-  let runtime = config.runtimes.find(
-    (entry) => entry.id === requestedRuntimeId,
+  const selection = resolveRuntimeSelection({
+    runtimeId: requestedRuntimeId,
+    phpVersion,
+    moodleBranch,
+  });
+  const runtime = resolveRuntimeConfig(config, selection);
+  traceRuntimeSelection(
+    scopeId,
+    debug,
+    profile,
+    "resolved",
+    `requestedRuntimeId=${requestedRuntimeId || "null"} requestedPhp=${phpVersion || "null"} requestedMoodleBranch=${moodleBranch || "null"} -> runtimeId=${selection.runtimeId} php=${selection.phpVersion} moodleBranch=${selection.moodleBranch} runtimeConfig=${runtime?.id || "null"}`,
   );
-  if (!runtime) {
-    const parsed = parseRuntimeId(requestedRuntimeId);
-    if (parsed) {
-      runtime = config.runtimes.find((entry) => {
-        const entryParsed = parseRuntimeId(entry.id);
-        return (
-          entryParsed &&
-          entryParsed.phpVersion === parsed.phpVersion &&
-          entryParsed.moodleBranch === parsed.moodleBranch
-        );
-      });
-    }
-    if (!runtime) {
-      runtime = getDefaultRuntime(config);
-    }
-  }
   setOverlayVisible(true);
 
   if (
     await resetRuntimeStorage({
       scopeId,
-      runtimeId: runtime.id,
+      runtimeId: selection.runtimeId,
       includePersistentOverlay: cleanBoot,
       resetNonce,
     })
@@ -523,7 +532,7 @@ async function bootstrapRemote() {
   });
 
   await registerRuntimeServiceWorker();
-  if (ensureRemoteServiceWorkerControl(scopeId, runtime.id)) {
+  if (ensureRemoteServiceWorkerControl(scopeId, selection.runtimeId)) {
     return;
   }
   await waitForServiceWorkerControl();
@@ -535,12 +544,12 @@ async function bootstrapRemote() {
       import.meta.url,
     );
     workerUrl.searchParams.set("scope", scopeId);
-    workerUrl.searchParams.set("runtime", runtime.id);
-    if (phpVersion) {
-      workerUrl.searchParams.set("phpVersion", phpVersion);
+    workerUrl.searchParams.set("runtime", selection.runtimeId);
+    if (selection.phpVersion) {
+      workerUrl.searchParams.set("phpVersion", selection.phpVersion);
     }
-    if (moodleBranch) {
-      workerUrl.searchParams.set("moodleBranch", moodleBranch);
+    if (selection.moodleBranch) {
+      workerUrl.searchParams.set("moodleBranch", selection.moodleBranch);
     }
     if (debug) {
       workerUrl.searchParams.set("debug", debug);
@@ -548,6 +557,13 @@ async function bootstrapRemote() {
     if (profile) {
       workerUrl.searchParams.set("profile", profile);
     }
+    traceRuntimeSelection(
+      scopeId,
+      debug,
+      profile,
+      "worker-url",
+      workerUrl.toString(),
+    );
     phpWorker = new Worker(workerUrl, { type: "module" });
     phpWorker.addEventListener("error", (event) => {
       const parts = [
@@ -584,14 +600,16 @@ async function bootstrapRemote() {
       if (msg.path && msg.path !== activePath) {
         activePath = msg.path;
         readyNavigated = true;
-        navigateFrame(scopeId, runtime.id, activePath, { force: true });
+        navigateFrame(scopeId, selection.runtimeId, activePath, {
+          force: true,
+        });
       }
     }
   });
 
   const workerReadyPromise = waitForPhpWorkerReady(
     scopeId,
-    runtime.id,
+    selection.runtimeId,
     phpWorker,
   );
   phpWorker.postMessage({
@@ -601,17 +619,17 @@ async function bootstrapRemote() {
   await workerReadyPromise;
 
   saveSessionState(scopeId, {
-    runtimeId: runtime.id,
+    runtimeId: selection.runtimeId,
     path: requestedPath,
   });
 
-  bindShellCommands(scopeId, runtime.id);
-  bindFrameNavigation(scopeId, runtime.id);
+  bindShellCommands(scopeId, selection.runtimeId);
+  bindFrameNavigation(scopeId, selection.runtimeId);
   // Navigate to the requested path only if the ready handler hasn't
   // already navigated to a fresh readyPath from bootstrap. This avoids
   // a wasted PHP request to a stale path from a previous session.
   if (!readyNavigated) {
-    navigateFrame(scopeId, runtime.id, activePath);
+    navigateFrame(scopeId, selection.runtimeId, activePath);
   }
   setRemoteProgress("Loading Moodle…", 0.98);
 }

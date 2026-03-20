@@ -15,12 +15,12 @@ import {
   saveSessionState,
 } from "../shared/storage.js";
 import {
-  buildRuntimeId,
   DEFAULT_PHP_VERSION,
   getCompatiblePhpVersions,
   MOODLE_BRANCHES,
   parseQueryParams,
-  resolveVersions,
+  resolveRuntimeSelection,
+  shouldTraceRuntimeSelection,
 } from "../shared/version-resolver.js";
 
 const els = {
@@ -79,6 +79,25 @@ let latestPhpInfoHtml = "";
 // biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
 let phpInfoCapturePromise = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
+
+function applyRuntimeSelection(selection) {
+  currentPhpVersion = selection.phpVersion;
+  currentMoodleBranch = selection.moodleBranch;
+  currentRuntimeId = selection.runtimeId;
+}
+
+function traceRuntimeSelection(stage, detail) {
+  if (
+    !shouldTraceRuntimeSelection({
+      debug: currentDebugParam,
+      profile: currentProfileParam,
+    })
+  ) {
+    return;
+  }
+
+  appendLog(`[runtime-selection][shell:${stage}] ${detail}`);
+}
 
 function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
@@ -308,7 +327,9 @@ async function importPayload(file) {
 
   // Check if this is a snapshot payload (old format)
   if (rawPayload?.version === SNAPSHOT_VERSION) {
-    currentRuntimeId = rawPayload.runtimeId || currentRuntimeId;
+    applyRuntimeSelection(
+      resolveRuntimeSelection({ runtimeId: rawPayload.runtimeId }),
+    );
     currentPath = rawPayload.path || "/";
     els.address.value = currentPath;
     saveState({ importedAt: new Date().toISOString() });
@@ -530,16 +551,19 @@ async function main() {
     php: activeBlueprint?.preferredVersions?.php || null,
     moodle: activeBlueprint?.preferredVersions?.moodle || null,
   };
-  const resolved = resolveVersions({
+  const selection = resolveRuntimeSelection({
     php: urlParams.php || blueprintVersions.php,
+    phpVersion: urlParams.phpVersion,
     moodle: urlParams.moodle || blueprintVersions.moodle,
     moodleBranch: urlParams.moodleBranch,
   });
   currentDebugParam = urlParams.debug;
   currentProfileParam = urlParams.profile;
-  currentPhpVersion = resolved.phpVersion;
-  currentMoodleBranch = resolved.moodleBranch;
-  currentRuntimeId = buildRuntimeId(currentPhpVersion, currentMoodleBranch);
+  applyRuntimeSelection(selection);
+  traceRuntimeSelection(
+    "resolved",
+    `params=${JSON.stringify(urlParams)} -> php=${currentPhpVersion}, moodleBranch=${currentMoodleBranch}, runtimeId=${currentRuntimeId}`,
+  );
 
   const previous = loadSessionState(scopeId);
   const preferredPath =
