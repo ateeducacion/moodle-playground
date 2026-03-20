@@ -162,6 +162,7 @@ describe("crash recovery request handler", () => {
    * recovery budget (MAX_REACTIVE_RESTARTS).
    */
   function createMockWorker() {
+    // These must match php-worker.js constants.
     const MAX_REACTIVE = 5;
     const MAX_PREVENTIVE = 20;
     let reactiveRestartCount = 0;

@@ -509,7 +509,7 @@ function installBridgeListener() {
         // requestQueue ensures sequential processing, so no concurrent race conditions.
         // resetRuntime resets requestCount to 0, so this only fires once per cycle.
         requestCount += 1;
-        if (requestCount >= HEAVY_REQUEST_THRESHOLD && preventiveRestartCount < MAX_PREVENTIVE_RESTARTS) {
+        if (requestCount >= HEAVY_REQUEST_THRESHOLD) {
           resetRuntime(`preventive rotation after ${requestCount} requests`, "preventive");
         }
 
