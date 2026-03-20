@@ -414,6 +414,14 @@ async function getRuntimeState() {
         automaticPhpInfoAttempted = true;
         void publishPhpInfo(runtime, "bootstrap-error");
       }
+
+      // Attempt runtime rotation on fatal WASM errors during bootstrap.
+      // Clear the runtimeStatePromise so the next request creates a fresh
+      // runtime instead of re-throwing the cached rejection.
+      if (isFatalWasmError(error)) {
+        resetRuntime(`fatal WASM error during bootstrap: ${error.message}`);
+      }
+
       throw error;
     }
     const bootstrapMs = Math.round(performance.now() - t2);

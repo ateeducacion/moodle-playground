@@ -519,8 +519,43 @@ describe("mountReadonlyVfs", () => {
     );
   });
 
+  // White-box test: verifies that file contents are not materialized into
+  // separate buffers during lookup — only during actual read operations.
+  it("defers file materialization until read (no eager allocation)", () => {
+    const root = mountTestVfs([
+      ["/mod/exeweb/version.php", "version-content"],
+      ["/mod/exeweb/lib.php", "lib-content"],
+      ["/mod/exeweb/lang/en/exeweb.php", "lang-content"],
+    ]);
+
+    // Lookup nodes — should NOT allocate contents buffers
+    const versionNode = lookupPath(root, "/www/moodle/mod/exeweb/version.php");
+    const libNode = lookupPath(root, "/www/moodle/mod/exeweb/lib.php");
+    const langNode = lookupPath(
+      root,
+      "/www/moodle/mod/exeweb/lang/en/exeweb.php",
+    );
+
+    // No contents buffer should be allocated yet
+    assert.strictEqual(versionNode.vfsRecord.contents, undefined);
+    assert.strictEqual(libNode.vfsRecord.contents, undefined);
+    assert.strictEqual(langNode.vfsRecord.contents, undefined);
+
+    // But reading should work — contents resolved on demand
+    assert.strictEqual(readFile(versionNode), "version-content");
+    assert.strictEqual(readFile(libNode), "lib-content");
+    assert.strictEqual(readFile(langNode), "lang-content");
+
+    // After read, contents are still not eagerly cached on the record
+    // (reads use resolveRecordSource which returns a subarray view)
+    assert.strictEqual(versionNode.vfsRecord.contents, undefined);
+  });
+
   // White-box test: intentionally checks internal vfsRecord state to verify
   // that the lazy copy optimization avoids buffer duplication during rename.
+  // With deferred materialization, base files are never eagerly sliced from
+  // imageBytes, so neither the original nor the clone should have a contents
+  // buffer after rename — only offset/size references are stored.
   it("uses lazy references during rename without duplicating file buffers", () => {
     const root = mountTestVfs([
       ["/mod/exeweb/version.php", "old-version"],
@@ -529,23 +564,25 @@ describe("mountReadonlyVfs", () => {
     const modDir = lookupPath(root, "/www/moodle/mod");
     const exewebDir = lookupPath(root, "/www/moodle/mod/exeweb");
 
-    // Materialize the original file to get a reference to its contents buffer
+    // With deferred materialization, the base file has no contents buffer
     const origVersion = lookupPath(root, "/www/moodle/mod/exeweb/version.php");
-    const origContents = origVersion.vfsRecord.contents;
+    assert.strictEqual(origVersion.vfsRecord.contents, undefined);
 
     // Rename the directory (should create lazy clones, not deep copies)
     exewebDir.node_ops.rename(exewebDir, modDir, "_temp_lazy");
 
-    // The cloned file record at the new path should share the original buffer
+    // The cloned file record should be marked shared and have no contents buffer
+    // (it inherits the null/undefined contents from the source)
     const clonedVersion = lookupPath(
       root,
       "/www/moodle/mod/_temp_lazy/version.php",
     );
     assert.strictEqual(clonedVersion.vfsRecord._shared, true);
-    // The contents should be the same reference (not a copy)
-    assert.strictEqual(clonedVersion.vfsRecord.contents, origContents);
+    // No buffer was allocated — contents remain null (lazy reference via offset)
+    assert.strictEqual(clonedVersion.vfsRecord.contents, null);
+    assert.ok(clonedVersion.vfsRecord.offset !== undefined);
 
-    // Reading should still work correctly
+    // Reading should still work correctly (resolved on demand from imageBytes)
     assert.strictEqual(readFile(clonedVersion), "old-version");
   });
 
@@ -555,9 +592,9 @@ describe("mountReadonlyVfs", () => {
     const modDir = lookupPath(root, "/www/moodle/mod");
     const exewebDir = lookupPath(root, "/www/moodle/mod/exeweb");
 
-    // Materialize and get the original buffer
+    // With deferred materialization, base files have no contents buffer
     const origVersion = lookupPath(root, "/www/moodle/mod/exeweb/version.php");
-    const origContents = origVersion.vfsRecord.contents;
+    assert.strictEqual(origVersion.vfsRecord.contents, undefined);
 
     // Rename to create lazy clone
     exewebDir.node_ops.rename(exewebDir, modDir, "_temp_cow");
@@ -566,8 +603,9 @@ describe("mountReadonlyVfs", () => {
       "/www/moodle/mod/_temp_cow/version.php",
     );
 
-    // Verify shared before write
+    // Verify shared before write and no buffer allocated
     assert.strictEqual(clonedVersion.vfsRecord._shared, true);
+    assert.strictEqual(clonedVersion.vfsRecord.contents, null);
 
     // Write to the cloned file (same length to fully overwrite)
     const stream = { node: clonedVersion, position: 0 };
@@ -575,10 +613,9 @@ describe("mountReadonlyVfs", () => {
     clonedVersion.stream_ops.open(stream);
     clonedVersion.stream_ops.write(stream, newBytes, 0, newBytes.byteLength, 0);
 
-    // After write, buffer should be detached (no longer shared)
+    // After write, buffer should be materialized and no longer shared
     assert.strictEqual(clonedVersion.vfsRecord._shared, false);
-    // And the contents should be different from the original buffer
-    assert.notStrictEqual(clonedVersion.vfsRecord.contents, origContents);
+    assert.ok(clonedVersion.vfsRecord.contents instanceof Uint8Array);
     assert.strictEqual(readFile(clonedVersion), "new-ver");
   });
 
