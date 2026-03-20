@@ -9,6 +9,9 @@ import { buildInstallConfig } from "../blueprint/index.js";
 import {
   DEFAULT_MOODLE_BRANCH,
   getBranchMetadata,
+  resolveRuntimeConfig,
+  resolveRuntimeSelection,
+  shouldTraceRuntimeSelection,
 } from "../shared/version-resolver.js";
 import {
   ensureDir,
@@ -1969,6 +1972,7 @@ export async function bootstrapMoodle({
   config,
   blueprint,
   debug,
+  profile,
   php,
   publish,
   runtimeId,
@@ -1978,9 +1982,12 @@ export async function bootstrapMoodle({
   moodleBranch,
   webRoot: webRootParam,
 }) {
-  const runtime =
-    config.runtimes.find((entry) => entry.id === runtimeId) ||
-    config.runtimes[0];
+  const selection = resolveRuntimeSelection({ runtimeId, moodleBranch });
+  const resolvedRuntimeId = selection.runtimeId;
+  const runtime = resolveRuntimeConfig(config, selection);
+  if (!runtime) {
+    throw new Error("Unable to resolve a runtime configuration.");
+  }
   const blueprintOverlay = buildInstallConfig(blueprint);
   const normalizeDebugOverride = (value) => {
     if (value == null) {
@@ -2038,7 +2045,14 @@ export async function bootstrapMoodle({
     debug: effectiveDebug,
     debugdisplay: effectiveDebugDisplay,
   };
-  const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  if (shouldTraceRuntimeSelection({ debug, profile })) {
+    publish(
+      `[runtime-selection][bootstrap:resolved] runtimeId=${resolvedRuntimeId} moodleBranch=${selection.moodleBranch}`,
+      0.145,
+    );
+  }
+
+  const resolvedBranch = selection.moodleBranch || DEFAULT_MOODLE_BRANCH;
   const branchMeta = getBranchMetadata(resolvedBranch);
   const webRoot = webRootParam || branchMeta?.webRoot || MOODLE_ROOT;
   const tArchive = performance.now();
@@ -2110,15 +2124,15 @@ export async function bootstrapMoodle({
 
   const manifestState = buildManifestState(
     archive.manifest,
-    runtimeId,
+    resolvedRuntimeId,
     config.bundleVersion,
   );
   const savedManifestState = await readJsonFile(php, MANIFEST_STATE_PATH);
 
   const wwwroot = buildPublicBase(appBaseUrl || origin);
-  const dbName = buildDatabaseName(scopeId, runtimeId);
-  const dbFile = buildDatabaseFilePath(scopeId, runtimeId);
-  const installStatePath = buildInstallStatePath(scopeId, runtimeId);
+  const dbName = buildDatabaseName(scopeId, resolvedRuntimeId);
+  const dbFile = buildDatabaseFilePath(scopeId, resolvedRuntimeId);
+  const installStatePath = buildInstallStatePath(scopeId, resolvedRuntimeId);
   const savedInstallState = await readJsonFile(php, installStatePath);
   const dbConfig = {
     dbFile,
@@ -2424,7 +2438,7 @@ export async function bootstrapMoodle({
         appBaseUrl,
         webRoot,
         scopeId,
-        runtimeId,
+        runtimeId: resolvedRuntimeId,
       });
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;

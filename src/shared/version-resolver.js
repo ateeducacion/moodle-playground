@@ -70,6 +70,15 @@ export const ALL_PHP_VERSIONS = ["8.1", "8.2", "8.3", "8.4", "8.5"];
 export const DEFAULT_PHP_VERSION = "8.3";
 export const DEFAULT_MOODLE_BRANCH = "MOODLE_500_STABLE";
 
+function normalizeStringParam(value) {
+  if (value == null) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
 /**
  * Get the metadata object for a given branch name.
  */
@@ -145,7 +154,15 @@ export function resolveMoodleBranch(versionOrBranch) {
  *
  * Returns { phpVersion, moodleBranch }.
  */
-export function resolveVersions({ php, moodle, moodleBranch } = {}) {
+export function resolveVersions({
+  php,
+  phpVersion,
+  moodle,
+  moodleBranch,
+  runtimeId,
+} = {}) {
+  const parsedRuntime = parseRuntimeId(runtimeId);
+
   // Resolve Moodle branch: explicit branch > version lookup > default
   let resolvedBranch = null;
   if (moodleBranch) {
@@ -154,12 +171,19 @@ export function resolveVersions({ php, moodle, moodleBranch } = {}) {
   if (!resolvedBranch && moodle) {
     resolvedBranch = resolveMoodleBranch(moodle);
   }
+  if (!resolvedBranch && parsedRuntime?.moodleBranch) {
+    resolvedBranch = parsedRuntime.moodleBranch;
+  }
   if (!resolvedBranch) {
     resolvedBranch = DEFAULT_MOODLE_BRANCH;
   }
 
   // Resolve PHP version: explicit > compatible default
-  let resolvedPhp = php ? String(php).trim() : null;
+  let resolvedPhp =
+    normalizeStringParam(phpVersion) || normalizeStringParam(php);
+  if (!resolvedPhp && parsedRuntime?.phpVersion) {
+    resolvedPhp = parsedRuntime.phpVersion;
+  }
   if (resolvedPhp && !isCompatibleCombination(resolvedPhp, resolvedBranch)) {
     // Incompatible, fall back
     resolvedPhp = null;
@@ -172,6 +196,74 @@ export function resolveVersions({ php, moodle, moodleBranch } = {}) {
   }
 
   return { phpVersion: resolvedPhp, moodleBranch: resolvedBranch };
+}
+
+export function resolveRuntimeSelection(options = {}) {
+  const resolved = resolveVersions(options);
+  return {
+    phpVersion: resolved.phpVersion,
+    moodleBranch: resolved.moodleBranch,
+    runtimeId: buildRuntimeId(resolved.phpVersion, resolved.moodleBranch),
+  };
+}
+
+export function buildRuntimeLabel(phpVersion, moodleBranch) {
+  const meta = getBranchMetadata(moodleBranch);
+  return `PHP ${phpVersion} + ${meta?.label || moodleBranch}`;
+}
+
+export function resolveRuntimeConfig(config, selection) {
+  const baseRuntime =
+    config?.runtimes?.find((runtime) => runtime.default) ||
+    config?.runtimes?.[0];
+  if (!baseRuntime) {
+    return null;
+  }
+
+  const runtimeId = selection?.runtimeId || baseRuntime.id;
+  const resolvedSelection =
+    selection?.phpVersion && selection?.moodleBranch
+      ? selection
+      : resolveRuntimeSelection({ runtimeId });
+
+  const exactRuntime = config.runtimes.find((entry) => entry.id === runtimeId);
+  if (exactRuntime) {
+    return exactRuntime;
+  }
+
+  const equivalentRuntime = config.runtimes.find((entry) => {
+    const parsed = parseRuntimeId(entry.id);
+    return (
+      parsed &&
+      parsed.phpVersion === resolvedSelection.phpVersion &&
+      parsed.moodleBranch === resolvedSelection.moodleBranch
+    );
+  });
+
+  return {
+    ...(equivalentRuntime || baseRuntime),
+    id: resolvedSelection.runtimeId,
+    label: buildRuntimeLabel(
+      resolvedSelection.phpVersion,
+      resolvedSelection.moodleBranch,
+    ),
+    phpVersionLabel: resolvedSelection.phpVersion,
+  };
+}
+
+export function shouldTraceRuntimeSelection({ debug, profile } = {}) {
+  const normalizedDebug = normalizeStringParam(debug)?.toLowerCase();
+  if (
+    normalizedDebug &&
+    !["0", "false", "off", "no"].includes(normalizedDebug)
+  ) {
+    return true;
+  }
+
+  return String(profile || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .some((entry) => entry === "runtime" || entry === "runtime-selection");
 }
 
 /**
@@ -266,7 +358,8 @@ export function parseQueryParams(urlOrSearchParams) {
   }
 
   return {
-    php: params.get("php") || null,
+    php: params.get("php") || params.get("phpVersion") || null,
+    phpVersion: params.get("phpVersion") || null,
     moodle: params.get("moodle") || null,
     moodleBranch: params.get("moodleBranch") || null,
     debug: params.get("debug") || null,

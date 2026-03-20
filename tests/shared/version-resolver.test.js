@@ -14,6 +14,8 @@ import {
   parseQueryParams,
   parseRuntimeId,
   resolveMoodleBranch,
+  resolveRuntimeConfig,
+  resolveRuntimeSelection,
   resolveVersions,
 } from "../../src/shared/version-resolver.js";
 
@@ -151,6 +153,105 @@ describe("resolveVersions", () => {
     const result = resolveVersions({ php: "8.2", moodle: "5.0" });
     assert.strictEqual(result.phpVersion, "8.2");
   });
+
+  it("accepts phpVersion alias", () => {
+    const result = resolveVersions({
+      phpVersion: "8.2",
+      moodleBranch: "MOODLE_405_STABLE",
+    });
+    assert.strictEqual(result.phpVersion, "8.2");
+    assert.strictEqual(result.moodleBranch, "MOODLE_405_STABLE");
+  });
+});
+
+describe("resolveRuntimeSelection", () => {
+  it("builds a canonical runtime selection from query-style params", () => {
+    const result = resolveRuntimeSelection({ php: "8.2", moodle: "4.5" });
+    assert.deepStrictEqual(result, {
+      phpVersion: "8.2",
+      moodleBranch: "MOODLE_405_STABLE",
+      runtimeId: "php82-moodle45",
+    });
+  });
+
+  it("accepts phpVersion + moodleBranch aliases", () => {
+    const result = resolveRuntimeSelection({
+      phpVersion: "8.2",
+      moodleBranch: "MOODLE_405_STABLE",
+    });
+    assert.deepStrictEqual(result, {
+      phpVersion: "8.2",
+      moodleBranch: "MOODLE_405_STABLE",
+      runtimeId: "php82-moodle45",
+    });
+  });
+
+  it("falls back to runtimeId when explicit params are absent", () => {
+    const result = resolveRuntimeSelection({ runtimeId: "php84-moodle51" });
+    assert.deepStrictEqual(result, {
+      phpVersion: "8.4",
+      moodleBranch: "MOODLE_501_STABLE",
+      runtimeId: "php84-moodle51",
+    });
+  });
+
+  it("uses defaults only when params are invalid", () => {
+    const result = resolveRuntimeSelection({
+      phpVersion: "8.1",
+      moodleBranch: "MOODLE_500_STABLE",
+    });
+    assert.deepStrictEqual(result, {
+      phpVersion: "8.3",
+      moodleBranch: "MOODLE_500_STABLE",
+      runtimeId: "php83-moodle50",
+    });
+  });
+});
+
+describe("resolveRuntimeConfig", () => {
+  const singleRuntimeConfig = {
+    runtimes: [
+      {
+        id: "php83-moodle50",
+        label: "PHP 8.3 + Moodle 5.0",
+        phpVersionLabel: "8.3",
+        mountStrategy: "readonly-vfs",
+        default: true,
+      },
+    ],
+  };
+
+  it("preserves the requested runtimeId when config only has the default runtime entry", () => {
+    const selection = resolveRuntimeSelection({ php: "8.2", moodle: "4.5" });
+    const runtime = resolveRuntimeConfig(singleRuntimeConfig, selection);
+
+    assert.strictEqual(runtime.id, "php82-moodle45");
+    assert.strictEqual(runtime.mountStrategy, "readonly-vfs");
+    assert.strictEqual(runtime.phpVersionLabel, "8.2");
+  });
+
+  it("reuses exact runtime entries when they exist", () => {
+    const runtime = resolveRuntimeConfig(
+      {
+        runtimes: [
+          singleRuntimeConfig.runtimes[0],
+          {
+            id: "php82-moodle45",
+            label: "PHP 8.2 + Moodle 4.5",
+            phpVersionLabel: "8.2",
+            mountStrategy: "zip-extract",
+          },
+        ],
+      },
+      resolveRuntimeSelection({
+        phpVersion: "8.2",
+        moodleBranch: "MOODLE_405_STABLE",
+      }),
+    );
+
+    assert.strictEqual(runtime.id, "php82-moodle45");
+    assert.strictEqual(runtime.mountStrategy, "zip-extract");
+  });
 });
 
 describe("buildRuntimeId", () => {
@@ -214,6 +315,7 @@ describe("parseQueryParams", () => {
     const params = new URLSearchParams("php=8.3&moodle=5.0&debug=true");
     const result = parseQueryParams(params);
     assert.strictEqual(result.php, "8.3");
+    assert.strictEqual(result.phpVersion, null);
     assert.strictEqual(result.moodle, "5.0");
     assert.strictEqual(result.debug, "true");
   });
@@ -223,7 +325,19 @@ describe("parseQueryParams", () => {
       "https://example.com/?php=8.4&moodleBranch=main",
     );
     assert.strictEqual(result.php, "8.4");
+    assert.strictEqual(result.phpVersion, null);
     assert.strictEqual(result.moodleBranch, "main");
+  });
+
+  it("parses phpVersion alias alongside debug/profile params", () => {
+    const result = parseQueryParams(
+      "https://example.com/?phpVersion=8.2&moodleBranch=MOODLE_405_STABLE&debug=true&profile=runtime",
+    );
+    assert.strictEqual(result.php, "8.2");
+    assert.strictEqual(result.phpVersion, "8.2");
+    assert.strictEqual(result.moodleBranch, "MOODLE_405_STABLE");
+    assert.strictEqual(result.debug, "true");
+    assert.strictEqual(result.profile, "runtime");
   });
 
   it("parses location-like object with search", () => {
@@ -234,6 +348,7 @@ describe("parseQueryParams", () => {
   it("returns nulls for missing params", () => {
     const result = parseQueryParams(new URLSearchParams());
     assert.strictEqual(result.php, null);
+    assert.strictEqual(result.phpVersion, null);
     assert.strictEqual(result.moodle, null);
     assert.strictEqual(result.moodleBranch, null);
     assert.strictEqual(result.debug, null);
