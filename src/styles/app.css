@@ -246,6 +246,19 @@ button.danger:hover {
   font-size: 16px;
 }
 
+.browser-toolbar .icon-button--labeled {
+  width: auto;
+  padding: 0 12px;
+  gap: var(--space-xs);
+}
+
+.browser-toolbar .icon-button__label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .browser-toolbar .icon-button:hover {
   background: var(--chrome-hover);
   color: var(--chrome-text);
@@ -750,13 +763,22 @@ button.danger:hover {
 
 @media (max-width: 720px) {
   .browser-toolbar {
-    grid-template-columns: 1fr;
-    height: auto;
-    padding: var(--space-sm) var(--space-md);
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0 var(--space-md);
     gap: var(--space-sm);
   }
 
   .address-form__input {
+    display: none;
+  }
+
+  .browser-toolbar .icon-button--labeled {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+  }
+
+  .browser-toolbar .icon-button__label {
     display: none;
   }
 
