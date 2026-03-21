@@ -59,7 +59,7 @@ Impact:
 Current state:
 
 - some patches are copied into the Moodle source tree during bundle preparation
-- other patches are applied at boot into the writable overlay
+- other patches are applied at boot into MEMFS
 
 Where to continue:
 
@@ -87,7 +87,7 @@ There were three interacting issues when enabling MUC (`CACHE_DISABLE_ALL = fals
    `mdl_config`. With MUC disabled the web admin flow cleared it; with MUC enabled the
    stale flag caused `is_major_upgrade_required()` to redirect all pages to admin.
 3. **`moodle_needs_upgrading()` version hash mismatch** — the `allversionshash` computed
-   at runtime differs from the snapshot value (component scanning varies in WASM VFS).
+   at runtime differs from the snapshot value (component scanning varies in WASM MEMFS).
    This caused `/my/` to redirect to `/admin/index.php` on every request.
 
 Fix:
@@ -113,10 +113,11 @@ Status:
 
 - **resolved**
 
-The VFS loader in `lib/moodle-loader.js` was reworked to preallocate a single destination
+The bundle loader in `lib/moodle-loader.js` was reworked to preallocate a single destination
 buffer when `content-length` is known and fill it incrementally, eliminating the double-buffer
 allocation that previously caused `RangeError: Array buffer allocation failed`. This is no
-longer an issue in practice.
+longer an issue in practice. (The project has since migrated from the custom readonly VFS
+overlay to extracting the Moodle ZIP bundle directly into writable MEMFS.)
 
 ## 6. Asset routing issues may still recur after changes to SW/CGI logic
 

@@ -541,11 +541,11 @@ describe("createSnapshotManager", () => {
     assert.strictEqual(sm.hasPendingRestore, false);
   });
 
-  it("restore() returns false when no snapshot is saved", async () => {
+  it("restore() returns not-restored when no snapshot is saved", async () => {
     const { postShell } = createMockPostShell();
     const sm = createSnapshotManager({ postShell });
     const result = await sm.restore({});
-    assert.strictEqual(result, false);
+    assert.strictEqual(result.restored, false);
   });
 
   it("clear() is safe to call without a snapshot", () => {

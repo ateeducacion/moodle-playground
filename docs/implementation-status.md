@@ -34,7 +34,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 - [`php-worker.js`](/Users/ernesto/Downloads/moodle-playground/php-worker.js)
   - ejecuta `PhpCgiWorker` en un `Dedicated Worker`, no en el Service Worker;
   - hace bootstrap de Moodle;
-  - monta la imagen VFS read-only;
+  - extrae el bundle ZIP de Moodle en MEMFS;
   - genera `php.ini` y helpers;
   - responde peticiones HTTP enviadas desde `sw.js`;
   - serializa las requests para evitar reentrada simultánea sobre la misma instancia PHP.
@@ -43,16 +43,22 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 - [`lib/moodle-loader.js`](/Users/ernesto/Downloads/moodle-playground/lib/moodle-loader.js)
   - carga `assets/manifests/latest.json`;
-  - prioriza la VFS image si existe;
+  - prioriza el bundle ZIP si existe;
   - cachea bundle e índice en Cache Storage;
   - ya no hace fallback a descarga remota de Moodle en runtime.
 
-### Mount de VFS
+### Mount de VFS (reemplazado)
 
-- [`lib/vfs-mount.js`](/Users/ernesto/Downloads/moodle-playground/lib/vfs-mount.js)
-  - implementa un FS read-only custom sobre `vfs.bin + vfs.index.json`;
-  - permite overlay writable solo para ficheros concretos, por ahora sobre todo `config.php`;
-  - se ha ido corrigiendo para respetar offsets, `stream.position`, `llseek`, `node.contents`, `usedBytes`, `mmap` y `msync`.
+> **Nota (marzo 2026)**: El mount VFS read-only custom (`lib/vfs-mount.js`,
+> `.vfs.bin` + `.vfs.index.json`) ha sido reemplazado. Ahora el core de Moodle
+> se extrae desde un bundle ZIP directamente en Emscripten MEMFS, donde todos
+> los ficheros son escribibles. `lib/vfs-mount.js` y `scripts/build-vfs-image.mjs`
+> han sido eliminados.
+
+- ~~[`lib/vfs-mount.js`](/Users/ernesto/Downloads/moodle-playground/lib/vfs-mount.js)~~ (eliminado)
+  - implementaba un FS read-only custom sobre `vfs.bin + vfs.index.json`;
+  - permitía overlay writable solo para ficheros concretos, por ahora sobre todo `config.php`;
+  - se fue corrigiendo para respetar offsets, `stream.position`, `llseek`, `node.contents`, `usedBytes`, `mmap` y `msync`.
 
 ## Pipeline offline
 
@@ -61,13 +67,12 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 - [`scripts/build-moodle-bundle.sh`](/Users/ernesto/Downloads/moodle-playground/scripts/build-moodle-bundle.sh)
   - descarga o reutiliza la release oficial;
   - aplica parches offline al árbol fuente;
-  - genera ZIP y VFS image;
+  - genera el ZIP de Moodle (anteriormente también generaba la imagen VFS, ya eliminada);
   - genera el manifiesto final.
 
-- [`scripts/build-vfs-image.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/build-vfs-image.mjs)
-  - empaqueta todos los ficheros en:
-    - `.vfs.bin`
-    - `.vfs.index.json`
+- ~~[`scripts/build-vfs-image.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/build-vfs-image.mjs)~~ (eliminado)
+  - empaquetaba todos los ficheros en `.vfs.bin` + `.vfs.index.json`
+  - reemplazado por extracción directa del ZIP de Moodle en MEMFS
 
 - [`scripts/generate-manifest.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/generate-manifest.mjs)
   - genera `assets/manifests/latest.json` con hashes, tamaños y paths.
@@ -109,9 +114,9 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Bundle y tiempo de arranque
 
-- Se implementó una imagen VFS offline para evitar:
-  - descomprimir ZIP en navegador;
-  - escribir fichero a fichero al VFS en cada arranque.
+- Se implementó inicialmente una imagen VFS offline (`.vfs.bin` + `.vfs.index.json`) para
+  evitar descomprimir ZIP y escribir fichero a fichero en cada arranque. Posteriormente,
+  esta imagen fue reemplazada por extracción directa del ZIP en MEMFS.
 
 ### Extensiones PHP dinámicas
 
@@ -139,13 +144,13 @@ Se corrigieron variables importantes:
 
 Esto arregló varios problemas de generación de URLs y warnings en el instalador.
 
-### Validación del VFS
+### Validación del VFS (histórico)
 
-Se comprobó que:
+Se comprobó en la etapa de VFS read-only (ya reemplazada) que:
 
-- `install.php` dentro de la VFS coincide byte a byte con el fichero fuente;
-- el propio FS montado puede leerlo con el tamaño correcto;
-- el final del fichero es correcto.
+- `install.php` dentro de la VFS coincidía byte a byte con el fichero fuente;
+- el propio FS montado podía leerlo con el tamaño correcto;
+- el final del fichero era correcto.
 
 ## Problemas encontrados durante la implementación
 
@@ -159,9 +164,9 @@ Han aparecido errores de clases/interfaces no encontradas que no deberían falla
 
 Se han ido parcheando offline con `require_once` explícitos.
 
-### VFS custom
+### VFS custom (histórico, ya eliminado)
 
-El mount custom ha necesitado varias correcciones:
+El mount custom VFS necesitó varias correcciones antes de ser reemplazado por MEMFS:
 
 - rutas montadas incorrectas;
 - lecturas sin respetar `stream.position`;
@@ -189,8 +194,8 @@ Ahora:
 
 - bootstrap offline;
 - bundle local y manifiesto local;
-- VFS image generada;
-- mount VFS funcionando al menos a nivel de lectura directa del worker;
+- bundle ZIP generado (anteriormente imagen VFS, ya reemplazada);
+- extracción del bundle en MEMFS funcionando;
 - `install.php` existe y se lee con el tamaño correcto;
 - la request HTTP llega al worker PHP.
 
@@ -211,7 +216,7 @@ Eso significa que el bloqueo ya no está en:
 - el fetch del bundle;
 - el registro del Service Worker;
 - la existencia del fichero `install.php`;
-- la carga básica del VFS.
+- la carga básica del bundle.
 
 Ahora mismo el problema parece estar dentro de:
 
@@ -220,7 +225,7 @@ Ahora mismo el problema parece estar dentro de:
 
 ## Últimos cambios relevantes
 
-- se añadió una sanity check tras montar la VFS para verificar `install.php`;
+- se añadió una sanity check tras cargar el bundle para verificar `install.php`;
 - se aumentó el timeout del bridge a 60 segundos;
 - se serializaron las requests HTTP al runtime PHP;
 - se bajó `max_execution_time` a 15s en [`lib/config-template.js`](/Users/ernesto/Downloads/moodle-playground/lib/config-template.js) para intentar obtener un error PHP real antes que un timeout del bridge.
@@ -249,5 +254,5 @@ Orden recomendado:
 
 1. instrumentar `vendor/php-cgi-wasm/PhpCgiBase.js` alrededor de `main` y `parseResponse`;
 2. comprobar si el cuelgue ocurre antes o después de `php.ccall('main', ...)`;
-3. si el bloqueo está en el FS custom, seguir endureciendo `lib/vfs-mount.js`;
+3. si el bloqueo está en el FS, inspeccionar la extracción del bundle en MEMFS;
 4. si el bloqueo es interno del runtime CGI, valorar cambiar de estrategia para servir la primera carga o usar otro modo de integración con `php-wasm`.

@@ -15,7 +15,6 @@
  *    prevent the runtime from reaching a usable state.
  *
  * Recovery strategy:
- *   - VFS lazy materialization (lib/vfs-mount.js) reduces memory pressure.
  *   - Reactive rotation detects fatal errors and discards the runtime.
  *   - Idempotent requests (GET/HEAD) are replayed once on a fresh runtime.
  *   - Non-idempotent requests are NOT replayed to avoid side-effects.
@@ -106,9 +105,12 @@ export function formatErrorDetail(error) {
  * @param {{ postShell: (msg: object) => void }} options
  * @returns {object} Snapshot manager with hydrate/restore methods.
  */
+const FILEDIR_PATH = "/persist/moodledata/filedir";
+
 export function createSnapshotManager({ postShell }) {
   let savedDbSnapshot = null;
   let savedPluginFiles = null;
+  let savedFiledirFiles = null;
   /** Paths of plugin directories installed during this session. */
   const installedPluginDirs = new Set();
 
@@ -116,18 +118,51 @@ export function createSnapshotManager({ postShell }) {
    * Recursively collect all files under a directory from the raw PHP FS.
    * Returns an array of { path, data } entries.
    */
+  /**
+   * Write an array of { path, data } entries into MEMFS with dir deduplication.
+   * Returns { ok, failed } counts.
+   */
+  function restoreFiles(rawPhp, files) {
+    let ok = 0;
+    let failed = 0;
+    const createdDirs = new Set();
+
+    for (const file of files) {
+      try {
+        const lastSlash = file.path.lastIndexOf("/");
+        const parentDir =
+          lastSlash > 0 ? file.path.substring(0, lastSlash) : null;
+        if (parentDir && !createdDirs.has(parentDir)) {
+          rawPhp.mkdirTree(parentDir);
+          let dir = parentDir;
+          while (dir && !createdDirs.has(dir)) {
+            createdDirs.add(dir);
+            dir = dir.substring(0, dir.lastIndexOf("/")) || null;
+          }
+        }
+        rawPhp.writeFile(file.path, file.data);
+        ok++;
+      } catch {
+        failed++;
+      }
+    }
+    return { ok, failed };
+  }
+
   function collectFiles(rawPhp, dirPath) {
     const files = [];
     try {
       const entries = rawPhp.listFiles(dirPath, { prependPath: true });
       for (const entry of entries) {
-        try {
-          // Try reading as file first
-          const data = rawPhp.readFileAsBuffer(entry);
-          files.push({ path: entry, data: new Uint8Array(data) });
-        } catch {
-          // If reading fails, it's likely a directory — recurse
+        if (rawPhp.isDir(entry)) {
           files.push(...collectFiles(rawPhp, entry));
+        } else {
+          try {
+            const data = rawPhp.readFileAsBuffer(entry);
+            files.push({ path: entry, data: new Uint8Array(data) });
+          } catch {
+            // Unreadable file — skip
+          }
         }
       }
     } catch {
@@ -169,25 +204,75 @@ export function createSnapshotManager({ postShell }) {
 
       // 2. Save files from plugin directories installed during this session
       if (installedPluginDirs.size > 0) {
+        postShell({
+          kind: "trace",
+          detail: `[snapshot] hydrating ${installedPluginDirs.size} tracked plugin dirs: ${[...installedPluginDirs].join(", ")}`,
+        });
         const allFiles = [];
         for (const dir of installedPluginDirs) {
           try {
-            if (!rawPhp.fileExists(dir)) continue;
+            if (!rawPhp.fileExists(dir)) {
+              postShell({
+                kind: "trace",
+                detail: `[snapshot] plugin dir not found: ${dir}`,
+              });
+              continue;
+            }
             const files = collectFiles(rawPhp, dir);
             if (files.length > 0) {
               allFiles.push(...files);
+              postShell({
+                kind: "trace",
+                detail: `[snapshot] collected ${files.length} files from ${dir}`,
+              });
             }
-          } catch {
-            // Skip dirs we can't read
+          } catch (err) {
+            postShell({
+              kind: "error",
+              detail: `[snapshot] failed to read plugin dir ${dir}: ${err.message}`,
+            });
           }
         }
         if (allFiles.length > 0) {
           savedPluginFiles = allFiles;
           postShell({
             kind: "trace",
-            detail: `[snapshot] saved ${allFiles.length} plugin files`,
+            detail: `[snapshot] saved ${allFiles.length} plugin files total`,
+          });
+        } else {
+          postShell({
+            kind: "trace",
+            detail: `[snapshot] no plugin files collected from tracked dirs`,
           });
         }
+      } else {
+        postShell({
+          kind: "trace",
+          detail: `[snapshot] no plugin dirs tracked, skipping plugin hydration`,
+        });
+      }
+
+      // 3. Save user-uploaded files (stored files in filedir)
+      try {
+        if (rawPhp.fileExists(FILEDIR_PATH) && rawPhp.isDir(FILEDIR_PATH)) {
+          const files = collectFiles(rawPhp, FILEDIR_PATH);
+          if (files.length > 0) {
+            savedFiledirFiles = files;
+            const totalBytes = files.reduce(
+              (sum, f) => sum + f.data.byteLength,
+              0,
+            );
+            postShell({
+              kind: "trace",
+              detail: `[snapshot] saved ${files.length} filedir entries (${Math.round(totalBytes / 1024)}KB)`,
+            });
+          }
+        }
+      } catch (err) {
+        postShell({
+          kind: "error",
+          detail: `[snapshot] failed to read filedir: ${err.message}`,
+        });
       }
     },
 
@@ -197,10 +282,17 @@ export function createSnapshotManager({ postShell }) {
      * @param {object} php - The php-compat wrapper (has ._php)
      */
     async restore(php) {
-      if (!savedDbSnapshot && !savedPluginFiles) return false;
+      if (!savedDbSnapshot && !savedPluginFiles && !savedFiledirFiles) {
+        return {
+          restored: false,
+          pluginsRestored: false,
+          restoredPluginDirs: [],
+        };
+      }
       const rawPhp = php._php;
       let restored = false;
       let pluginsRestored = false;
+      const restoredPluginDirs = [];
 
       // 1. Restore DB
       if (savedDbSnapshot) {
@@ -220,51 +312,9 @@ export function createSnapshotManager({ postShell }) {
         savedDbSnapshot = null;
       }
 
-      // 2. Restore plugin files via a two-step approach:
-      //    a) Write files to /tmp/snapshot_restore/ using rawPhp.writeFile()
-      //       (works on plain MEMFS, no VFS overlay issues)
-      //    b) Use PHP to copy them from /tmp/ to the VFS-mounted /www/moodle/
-      //       (PHP's copy() goes through the VFS overlay correctly)
+      // 2. Restore plugin files directly into MEMFS.
       if (savedPluginFiles) {
-        let ok = 0;
-        let failed = 0;
-        const tmpBase = "/tmp/snapshot_restore";
-
-        // Step a: Write all files to /tmp/ via rawPhp (Emscripten FS)
-        for (const file of savedPluginFiles) {
-          try {
-            const tmpPath = `${tmpBase}${file.path}`;
-            const tmpParent = tmpPath.substring(0, tmpPath.lastIndexOf("/"));
-            try {
-              rawPhp.mkdirTree(tmpParent);
-            } catch {
-              // Already exists
-            }
-            rawPhp.writeFile(tmpPath, file.data);
-          } catch {
-            // Skip files we can't stage
-          }
-        }
-
-        // Step b: Use PHP to copy from /tmp/ to the real locations
-        for (const file of savedPluginFiles) {
-          try {
-            const parentDir = file.path.substring(
-              0,
-              file.path.lastIndexOf("/"),
-            );
-            const escapedParent = escapePath(parentDir);
-            const escapedPath = escapePath(file.path);
-            const tmpPath = `${tmpBase}${file.path}`;
-            const escapedTmp = escapePath(tmpPath);
-            await php.run(
-              `<?php @mkdir('${escapedParent}', 0777, true); copy('${escapedTmp}', '${escapedPath}');`,
-            );
-            ok++;
-          } catch {
-            failed++;
-          }
-        }
+        const { ok, failed } = restoreFiles(rawPhp, savedPluginFiles);
         postShell({
           kind: "trace",
           detail: `[snapshot] restored ${ok} plugin files${failed > 0 ? ` (${failed} failed)` : ""}`,
@@ -272,16 +322,34 @@ export function createSnapshotManager({ postShell }) {
         if (ok > 0) {
           restored = true;
           pluginsRestored = true;
+          restoredPluginDirs.push(...installedPluginDirs);
         }
         savedPluginFiles = null;
       }
 
-      return { restored, pluginsRestored };
+      // 3. Restore filedir (user-uploaded content)
+      if (savedFiledirFiles) {
+        const { ok, failed } = restoreFiles(rawPhp, savedFiledirFiles);
+        postShell({
+          kind: "trace",
+          detail: `[snapshot] restored ${ok} filedir entries${failed > 0 ? ` (${failed} failed)` : ""}`,
+        });
+        if (ok > 0) {
+          restored = true;
+        }
+        savedFiledirFiles = null;
+      }
+
+      return { restored, pluginsRestored, restoredPluginDirs };
     },
 
     /** Whether there is a saved snapshot waiting to be restored. */
     get hasPendingRestore() {
-      return savedDbSnapshot !== null || savedPluginFiles !== null;
+      return (
+        savedDbSnapshot !== null ||
+        savedPluginFiles !== null ||
+        savedFiledirFiles !== null
+      );
     },
 
     /**
@@ -303,18 +371,7 @@ export function createSnapshotManager({ postShell }) {
     clear() {
       savedDbSnapshot = null;
       savedPluginFiles = null;
+      savedFiledirFiles = null;
     },
   };
-}
-
-function escapePath(path) {
-  return String(path).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
-
-function uint8ToBase64(bytes) {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
 }

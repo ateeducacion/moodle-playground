@@ -16,7 +16,7 @@ The project follows a layered architecture:
 2. **Runtime host** (`remote.html` + `src/remote/main.js`) — registers the service worker and hosts the playground iframe
 3. **Request routing** (`sw.js` + `php-worker.js`) — intercepts requests and routes them to the PHP runtime
 4. **PHP/Moodle runtime** (`src/runtime/*`) — boots Moodle via `@php-wasm/web` and serves HTTP requests through a bridge
-5. **Generated assets** (`assets/moodle/`) — prebuilt VFS bundle with readonly Moodle core
+5. **Generated assets** (`assets/moodle/`) — prebuilt ZIP bundle with Moodle core (extracted into writable MEMFS at runtime)
 
 ## Quick start
 

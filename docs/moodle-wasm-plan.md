@@ -2,6 +2,14 @@
 
 Fecha de análisis: 2026-03-10
 
+> **Nota (marzo 2026)**: Este documento es histórico. La arquitectura propuesta aquí
+> (imagen VFS preconstruida, `lib/vfs-mount.js`, `.vfs.bin` + `.vfs.index.json`) fue
+> implementada y posteriormente reemplazada por extracción directa del ZIP de Moodle
+> en Emscripten MEMFS escribible. Las referencias a "VFS image", "VFS mount" y
+> "VFS overlay" describen la estrategia original, no la arquitectura actual. El
+> almacenamiento persistente (OPFS, IDBFS, PGlite) tampoco fue adoptado; el runtime
+> es ahora completamente efímero (MEMFS).
+
 ## Objetivo
 
 Levantar Moodle completo en navegador con `php-wasm` y publicarlo desde GitHub Pages con el menor tiempo posible hasta tener una instancia utilizable.

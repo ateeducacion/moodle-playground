@@ -14,14 +14,16 @@ It is meant to answer three practical questions:
 Compared with `main`, this branch hardens the plugin install/runtime path in a
 few areas that were previously fragile:
 
-- **Writable runtime patches over the readonly VFS**
-  Runtime overrides in `src/runtime/bootstrap.js` are now applied through the
-  writable overlay instead of trying to mutate the readonly Moodle core mount.
+- **Writable runtime patches**
+  Runtime overrides in `src/runtime/bootstrap.js` are now applied directly in
+  writable MEMFS. (Previously the Moodle core was mounted as a readonly VFS
+  overlay and runtime patches had to use a separate writable layer.)
 
 - **Plugin extraction no longer corrupts PHP files**
-  `lib/vfs-mount.js` now respects Emscripten `usedBytes` during cross-mount copy
-  operations. This prevents embedded `0x00` bytes from appearing in installed
-  plugin files such as `mod/exeweb/lib.php`.
+  The previous VFS overlay (`lib/vfs-mount.js`) had a bug where cross-mount copy
+  operations did not respect Emscripten `usedBytes`, embedding `0x00` bytes in
+  installed plugin files. This is no longer an issue because the Moodle core now
+  lives in writable MEMFS (the VFS overlay has been removed).
 
 - **Alternative component cache is refreshed after plugin install**
   Runtime patches to Moodle's `core_component` and `plugin_manager` update the
@@ -98,8 +100,7 @@ reliably and Moodle will still fail during install or upgrade.
 These are the main things the current branch still depends on.
 
 - **Rebuild the worker after runtime changes**
-  Run `npm run build:worker` after editing `src/runtime/*`, `php-worker.js`, or
-  VFS overlay logic.
+  Run `npm run build:worker` after editing `src/runtime/*` or `php-worker.js`.
 
 - **Hard reload after rebuilding**
   The browser can keep an old worker alive. After a new build, do a hard reload
@@ -112,9 +113,10 @@ These are the main things the current branch still depends on.
 - **No sodium in the current WASM runtime**
   Encryption-sensitive plugin code must tolerate Moodle's OpenSSL fallback path.
 
-- **Readonly core + writable overlay is intentional**
-  Do not assume plugins can patch files inside `/www/moodle` directly. Runtime
-  edits must target files explicitly exposed through the writable overlay.
+- **Moodle core in writable MEMFS**
+  All files under `/www/moodle` are writable in MEMFS. Plugins can be extracted
+  directly into the correct subdirectory. (Previously the core was a readonly VFS
+  overlay and only files explicitly exposed through a writable layer could be modified.)
 
 - **The runtime is ephemeral**
   Installed plugins are not durable across full reloads unless they are part of a
@@ -160,6 +162,6 @@ The main implementation points behind this branch work are:
 - [`src/runtime/bootstrap.js`](../src/runtime/bootstrap.js)
 - [`src/runtime/config-template.js`](../src/runtime/config-template.js)
 - [`php-worker.js`](../php-worker.js)
-- [`lib/vfs-mount.js`](../lib/vfs-mount.js)
+- ~~`lib/vfs-mount.js`~~ (removed — VFS overlay replaced by MEMFS extraction)
 - [`scripts/generate-install-snapshot.sh`](../scripts/generate-install-snapshot.sh)
 

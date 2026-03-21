@@ -21,9 +21,9 @@ It follows the same product shape as `omeka-s-playground`:
 3. Request routing: `sw.js` and `php-worker.js`
 4. PHP/Moodle runtime: `src/runtime/*` + generated assets under `assets/moodle/`
 
-The readonly Moodle core is loaded from a prebuilt VFS bundle while mutable state lives
-in Emscripten MEMFS (in-memory). The runtime is fully ephemeral — all state is lost when
-the browser tab closes or the page is reloaded.
+The Moodle core is extracted from a prebuilt ZIP bundle into Emscripten MEMFS (in-memory)
+at boot. All files — core and mutable state — live in writable MEMFS. The runtime is fully
+ephemeral — all state is lost when the browser tab closes or the page is reloaded.
 
 ## Build System
 
@@ -64,7 +64,7 @@ automatically.
 
 ### Generated Assets
 
-- `assets/moodle/`: readonly runtime bundle files (`.vfs.bin`, index, optional zip)
+- `assets/moodle/`: runtime bundle files (`.zip`, snapshot, manifests)
 - `assets/moodle/snapshot/`: pre-built install snapshot (`install.sq3`)
 - `assets/manifests/`: generated bundle manifests
 - `dist/`: esbuild output (php-worker bundle, WASM files, ICU data)
@@ -143,7 +143,7 @@ durable browser storage during normal operation. Closing the tab destroys all st
 
 Current layout:
 
-- Readonly core: custom VFS mount under `/www/moodle` (from prebuilt `.vfs.bin` image)
+- Moodle core: extracted from ZIP bundle into `/www/moodle` (writable MEMFS)
 - Mutable data: `/persist/moodledata` (MEMFS — the `/persist` name is legacy, not durable)
 - SQLite database: `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (MEMFS file)
 - Config and install markers: `/persist/config` (MEMFS)
@@ -189,7 +189,7 @@ Current database assumptions:
 - Moodle runs against the deprecated SQLite PDO driver
 - The SQLite database file lives in MEMFS (pure memory, no durable storage)
 - The DB file path is `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
-- The readonly Moodle core lives under `/www/moodle` (custom VFS mount)
+- The Moodle core lives under `/www/moodle` (writable MEMFS, extracted from ZIP at boot)
 - `config.php` is generated at boot and points at the MEMFS database file
 - SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
   `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
@@ -203,7 +203,7 @@ When touching the migration/runtime path, preserve these invariants:
 
 1. Do not reintroduce PGlite as the active DB path
 2. Do not move the DB out of the writable MEMFS filesystem
-3. Do not turn the readonly core mount back into a full persistent copy of Moodle
+3. Do not copy the full Moodle core into persistent (OPFS/IndexedDB) storage
 4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
 5. Keep the default scope stable unless there is a deliberate migration plan
 6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
@@ -313,8 +313,7 @@ These areas have repeatedly caused regressions during the SQLite migration:
   - historically, the nested iframe could stall with a valid URL/title but an empty body
     (this is now resolved; the watchdog recovery code remains as a safety net)
 - `lib/moodle-loader.js`
-  - historically, large VFS downloads could trigger memory pressure due to double-buffer
-    allocation (this is now resolved; the loader preallocates a single destination buffer)
+  - handles ZIP bundle download, caching, and extraction
 - `src/runtime/bootstrap.js`
   - many install-time compatibility shims live here and are easy to break accidentally
   - **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets
@@ -324,10 +323,10 @@ These areas have repeatedly caused regressions during the SQLite migration:
     to `upgradesettings.php`. Fix: add the missing setting with a safe static default to the
     `$postinstalldefaults` array. Known examples: `noreplyaddress`, `supportemail`.
   - **Runtime patches vs `patches/` directory**: Patches applied via the `patches/` directory
-    (copied at VFS build time) should NOT also be applied at runtime via `patchFile()` in
+    (copied at bundle build time) should NOT also be applied at runtime via `patchFile()` in
     `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
-    runtime `patchFile()` for files that are in the readonly VFS and need modification at
-    boot (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
+    runtime `patchFile()` for files that need modification at boot
+    (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
 
 If a change touches any of these files, prefer validating in a real browser, not only with syntax checks.
 

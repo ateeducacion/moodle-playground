@@ -4,7 +4,6 @@ import {
   fetchBundleWithCache,
   writeEntriesToPhp,
 } from "../../lib/moodle-loader.js";
-import { mountReadonlyVfs } from "../../lib/vfs-mount.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
   DEFAULT_MOODLE_BRANCH,
@@ -70,37 +69,6 @@ function buildRuntimePaths(webRoot) {
     HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
     THEME_CSS_WARMUP_PATH: `${webRoot}/__theme_css_warmup.php`,
   };
-}
-
-function buildInternalRuntimeFiles(webRoot) {
-  const paths = buildRuntimePaths(webRoot);
-  return [
-    `${MOODLE_ROOT}/config.php`,
-    COMPONENT_CACHE_PATH,
-    paths.AUTOLOAD_CHECK_PATH,
-    paths.INSTALL_CHECK_PATH,
-    paths.INSTALL_RUNNER_PATH,
-    paths.PDO_PROBE_PATH,
-    paths.PDO_DDL_PROBE_PATH,
-    paths.CONFIG_NORMALIZER_PATH,
-    paths.CACHE_CONFIG_PATH,
-    paths.CACHE_ADMIN_HELPER_PATH,
-    paths.ADMIN_INDEX_PATH,
-    paths.ADMIN_SEARCH_PATH,
-    paths.ADMIN_ENVIRONMENT_PATH,
-    paths.MY_INDEX_PATH,
-    paths.MY_COURSES_PATH,
-    paths.CODE_MANAGER_PATH,
-    paths.PLUGIN_MANAGER_PATH,
-    paths.COMPONENT_CLASS_PATH,
-    paths.ADMINLIB_PATH,
-    paths.MOODLELIB_PATH,
-    paths.ADMIN_DEFAULTS_SEEDER_PATH,
-    paths.DATAPRIVACY_SETTINGS_PATH,
-    paths.LOG_SETTINGS_PATH,
-    paths.HTTPSREPLACE_SETTINGS_PATH,
-    paths.THEME_CSS_WARMUP_PATH,
-  ];
 }
 
 function nowIso() {
@@ -1639,7 +1607,6 @@ async function prepareMoodleRuntime({
   php,
   archive,
   manifestState,
-  savedManifestState,
   configPhp,
   installRunnerPhp,
   pdoProbePhp,
@@ -1649,12 +1616,7 @@ async function prepareMoodleRuntime({
   allowDiagnostics = false,
   webRoot = MOODLE_ROOT,
 }) {
-  const shouldMountArchive = !manifestStateMatches(
-    savedManifestState,
-    manifestState,
-  );
   const rp = buildRuntimePaths(webRoot);
-  const internalFiles = buildInternalRuntimeFiles(webRoot);
 
   const tDirs = performance.now();
   await ensureDir(php, DOCROOT);
@@ -1674,27 +1636,11 @@ async function prepareMoodleRuntime({
   const dirsMs = Math.round(performance.now() - tDirs);
 
   const tMount = performance.now();
-  if (archive.kind === "vfs-image") {
-    publish(
-      shouldMountArchive
-        ? "Mounting the readonly Moodle VFS image."
-        : "Reusing the readonly Moodle VFS image.",
-      0.56,
-    );
-    const binary = await php.binary;
-    mountReadonlyVfs(binary, {
-      imageBytes: archive.bytes,
-      entries: archive.image.entries || [],
-      mountPath: MOODLE_ROOT,
-      writablePaths: internalFiles,
-    });
-  } else {
-    publish("Writing fallback Moodle bundle into the runtime VFS.", 0.58);
-    const entries = extractZipEntries(archive.bytes);
-    await writeEntriesToPhp(php, entries, MOODLE_ROOT, ({ ratio, path }) => {
-      publish(`Writing ${path}`, 0.58 + ratio * 0.2);
-    });
-  }
+  publish("Writing Moodle bundle into MEMFS.", 0.58);
+  const entries = extractZipEntries(archive.bytes);
+  writeEntriesToPhp(php, entries, MOODLE_ROOT, ({ ratio, path }) => {
+    publish(`Writing ${path}`, 0.58 + ratio * 0.2);
+  });
   const mountMs = Math.round(performance.now() - tMount);
 
   const tComponentCache = performance.now();
@@ -1772,8 +1718,6 @@ async function prepareMoodleRuntime({
       updatedAt: nowIso(),
     });
   }
-
-  return { shouldMountArchive };
 }
 
 async function loadInstallSnapshot(
@@ -2121,10 +2065,7 @@ export async function bootstrapMoodle({
     archive.manifest?.bundle?.url
   ) {
     const tZip = performance.now();
-    publish(
-      "Switching Moodle runtime to ZIP extraction to avoid readonly VFS parser issues.",
-      0.5,
-    );
+    publish("Extracting Moodle ZIP bundle into writable MEMFS.", 0.5);
     const zipBytes = await fetchBundleWithCache(
       archive.manifest,
       ({ ratio, cached }) => {
@@ -2150,8 +2091,6 @@ export async function bootstrapMoodle({
     resolvedRuntimeId,
     config.bundleVersion,
   );
-  const savedManifestState = await readJsonFile(php, MANIFEST_STATE_PATH);
-
   const wwwroot = buildPublicBase(appBaseUrl || origin);
   const dbName = buildDatabaseName(scopeId, resolvedRuntimeId);
   const dbFile = buildDatabaseFilePath(scopeId, resolvedRuntimeId);
@@ -2184,7 +2123,6 @@ export async function bootstrapMoodle({
     php,
     archive,
     manifestState,
-    savedManifestState,
     configPhp,
     installRunnerPhp,
     pdoProbePhp,

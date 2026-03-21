@@ -496,7 +496,24 @@ async function bootstrapRemote() {
   const profile = url.searchParams.get("profile") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
-  const blueprint = loadBlueprint(scopeId);
+  let blueprint = loadBlueprint(scopeId);
+  // If sessionStorage has no blueprint (first load, or session cleared),
+  // fetch the default blueprint directly instead of relying on the shell
+  // having saved it first — avoids a race condition on cold start.
+  if (!blueprint && config.defaultBlueprintUrl) {
+    try {
+      const response = await fetch(
+        new URL(config.defaultBlueprintUrl, window.location.href),
+        { cache: "no-store" },
+      );
+      if (response.ok) {
+        blueprint = await response.json();
+        console.log("[blueprint] remote: resolved from defaultBlueprintUrl.");
+      }
+    } catch {
+      // Fall through — worker will boot without blueprint steps
+    }
+  }
   const selection = resolveRuntimeSelection({
     runtimeId: requestedRuntimeId,
     phpVersion,

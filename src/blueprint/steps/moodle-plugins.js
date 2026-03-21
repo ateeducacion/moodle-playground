@@ -198,10 +198,11 @@ async function installViaJsDelivr(
     );
   }
 
-  // Create the target directory
-  await php.run(`<?php @mkdir('${escapePath(targetDir)}', 0777, true);`);
+  // Create the target directory directly in MEMFS
+  const rawPhp = php._php;
+  rawPhp.mkdirTree(targetDir);
 
-  // Download each file from CDN and write to the target directory
+  // Download each file from CDN and write directly to MEMFS
   const cdnBase = `https://cdn.jsdelivr.net/${jsdelivrPkg}`;
   let downloaded = 0;
 
@@ -212,7 +213,7 @@ async function installViaJsDelivr(
     // Ensure parent directory exists
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir && parentDir !== targetDir) {
-      await php.run(`<?php @mkdir('${escapePath(parentDir)}', 0777, true);`);
+      rawPhp.mkdirTree(parentDir);
     }
 
     const fileUrl = `${cdnBase}${filePath}`;
@@ -225,13 +226,7 @@ async function installViaJsDelivr(
     }
 
     const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
-    // Write via PHP file_put_contents instead of php.writeFile — the latter
-    // uses Emscripten's FS API directly which doesn't go through the custom
-    // VFS overlay for new directories in the readonly mount.
-    const b64 = uint8ToBase64(fileBytes);
-    await php.run(
-      `<?php file_put_contents('${escapePath(fullPath)}', base64_decode('${b64}'));`,
-    );
+    rawPhp.writeFile(fullPath, fileBytes);
     downloaded++;
   }
 
@@ -267,7 +262,8 @@ async function installViaZipDownload(zipUrl, targetDir, { php, publish }) {
   const paths = Object.keys(entries).filter((p) => !p.endsWith("/"));
   const commonPrefix = findCommonPrefix(paths);
 
-  await php.run(`<?php @mkdir('${escapePath(targetDir)}', 0777, true);`);
+  const rawPhp = php._php;
+  rawPhp.mkdirTree(targetDir);
 
   let fileCount = 0;
   for (const [entryPath, entryData] of Object.entries(entries)) {
@@ -281,13 +277,10 @@ async function installViaZipDownload(zipUrl, targetDir, { php, publish }) {
     const fullPath = `${targetDir}/${relativePath}`;
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir && parentDir !== targetDir) {
-      await php.run(`<?php @mkdir('${escapePath(parentDir)}', 0777, true);`);
+      rawPhp.mkdirTree(parentDir);
     }
 
-    const b64 = uint8ToBase64(entryData);
-    await php.run(
-      `<?php file_put_contents('${escapePath(fullPath)}', base64_decode('${b64}'));`,
-    );
+    rawPhp.writeFile(fullPath, entryData);
     fileCount++;
   }
 
@@ -362,16 +355,4 @@ function findCommonPrefix(paths) {
   const candidate = paths[0].substring(0, firstSlash + 1);
   if (paths.every((p) => p.startsWith(candidate))) return candidate;
   return "";
-}
-
-function escapePath(path) {
-  return String(path).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
-
-function uint8ToBase64(bytes) {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
 }

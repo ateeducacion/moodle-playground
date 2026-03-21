@@ -21,7 +21,7 @@ npm install
 # Install deps and build the worker bundle
 make prepare
 
-# Build the default Moodle bundle (VFS image + install snapshot)
+# Build the default Moodle bundle (ZIP + install snapshot)
 make bundle
 
 # Build all Moodle bundles (parallelizable via JOBS=...)

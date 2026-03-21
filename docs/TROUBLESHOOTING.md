@@ -222,7 +222,7 @@ If this symptom reappears after changes to routing or bootstrap:
 
 ### `RangeError: Array buffer allocation failed` — resolved
 
-This was caused by the VFS loader double-buffering (chunk buffers + full output buffer).
+This was caused by the bundle loader double-buffering (chunk buffers + full output buffer).
 Fixed by preallocating a single destination buffer when `content-length` is known.
 
 If this reappears after changes to the loader, inspect `lib/moodle-loader.js`.

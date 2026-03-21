@@ -63,163 +63,6 @@ let reactiveRestartCount = 0;
 // --- DB snapshot for crash recovery state preservation ---
 let snapshot = null;
 
-function normalizeProfileFlags(value) {
-  return new Set(
-    String(value || "")
-      .split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-function installVfsTraceHook() {
-  const flags = normalizeProfileFlags(profile);
-  if (!flags.has("vfs") && !flags.has("vfs-plugins")) {
-    return;
-  }
-
-  const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
-  const webRoot = branchMeta?.webRoot || "/www/moodle";
-  const pluginRoots = [
-    `${webRoot}/mod/`,
-    `${webRoot}/blocks/`,
-    `${webRoot}/theme/`,
-    `${webRoot}/local/`,
-    `${webRoot}/report/`,
-    `${webRoot}/auth/`,
-    `${webRoot}/filter/`,
-    `${webRoot}/grade/export/`,
-    `${webRoot}/grade/import/`,
-    `${webRoot}/grade/report/`,
-    `${webRoot}/message/output/`,
-    `${webRoot}/admin/tool/`,
-    `${webRoot}/user/profile/field/`,
-    `${webRoot}/mod/quiz/report/`,
-    `${webRoot}/plagiarism/`,
-    `${webRoot}/portfolio/`,
-    `${webRoot}/repository/`,
-    `${webRoot}/search/`,
-    `${webRoot}/reportbuilder/source/`,
-    `${webRoot}/payment/gateway/`,
-    `${webRoot}/enrol/`,
-    `${webRoot}/mod/assign/feedback/`,
-    `${webRoot}/mod/assign/submission/`,
-    `${webRoot}/mod/quiz/accessrule/`,
-    `${webRoot}/mod/workshop/allocation/`,
-    `${webRoot}/mod/workshop/assessment/`,
-    `${webRoot}/mod/workshop/form/`,
-    `${webRoot}/question/type/`,
-    `${webRoot}/question/behaviour/`,
-    `${webRoot}/question/format/`,
-    `${webRoot}/lib/editor/`,
-    `${webRoot}/lib/editor/tiny/plugins/`,
-    `${webRoot}/lib/editor/atto/plugins/`,
-    `${webRoot}/lib/editor/tinymce/plugins/`,
-    `${webRoot}/availability/condition/`,
-    `${webRoot}/mod/data/field/`,
-    `${webRoot}/mod/data/preset/`,
-    `${webRoot}/mod/scorm/report/`,
-    `${webRoot}/mod/lti/source/`,
-    `${webRoot}/contentbank/contenttype/`,
-    `${webRoot}/course/format/`,
-    `${webRoot}/customfield/field/`,
-    `${webRoot}/analytics/indicator/`,
-    `${webRoot}/ai/provider/`,
-    `${webRoot}/ai/placement/`,
-    `${webRoot}/cache/lock/`,
-    `${webRoot}/cache/stores/`,
-    `${webRoot}/search/engine/`,
-    `${webRoot}/local/cache/`,
-    `${webRoot}/admin/tool/log/store/`,
-  ];
-  const requestDirPrefix = "/tmp/moodle/requestdir/";
-  const trackedPluginPaths = new Set();
-  const TRACKED_PLUGIN_LIMIT = 200;
-  const trackPluginFromRequestDir = (text) => {
-    if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
-      return;
-    }
-
-    const match = text.match(/\/tmp\/moodle\/requestdir\/[^/\s]+\/[^/\s]+\/[^/\s]+\/([^/\s]+)\//);
-    if (!match?.[1]) {
-      return;
-    }
-
-    const pluginName = match[1];
-    let added = false;
-
-    for (const prefix of pluginRoots) {
-      if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
-        break;
-      }
-      const candidate = `${prefix}${pluginName}`;
-      if (!trackedPluginPaths.has(candidate)) {
-        trackedPluginPaths.add(candidate);
-        added = true;
-      }
-    }
-
-    if (added) {
-      postShell({
-        kind: "trace",
-        detail: `[vfs] tracking plugin path candidates for ${pluginName}`,
-      });
-    }
-  };
-  let traceCount = 0;
-  let traceDropped = false;
-  const TRACE_LIMIT = 10000;
-
-  globalThis.__moodleFsDebugHook = (detail) => {
-    const text = String(detail || "");
-    if (flags.has("vfs-plugins")) {
-      if (text.includes(requestDirPrefix)) {
-        trackPluginFromRequestDir(text);
-      }
-
-      let matchesTrackedPlugin = false;
-      for (const prefix of trackedPluginPaths) {
-        if (text.includes(prefix)) {
-          matchesTrackedPlugin = true;
-          break;
-        }
-      }
-      const matchesInstallScratch =
-        text.includes(requestDirPrefix) ||
-        text.includes("/_temp_") ||
-        text.includes("cross-mount rename");
-
-      if (!matchesTrackedPlugin && !matchesInstallScratch) {
-        return;
-      }
-    }
-
-    if (traceCount >= TRACE_LIMIT) {
-      if (!traceDropped) {
-        traceDropped = true;
-        postShell({
-          kind: "trace",
-          detail: `[vfs] trace limit reached (${TRACE_LIMIT}); suppressing further VFS logs`,
-        });
-      }
-      return;
-    }
-
-    traceCount += 1;
-    postShell({
-      kind: "trace",
-      detail: `[vfs] ${text}`,
-    });
-  };
-
-  postShell({
-    kind: "trace",
-    detail: `[vfs] tracing enabled with profile=${profile}`,
-  });
-}
-
-installVfsTraceHook();
-
 function postShell(message) {
   const channel = new BroadcastChannel(createShellChannel(scopeId));
   channel.postMessage(message);
@@ -400,28 +243,25 @@ async function reLoginAfterRestore(php, webRoot) {
  * doesn't know about them. Reset the cache and run the upgrade so the plugins
  * are discovered and registered.
  */
-async function reRegisterPluginsAfterRestore(php, webRoot) {
+async function reRegisterPluginsAfterRestore(php, webRoot, restoredPluginDirs = []) {
   try {
-    // First, verify plugin files are visible to PHP
-    const verifyCode = `<?php
-$dir = '${webRoot}/mod/exeweb';
-$exists = is_dir($dir);
-$version = file_exists($dir . '/version.php');
-$files = $exists ? scandir($dir) : [];
-echo json_encode(['dir_exists' => $exists, 'version_exists' => $version, 'files' => $files]);
-`;
-    try {
-      const verifyResult = await php.run(verifyCode);
-      postShell({
-        kind: "trace",
-        detail: `[snapshot] plugin verify: ${verifyResult?.text || "no output"}`,
-      });
-    } catch (e) {
-      postShell({
-        kind: "trace",
-        detail: `[snapshot] plugin verify failed: ${e.message}`,
-      });
-    }
+    // Build PHP code to refresh the component cache for each restored plugin
+    const webRootPrefix = webRoot.endsWith("/") ? webRoot : `${webRoot}/`;
+    const refreshCalls = restoredPluginDirs
+      .map((dir) => {
+        if (!dir.startsWith(webRootPrefix)) return "";
+        const relPath = dir.slice(webRootPrefix.length);
+        const pluginName = relPath.split("/").pop();
+        const typeDir = relPath.slice(0, relPath.lastIndexOf("/"));
+        const pluginType = Object.entries(PLUGIN_TYPE_DIRS).find(
+          ([, d]) => d === typeDir,
+        )?.[0];
+        if (!pluginType || !pluginName) return "";
+        const safeDir = dir.replaceAll("'", "\\'");
+        return `\\core_component::playground_refresh_installed_plugin_cache('${pluginType}_${pluginName}', '${safeDir}');`;
+      })
+      .filter(Boolean)
+      .join("\n");
 
     const code = `<?php
 define('CLI_SCRIPT', true);
@@ -430,10 +270,12 @@ require_once($CFG->libdir . '/upgradelib.php');
 require_once($CFG->libdir . '/clilib.php');
 require_once($CFG->libdir . '/adminlib.php');
 
+${refreshCalls}
 \\core_component::reset();
 if (function_exists('purge_all_caches')) {
     purge_all_caches();
 }
+set_config('allversionshash', '');
 
 try {
     if (moodle_needs_upgrading()) {
@@ -711,7 +553,7 @@ async function getRuntimeState() {
       // If plugin files were restored, re-register them with Moodle
       // (reset component cache + run upgrade) before re-login.
       if (restoreResult?.pluginsRestored) {
-        await reRegisterPluginsAfterRestore(php, webRoot);
+        await reRegisterPluginsAfterRestore(php, webRoot, restoreResult.restoredPluginDirs);
       }
       // The restore overwrites the DB, invalidating the auto-login session
       // that bootstrap just created. Re-create it on the restored DB.
@@ -792,10 +634,22 @@ function installBridgeListener() {
         try {
           const currentState = await runtimeStatePromise;
           if (currentState?.php?._php) {
+            postShell({
+              kind: "trace",
+              detail: `[runtime] hydrating snapshot before runtime reset (dbPath=${buildDbPath()})`,
+            });
             await snapshot.hydrate(currentState.php, buildDbPath());
+          } else {
+            postShell({
+              kind: "trace",
+              detail: `[runtime] no PHP instance available for snapshot hydration`,
+            });
           }
-        } catch {
-          // Runtime may be too broken to read — proceed without state.
+        } catch (hydrateErr) {
+          postShell({
+            kind: "error",
+            detail: `[runtime] snapshot hydration failed: ${hydrateErr.message}`,
+          });
         }
 
         const didReset = resetRuntime(`fatal WASM error: ${error.message}`);

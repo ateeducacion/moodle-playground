@@ -21,11 +21,11 @@ Constraints followed during the migration:
 
 ## Resulting runtime model
 
-- readonly Moodle core is mounted at `/www/moodle`
+- Moodle core is extracted from a prebuilt ZIP bundle into writable MEMFS at `/www/moodle`
 - mutable state lives under `/persist`
 - `moodledata` lives at `/persist/moodledata`
 - the SQLite database file lives at `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
-- `config.php`, bootstrap helpers, and a few patched PHP files are written into the writable overlay at boot
+- `config.php`, bootstrap helpers, and a few patched PHP files are written into MEMFS at boot
 
 ## Main migration changes
 
@@ -135,7 +135,7 @@ Main file:
 
 What it does now:
 
-- mounts the readonly VFS bundle
+- extracts the Moodle ZIP bundle into writable MEMFS
 - writes runtime files such as:
   - `/www/moodle/config.php`
   - `/www/moodle/__install_database.php`
@@ -194,7 +194,7 @@ What changed:
 
 This was needed because Moodle reads normal CGI server variables and emitted warnings when they were missing.
 
-## Readonly bundle loading fix
+## Bundle loading fix
 
 Main file:
 
@@ -202,13 +202,18 @@ Main file:
 
 Problem:
 
-- the readonly VFS image is large
+- the Moodle bundle is large
 - the old `fetchWithProgress()` implementation kept all chunks and then allocated a second full buffer
 - that doubled peak memory and could fail with `RangeError: Array buffer allocation failed`
 
 Fix:
 
 - when `content-length` is known, the loader now preallocates a single `Uint8Array` and writes chunks into it directly
+
+> **Note (March 2026)**: The project previously used a custom readonly VFS overlay
+> (`lib/vfs-mount.js`, `.vfs.bin` + `.vfs.index.json`). This has been replaced by
+> extracting a prebuilt ZIP bundle directly into writable Emscripten MEMFS. The VFS
+> overlay code and `scripts/build-vfs-image.mjs` have been removed.
 
 ## Current patch inventory
 
