@@ -1,6 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
+import { isFatalWasmError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import {
   getBranchMetadata,
@@ -34,8 +35,33 @@ let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
 let activeBlueprint = null;
 let activeRuntimeConfig = null;
+let activeWebRoot = "/www/moodle";
 let phpInfoCapturePromise = null;
 let automaticPhpInfoAttempted = false;
+
+// --- Runtime rotation state ---
+// The PHP WASM runtime can crash with "memory access out of bounds",
+// "unreachable", or resource exhaustion ("No file descriptors available").
+//
+// Recovery strategy (reactive only, inspired by WordPress Playground):
+//   1. Reactive rotation detects fatal WASM errors (isFatalWasmError) and
+//      discards the corrupted runtime, then replays idempotent requests once.
+//   2. Bootstrap crashes reset the runtime promise so the next request
+//      triggers a clean bootstrap on a fresh WASM instance.
+//   3. Anti-loop guard: if the runtime crashes before processing
+//      MIN_REQUESTS_BEFORE_RESTART requests, it is likely a fundamental bug
+//      — do not restart (avoids infinite boot-crash-boot loops).
+//
+// No preventive rotation is performed. WordPress Playground does not rotate
+// preventively either; the correct fix for memory leaks is root-cause, not
+// periodic restarts that cost 3-8s each.
+const MAX_REACTIVE_RESTARTS = 20;
+const MIN_REQUESTS_BEFORE_RESTART = 10;
+let requestCount = 0;
+let reactiveRestartCount = 0;
+
+// --- DB snapshot for crash recovery state preservation ---
+let snapshot = null;
 
 function normalizeProfileFlags(value) {
   return new Set(
@@ -108,7 +134,12 @@ function installVfsTraceHook() {
   ];
   const requestDirPrefix = "/tmp/moodle/requestdir/";
   const trackedPluginPaths = new Set();
+  const TRACKED_PLUGIN_LIMIT = 200;
   const trackPluginFromRequestDir = (text) => {
+    if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
+      return;
+    }
+
     const match = text.match(/\/tmp\/moodle\/requestdir\/[^/\s]+\/[^/\s]+\/[^/\s]+\/([^/\s]+)\//);
     if (!match?.[1]) {
       return;
@@ -118,6 +149,9 @@ function installVfsTraceHook() {
     let added = false;
 
     for (const prefix of pluginRoots) {
+      if (trackedPluginPaths.size >= TRACKED_PLUGIN_LIMIT) {
+        break;
+      }
       const candidate = `${prefix}${pluginName}`;
       if (!trackedPluginPaths.has(candidate)) {
         trackedPluginPaths.add(candidate);
@@ -192,6 +226,8 @@ function postShell(message) {
   channel.close();
 }
 
+snapshot = createSnapshotManager({ postShell });
+
 function traceRuntimeSelection(stage, detail) {
   if (!shouldTraceRuntimeSelection({ debug, profile })) {
     return;
@@ -205,6 +241,235 @@ function traceRuntimeSelection(stage, detail) {
 
 function respond(payload) {
   bridgeChannel.postMessage(payload);
+}
+
+/**
+ * Build the DB file path from scope and runtime IDs.
+ */
+function buildDbPath() {
+  const scope = String(scopeId || "default").replace(/[^A-Za-z0-9_]/gu, "_");
+  const runtime = String(runtimeId || "php").replace(/[^A-Za-z0-9_]/gu, "_");
+  return `/persist/moodledata/moodle_${scope}_${runtime}.sq3.php`;
+}
+
+/**
+ * Frankenstyle plugin type → directory mapping under the webroot.
+ * Used to resolve plugin file paths from Moodle's installzipcomponent param.
+ */
+const PLUGIN_TYPE_DIRS = {
+  mod: "mod",
+  block: "blocks",
+  local: "local",
+  theme: "theme",
+  auth: "auth",
+  enrol: "enrol",
+  filter: "filter",
+  format: "course/format",
+  report: "report",
+  tool: "admin/tool",
+  editor: "lib/editor",
+  atto: "lib/editor/atto/plugins",
+  tiny: "lib/editor/tiny/plugins",
+  qtype: "question/type",
+  qbehaviour: "question/behaviour",
+  gradeexport: "grade/export",
+  gradeimport: "grade/import",
+  gradereport: "grade/report",
+  repository: "repository",
+  plagiarism: "plagiarism",
+  availability: "availability/condition",
+  calendartype: "calendar/type",
+  message: "message/output",
+  profilefield: "user/profile/field",
+  datafield: "mod/data/field",
+  assignsubmission: "mod/assign/submission",
+  assignfeedback: "mod/assign/feedback",
+  booktool: "mod/book/tool",
+  quizaccess: "mod/quiz/accessrule",
+  ltisource: "mod/lti/source",
+};
+
+/**
+ * Detect plugin installations from HTTP responses.
+ * When Moodle's native install addon UI succeeds, it redirects with
+ * installzipcomponent=TYPE_NAME in the URL. We extract the plugin type
+ * and name to track its directory for crash recovery.
+ *
+ * @param {object} serializedRequest - The original request
+ * @param {Response} response - The PHP response
+ * @param {string} webRoot - The Moodle webroot path (e.g. "/www/moodle")
+ */
+function detectPluginInstall(serializedRequest, response, webRoot) {
+  const url = serializedRequest.url || "";
+  if (!url.includes("/admin/tool/installaddon/")) return;
+
+  // Strategy 1: Check GET requests to installaddon that have installzipcomponent
+  // (this is the redirect target after a successful plugin upload)
+  if (url.includes("installzipcomponent=")) {
+    const match = url.match(/installzipcomponent=([a-z]+)_([a-z0-9_]+)/i);
+    if (match) {
+      const pluginType = match[1];
+      const pluginName = match[2];
+      const typeDir = PLUGIN_TYPE_DIRS[pluginType];
+      if (typeDir) {
+        snapshot.trackPluginDir(`${webRoot}/${typeDir}/${pluginName}`);
+      }
+    }
+    return;
+  }
+
+  // Strategy 2: Check POST redirects with Location header containing installzipcomponent
+  const method = String(serializedRequest.method || "").toUpperCase();
+  if (method !== "POST") return;
+  const status = response.status || 0;
+  if (status < 300 || status >= 400) return;
+
+  let location = "";
+  try {
+    if (response.headers?.get) {
+      location = response.headers.get("location") || "";
+    }
+  } catch {
+    // Headers might not be available
+  }
+  if (!location) return;
+
+  const match = location.match(/installzipcomponent=([a-z]+)_([a-z0-9_]+)/i);
+  if (!match) return;
+
+  const pluginType = match[1];
+  const pluginName = match[2];
+  const typeDir = PLUGIN_TYPE_DIRS[pluginType];
+  if (!typeDir) return;
+
+  const pluginDir = `${webRoot}/${typeDir}/${pluginName}`;
+  snapshot.trackPluginDir(pluginDir);
+}
+
+/**
+ * Re-create the admin session after DB snapshot restore.
+ * The restore overwrites the DB file (which contains the session table),
+ * invalidating the auto-login session that bootstrap just created.
+ * This creates a fresh session on top of the restored DB state.
+ */
+async function reLoginAfterRestore(php, webRoot) {
+  const AUTO_LOGIN_PATH = `${webRoot}/__playground_autologin.php`;
+  try {
+    const autoLoginPhp = [
+      "<?php",
+      "define('NO_OUTPUT_BUFFERING', true);",
+      "require(__DIR__ . '/config.php');",
+      "$admin = get_admin();",
+      "complete_user_login($admin);",
+      "echo json_encode(['ok' => true, 'user' => $admin->username]);",
+    ].join("\n");
+    await php.writeFile(
+      AUTO_LOGIN_PATH,
+      new TextEncoder().encode(autoLoginPhp),
+    );
+    const loginResponse = await php.request(
+      new Request("http://localhost:8080/__playground_autologin.php"),
+    );
+    const loginText = await loginResponse.text();
+    if (loginResponse.status === 200 && loginText.includes('"ok"')) {
+      postShell({
+        kind: "trace",
+        detail: "[snapshot] re-created admin session after DB restore",
+      });
+    } else {
+      postShell({
+        kind: "error",
+        detail: `[snapshot] re-login returned unexpected response: ${loginText.slice(0, 200)}`,
+      });
+    }
+  } catch (err) {
+    postShell({
+      kind: "error",
+      detail: `[snapshot] re-login failed: ${err.message}`,
+    });
+  }
+  try {
+    await php.run(`<?php @unlink('${AUTO_LOGIN_PATH}');`);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/**
+ * After restoring plugin files onto a fresh runtime, Moodle's component cache
+ * doesn't know about them. Reset the cache and run the upgrade so the plugins
+ * are discovered and registered.
+ */
+async function reRegisterPluginsAfterRestore(php, webRoot) {
+  try {
+    // First, verify plugin files are visible to PHP
+    const verifyCode = `<?php
+$dir = '${webRoot}/mod/exeweb';
+$exists = is_dir($dir);
+$version = file_exists($dir . '/version.php');
+$files = $exists ? scandir($dir) : [];
+echo json_encode(['dir_exists' => $exists, 'version_exists' => $version, 'files' => $files]);
+`;
+    try {
+      const verifyResult = await php.run(verifyCode);
+      postShell({
+        kind: "trace",
+        detail: `[snapshot] plugin verify: ${verifyResult?.text || "no output"}`,
+      });
+    } catch (e) {
+      postShell({
+        kind: "trace",
+        detail: `[snapshot] plugin verify failed: ${e.message}`,
+      });
+    }
+
+    const code = `<?php
+define('CLI_SCRIPT', true);
+require('${webRoot}/config.php');
+require_once($CFG->libdir . '/upgradelib.php');
+require_once($CFG->libdir . '/clilib.php');
+require_once($CFG->libdir . '/adminlib.php');
+
+\\core_component::reset();
+if (function_exists('purge_all_caches')) {
+    purge_all_caches();
+}
+
+try {
+    if (moodle_needs_upgrading()) {
+        upgrade_noncore(true);
+    }
+    echo json_encode(['ok' => true]);
+} catch (\\Throwable $e) {
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+}
+`;
+    const result = await php.run(code);
+    const text = result?.text || "";
+    const errors = result?.errors || "";
+    if (errors) {
+      postShell({
+        kind: "trace",
+        detail: `[snapshot] plugin re-register PHP errors: ${errors.slice(0, 300)}`,
+      });
+    }
+    if (text.includes('"ok":true')) {
+      postShell({
+        kind: "trace",
+        detail: "[snapshot] re-registered plugins after restore",
+      });
+    } else {
+      postShell({
+        kind: "trace",
+        detail: `[snapshot] plugin re-register result: ${text.slice(0, 200)}`,
+      });
+    }
+  } catch (err) {
+    postShell({
+      kind: "error",
+      detail: `[snapshot] plugin re-register failed: ${err.message}`,
+    });
+  }
 }
 
 async function capturePhpInfoHtml(runtimeConfig, reason = "manual") {
@@ -307,24 +572,38 @@ function buildLoadingResponse(message, status = 503) {
   );
 }
 
-function formatErrorDetail(error) {
-  if (!error) {
-    return "Unknown error";
+function resetRuntime(reason) {
+  if (reactiveRestartCount >= MAX_REACTIVE_RESTARTS) {
+    postShell({
+      kind: "error",
+      detail: `[runtime] restart limit reached (${reactiveRestartCount}/${MAX_REACTIVE_RESTARTS}), not restarting. Reason: ${reason}`,
+    });
+    return false;
   }
 
-  if (typeof error === "string") {
-    return error;
+  if (requestCount < MIN_REQUESTS_BEFORE_RESTART) {
+    postShell({
+      kind: "error",
+      detail: `[runtime] crash after only ${requestCount} requests (minimum ${MIN_REQUESTS_BEFORE_RESTART}), likely a fundamental bug — not restarting. Reason: ${reason}`,
+    });
+    return false;
   }
 
-  if (error instanceof Error) {
-    return String(error.stack || error.message || error);
-  }
+  reactiveRestartCount += 1;
+  requestCount = 0;
+  runtimeStatePromise = null;
+  phpInfoCapturePromise = null;
+  automaticPhpInfoAttempted = false;
+  activeRuntimeConfig = null;
 
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return String(error);
-  }
+  postShell({
+    kind: "progress",
+    title: "Runtime rotation",
+    detail: `[runtime] restart (${reactiveRestartCount}/${MAX_REACTIVE_RESTARTS}): ${reason}`,
+    progress: 0.01,
+  });
+
+  return true;
 }
 
 async function getRuntimeState() {
@@ -346,6 +625,7 @@ async function getRuntimeState() {
     activeRuntimeConfig = runtime;
     const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
     const webRoot = branchMeta?.webRoot || "/www/moodle";
+    activeWebRoot = webRoot;
     traceRuntimeSelection(
       "resolved",
       `runtimeId=${runtimeId} php=${phpVersion} moodleBranch=${moodleBranch} runtimeConfig=${runtime.id}`,
@@ -396,12 +676,21 @@ async function getRuntimeState() {
         moodleBranch,
         profile,
         webRoot,
+        onPluginInstalled: (dirPath) => snapshot.trackPluginDir(dirPath),
       });
     } catch (error) {
       if (!automaticPhpInfoAttempted) {
         automaticPhpInfoAttempted = true;
         void publishPhpInfo(runtime, "bootstrap-error");
       }
+
+      // Clear the cached runtimeStatePromise so the next caller of
+      // getRuntimeState() creates a fresh runtime instead of re-throwing
+      // this cached rejection.  The actual restart-count bookkeeping and
+      // retry decision live in the bridge listener (installBridgeListener),
+      // not here, to avoid double-counting restarts.
+      runtimeStatePromise = null;
+
       throw error;
     }
     const bootstrapMs = Math.round(performance.now() - t2);
@@ -413,6 +702,23 @@ async function getRuntimeState() {
       detail: `Config: ${configMs}ms | PHP refresh: ${refreshMs}ms | Bootstrap: ${bootstrapMs}ms | Total: ${totalMs}ms`,
       progress: 0.95,
     });
+
+    // Restore saved DB snapshot if recovering from a crash.
+    // This overwrites the fresh install snapshot with the pre-crash DB
+    // that contains all courses, users, and config changes.
+    if (snapshot.hasPendingRestore) {
+      const restoreResult = await snapshot.restore(php);
+      // If plugin files were restored, re-register them with Moodle
+      // (reset component cache + run upgrade) before re-login.
+      if (restoreResult?.pluginsRestored) {
+        await reRegisterPluginsAfterRestore(php, webRoot);
+      }
+      // The restore overwrites the DB, invalidating the auto-login session
+      // that bootstrap just created. Re-create it on the restored DB.
+      if (restoreResult?.restored) {
+        await reLoginAfterRestore(php, webRoot);
+      }
+    }
 
     postShell({
       kind: "ready",
@@ -426,6 +732,24 @@ async function getRuntimeState() {
   return runtimeStatePromise;
 }
 
+/**
+ * Execute a single HTTP request against the PHP runtime, returning the
+ * Response object.  Throws on fatal errors.
+ */
+async function executePhpRequest(state, serializedRequest) {
+  return state.php.request(deserializeRequest(serializedRequest));
+}
+
+/** Send an error page back through the bridge channel. */
+async function respondError(id, message, status) {
+  const response = buildLoadingResponse(message, status);
+  respond({
+    kind: "http-response",
+    id,
+    response: await serializeResponse(response),
+  });
+}
+
 function installBridgeListener() {
   bridgeChannel.addEventListener("message", (event) => {
     const data = event.data;
@@ -435,26 +759,90 @@ function installBridgeListener() {
     }
 
     requestQueue = requestQueue.then(async () => {
+      // Safety net: if this request was externally re-dispatched with
+      // _retried=true, skip the auto-retry path to prevent loops.
+      // In the current implementation, retry happens in-handler (below),
+      // so this is always false — but it guards against future changes.
+      const isRetry = Boolean(data._retried);
+
       try {
+        requestCount += 1;
         const state = await getRuntimeState();
-        const response = await state.php.request(deserializeRequest(data.request));
+        const response = await executePhpRequest(state, data.request);
+        // Detect plugin installations from Moodle's native admin UI
+        detectPluginInstall(data.request, response, activeWebRoot);
         respond({
           kind: "http-response",
           id: data.id,
           response: await serializeResponse(response),
         });
       } catch (error) {
-        const detail = formatErrorDetail(error);
-        const response = buildLoadingResponse(detail, 500);
-        respond({
-          kind: "http-response",
-          id: data.id,
-          response: await serializeResponse(response),
-        });
+        if (!isFatalWasmError(error)) {
+          // Non-fatal error: return 500 without runtime rotation.
+          const detail = formatErrorDetail(error);
+          await respondError(data.id, detail, 500);
+          postShell({ kind: "error", detail });
+          return;
+        }
+
+        // --- Fatal WASM error path ---
+        // Save the DB file before destroying the runtime.
+        // MEMFS lives in JS heap so readFileAsBuffer works even with
+        // a corrupted WASM linear memory.
+        try {
+          const currentState = await runtimeStatePromise;
+          if (currentState?.php?._php) {
+            await snapshot.hydrate(currentState.php, buildDbPath());
+          }
+        } catch {
+          // Runtime may be too broken to read — proceed without state.
+        }
+
+        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
+        const canReplay = isSafeToReplay(data.request);
+
+        // If we already retried this request, or the request is not
+        // idempotent, or we hit the restart limit — give up.
+        if (isRetry || !canReplay || !didReset) {
+          const detail = formatErrorDetail(error);
+          const status = didReset || isRetry ? 503 : 500;
+          const message = isRetry
+            ? `Runtime crashed again on retry. Manual reload required.\n\n${detail}`
+            : !canReplay
+              ? `Runtime restarting after crash. Non-idempotent request was not retried.\n\n${detail}`
+              : `Runtime restart limit reached.\n\n${detail}`;
+          await respondError(data.id, message, status);
+          return;
+        }
+
+        // Automatic retry: boot a fresh runtime and replay the safe request.
         postShell({
-          kind: "error",
-          detail,
+          kind: "progress",
+          title: "Crash recovery",
+          detail: "[runtime] replaying request on fresh runtime…",
+          progress: 0.02,
         });
+
+        try {
+          const freshState = await getRuntimeState();
+          const retryResponse = await executePhpRequest(freshState, data.request);
+          respond({
+            kind: "http-response",
+            id: data.id,
+            response: await serializeResponse(retryResponse),
+          });
+        } catch (retryError) {
+          // The retry itself failed — report but don't loop.
+          if (isFatalWasmError(retryError)) {
+            resetRuntime(`fatal WASM error on retry: ${retryError.message}`);
+          }
+          const detail = formatErrorDetail(retryError);
+          await respondError(
+            data.id,
+            `Runtime crashed again on retry. Manual reload required.\n\n${detail}`,
+            503,
+          );
+        }
       }
     });
   });

@@ -2003,6 +2003,7 @@ export async function bootstrapMoodle({
   origin,
   moodleBranch,
   webRoot: webRootParam,
+  onPluginInstalled,
 }) {
   const selection = resolveRuntimeSelection({ runtimeId, moodleBranch });
   const resolvedRuntimeId = selection.runtimeId;
@@ -2461,6 +2462,7 @@ export async function bootstrapMoodle({
         webRoot,
         scopeId,
         runtimeId: resolvedRuntimeId,
+        onPluginInstalled,
       });
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;

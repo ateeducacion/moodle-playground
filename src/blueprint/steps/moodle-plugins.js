@@ -66,6 +66,7 @@ async function handleInstallMoodlePlugin(step, context) {
   const targetDir = resolvePluginDir(step.pluginType, pluginName);
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade(context);
+  context.onPluginInstalled?.(targetDir);
 }
 
 async function handleInstallTheme(step, context) {
@@ -84,6 +85,7 @@ async function handleInstallTheme(step, context) {
   const targetDir = resolvePluginDir("theme", pluginName);
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade(context);
+  context.onPluginInstalled?.(targetDir);
 }
 
 function resolvePluginDir(pluginType, pluginName) {
