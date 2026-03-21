@@ -14,7 +14,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Frontend
 
-- [`app.js`](/Users/ernesto/Downloads/moodle-playground/app.js)
+- [`app.js`](https://github.com/ateeducacion/moodle-playground/blob/main/app.js)
   - registra y re-registra el Service Worker en cada entrada;
   - arranca el bootstrap;
   - muestra logs de progreso y errores;
@@ -22,7 +22,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Service Worker
 
-- [`sw.js`](/Users/ernesto/Downloads/moodle-playground/sw.js)
+- [`sw.js`](https://github.com/ateeducacion/moodle-playground/blob/main/sw.js)
   - se re-registra con cache-busting;
   - intercepta `/moodle/*`;
   - reenvía las requests al worker PHP por `BroadcastChannel`;
@@ -31,7 +31,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### PHP runtime
 
-- [`php-worker.js`](/Users/ernesto/Downloads/moodle-playground/php-worker.js)
+- [`php-worker.js`](https://github.com/ateeducacion/moodle-playground/blob/main/php-worker.js)
   - ejecuta `PhpCgiWorker` en un `Dedicated Worker`, no en el Service Worker;
   - hace bootstrap de Moodle;
   - extrae el bundle ZIP de Moodle en MEMFS;
@@ -41,7 +41,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Carga de Moodle
 
-- [`lib/moodle-loader.js`](/Users/ernesto/Downloads/moodle-playground/lib/moodle-loader.js)
+- [`lib/moodle-loader.js`](https://github.com/ateeducacion/moodle-playground/blob/main/lib/moodle-loader.js)
   - carga `assets/manifests/latest.json`;
   - prioriza el bundle ZIP si existe;
   - cachea bundle e índice en Cache Storage;
@@ -49,7 +49,7 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Extracción del bundle en MEMFS
 
-- [`lib/moodle-loader.js`](/Users/ernesto/Downloads/moodle-playground/lib/moodle-loader.js)
+- [`lib/moodle-loader.js`](https://github.com/ateeducacion/moodle-playground/blob/main/lib/moodle-loader.js)
   - `writeEntriesToPhp()` extrae el ZIP directamente en Emscripten MEMFS usando
     operaciones síncronas del FS (`mkdirTree` + `writeFile`) con deduplicación
     de directorios ancestro para rendimiento (~30k archivos en ~2s).
@@ -60,25 +60,25 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Build
 
-- [`scripts/build-moodle-bundle.sh`](/Users/ernesto/Downloads/moodle-playground/scripts/build-moodle-bundle.sh)
+- [`scripts/build-moodle-bundle.sh`](https://github.com/ateeducacion/moodle-playground/blob/main/scripts/build-moodle-bundle.sh)
   - descarga o reutiliza la release oficial;
   - aplica parches offline al árbol fuente;
   - genera el ZIP de Moodle;
   - genera el manifiesto final.
 
-- [`scripts/generate-manifest.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/generate-manifest.mjs)
+- [`scripts/generate-manifest.mjs`](https://github.com/ateeducacion/moodle-playground/blob/main/scripts/generate-manifest.mjs)
   - genera `assets/manifests/latest.json` con hashes, tamaños y paths.
 
 ### Dependencias runtime
 
-- [`scripts/sync-browser-deps.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/sync-browser-deps.mjs)
+- [`scripts/sync-browser-deps.mjs`](https://github.com/ateeducacion/moodle-playground/blob/main/scripts/sync-browser-deps.mjs)
   - copia dependencias browser a `vendor/`;
   - parchea rutas de `moduleRoot` para que los `.so` se resuelvan bien;
   - parchea `PhpCgiBase.js` para completar variables CGI y corregir `SCRIPT_NAME`.
 
 ### Parches a Moodle
 
-- [`scripts/patch-moodle-source.sh`](/Users/ernesto/Downloads/moodle-playground/scripts/patch-moodle-source.sh)
+- [`scripts/patch-moodle-source.sh`](https://github.com/ateeducacion/moodle-playground/blob/main/scripts/patch-moodle-source.sh)
   - añade `require_once` para `response_aware_exception.php` en `lib/dmllib.php`;
   - añade `require_once` para `lib/classes/session/manager.php` en `install.php`;
   - añade `require_once(__DIR__.'/loader_interface.php')` en `cache/classes/cache.php`.
@@ -207,7 +207,7 @@ Ahora mismo el problema parece estar dentro de:
 - se añadió una sanity check tras cargar el bundle para verificar `install.php`;
 - se aumentó el timeout del bridge a 60 segundos;
 - se serializaron las requests HTTP al runtime PHP;
-- se bajó `max_execution_time` a 15s en [`lib/config-template.js`](/Users/ernesto/Downloads/moodle-playground/lib/config-template.js) para intentar obtener un error PHP real antes que un timeout del bridge.
+- se bajó `max_execution_time` a 15s en [`lib/config-template.js`](https://github.com/ateeducacion/moodle-playground/blob/main/lib/config-template.js) para intentar obtener un error PHP real antes que un timeout del bridge.
 
 ## Comandos útiles
 
