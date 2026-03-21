@@ -12,6 +12,7 @@ import {
   resolveRuntimeSelection,
   shouldTraceRuntimeSelection,
 } from "../shared/version-resolver.js";
+import { createAdminAccountSyncPhp } from "./admin-account.js";
 import {
   ensureDir,
   readJsonFile,
@@ -666,7 +667,7 @@ echo 'stage:' . $stage . ':ok' . PHP_EOL;
 if ($stage === 'themes') {
     echo get_string('cliinstallfinished', 'install') . PHP_EOL;
 }
-`;
+  `;
 }
 
 function createConfigNormalizerPhp(effectiveDebug = 0) {
@@ -1864,6 +1865,22 @@ async function runConfigNormalizer(php, webRoot) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
+async function runAdminAccountSync(php, effectiveConfig) {
+  const output = await php.run(
+    createAdminAccountSyncPhp(effectiveConfig.admin),
+  );
+  if (output?.errors?.trim()) {
+    throw new Error(output.errors.trim());
+  }
+  const payload = output?.text?.trim() || "";
+  const jsonStart = payload.indexOf("{");
+  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
+  if (!jsonPayload) {
+    throw new Error("Admin account sync returned an empty response.");
+  }
+  return JSON.parse(jsonPayload);
+}
+
 async function runAdminDefaultsSeeder(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
@@ -2238,6 +2255,15 @@ export async function bootstrapMoodle({
     });
 
     if (snapshotLoaded) {
+      publish(
+        "Syncing configured admin account into the install snapshot.",
+        0.887,
+      );
+      const syncedAdmin = await runAdminAccountSync(php, effectiveConfig);
+      publish(
+        `Snapshot admin account synced for ${syncedAdmin.username}.`,
+        0.889,
+      );
       await writeJsonFile(php, installStatePath, {
         ...manifestState,
         dbName,

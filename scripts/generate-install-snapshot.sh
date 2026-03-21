@@ -130,7 +130,7 @@ INSTALL_LOG="$TMPROOT/install.log"
 ${PHP_BIN:-php} -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/install_database.php" \
   --agree-license \
   --adminuser=admin \
-  --adminpass=admin \
+  --adminpass=password \
   --adminemail=admin@example.com \
   --fullname="Moodle Playground" \
   --shortname="Playground" \
