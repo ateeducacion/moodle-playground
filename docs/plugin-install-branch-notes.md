@@ -15,15 +15,15 @@ Compared with `main`, this branch hardens the plugin install/runtime path in a
 few areas that were previously fragile:
 
 - **Writable runtime patches**
-  Runtime overrides in `src/runtime/bootstrap.js` are now applied directly in
-  writable MEMFS. (Previously the Moodle core was mounted as a readonly VFS
-  overlay and runtime patches had to use a separate writable layer.)
+  Runtime overrides in `src/runtime/bootstrap.js` are applied directly in
+  writable MEMFS. All Moodle files are writable, so plugins can be extracted
+  and patched without restrictions.
 
-- **Plugin extraction no longer corrupts PHP files**
-  The previous VFS overlay (`lib/vfs-mount.js`) had a bug where cross-mount copy
-  operations did not respect Emscripten `usedBytes`, embedding `0x00` bytes in
-  installed plugin files. This is no longer an issue because the Moodle core now
-  lives in writable MEMFS (the VFS overlay has been removed).
+- **Crash recovery preserves plugins and user data**
+  When the PHP WASM runtime crashes (OOM, file descriptor exhaustion), the
+  worker snapshots the DB, plugin files, and user uploads from MEMFS before
+  destroying the runtime. After a fresh bootstrap, the snapshot is restored
+  and plugins are re-registered with Moodle's component cache.
 
 - **Alternative component cache is refreshed after plugin install**
   Runtime patches to Moodle's `core_component` and `plugin_manager` update the
@@ -115,12 +115,11 @@ These are the main things the current branch still depends on.
 
 - **Moodle core in writable MEMFS**
   All files under `/www/moodle` are writable in MEMFS. Plugins can be extracted
-  directly into the correct subdirectory. (Previously the core was a readonly VFS
-  overlay and only files explicitly exposed through a writable layer could be modified.)
+  directly into the correct subdirectory.
 
 - **The runtime is ephemeral**
-  Installed plugins are not durable across full reloads unless they are part of a
-  blueprint or otherwise reprovisioned during boot.
+  Installed plugins survive PHP runtime crashes (via the crash recovery snapshot)
+  but are lost on full page reload unless they are part of a blueprint.
 
 ## Current Caveats
 
@@ -160,8 +159,9 @@ When testing plugin support in this branch:
 The main implementation points behind this branch work are:
 
 - [`src/runtime/bootstrap.js`](../src/runtime/bootstrap.js)
+- [`src/runtime/crash-recovery.js`](../src/runtime/crash-recovery.js)
 - [`src/runtime/config-template.js`](../src/runtime/config-template.js)
 - [`php-worker.js`](../php-worker.js)
-- ~~`lib/vfs-mount.js`~~ (removed — VFS overlay replaced by MEMFS extraction)
+- [`lib/moodle-loader.js`](../lib/moodle-loader.js)
 - [`scripts/generate-install-snapshot.sh`](../scripts/generate-install-snapshot.sh)
 

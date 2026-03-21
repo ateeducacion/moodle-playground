@@ -210,11 +210,6 @@ Fix:
 
 - when `content-length` is known, the loader now preallocates a single `Uint8Array` and writes chunks into it directly
 
-> **Note (March 2026)**: The project previously used a custom readonly VFS overlay
-> (`lib/vfs-mount.js`, `.vfs.bin` + `.vfs.index.json`). This has been replaced by
-> extracting a prebuilt ZIP bundle directly into writable Emscripten MEMFS. The VFS
-> overlay code and `scripts/build-vfs-image.mjs` have been removed.
-
 ## Current patch inventory
 
 These files contain the long-lived Moodle-side prototype patches:

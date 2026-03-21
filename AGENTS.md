@@ -130,10 +130,16 @@ all encryption needs.
   - Owns the PHP runtime instance for a scope
   - Boots Moodle and serves HTTP requests through the bridge
 - `src/runtime/bootstrap.js`
-  - Prepares storage
-  - Mounts the readonly Moodle bundle
-  - Writes `config.php`
+  - Extracts the Moodle ZIP bundle into writable MEMFS
+  - Writes `config.php` and runtime helper scripts
+  - Applies runtime patches to Moodle PHP sources
   - Loads a pre-built install snapshot (or falls back to full CLI install)
+  - Executes blueprint steps (courses, users, plugins, etc.)
+- `src/runtime/crash-recovery.js`
+  - Detects fatal WASM errors (OOM, file descriptor exhaustion)
+  - Snapshots the DB, plugin files, and user uploads before runtime destruction
+  - Restores state onto a fresh runtime after crash
+  - Replays safe (GET/HEAD) requests automatically
 
 ## Storage Model
 
@@ -160,6 +166,36 @@ but persists across PHP script executions within the same worker session.
 
 Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
 Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
+
+## Crash Recovery (PHP Runtime Restart)
+
+The PHP WASM runtime can crash mid-session due to resource exhaustion (file descriptor
+limits, memory access out of bounds, `unreachable` traps). This is a known limitation of
+running PHP inside WebAssembly — WordPress Playground documents the same class of errors.
+See: https://github.com/WordPress/wordpress-playground/issues/1137
+
+When a fatal WASM error is detected (`src/runtime/crash-recovery.js`), the worker:
+
+1. **Snapshots state** from the dying runtime (MEMFS is in JS heap, readable even with
+   corrupted WASM linear memory):
+   - SQLite database file (`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`)
+   - Plugin files installed during this session (tracked via `trackPluginDir()`)
+   - User-uploaded files (`/persist/moodledata/filedir/`)
+2. **Destroys** the old PHP instance and creates a fresh one
+3. **Bootstraps** Moodle from scratch (ZIP extraction → install snapshot → config)
+4. **Restores** the saved DB, plugin files, and filedir onto the fresh runtime
+5. **Re-registers plugins** with Moodle's component cache and runs `upgrade_noncore()`
+6. **Re-creates** the admin session (the DB restore invalidates the bootstrap session)
+7. **Replays** the original request if it was idempotent (GET/HEAD)
+
+Anti-loop guards prevent infinite restart cycles:
+- Maximum 20 reactive restarts per session (`MAX_REACTIVE_RESTARTS`)
+- No restart if fewer than 10 requests were processed (`MIN_REQUESTS_BEFORE_RESTART`)
+- Non-idempotent requests (POST) are never replayed
+
+Key files:
+- `src/runtime/crash-recovery.js` — `isFatalWasmError()`, `createSnapshotManager()`
+- `php-worker.js` — `resetRuntime()`, `reRegisterPluginsAfterRestore()`
 
 ## Patch Layout
 
@@ -217,8 +253,10 @@ Important files for this prototype:
 - `src/runtime/bootstrap.js`
 - `src/runtime/php-loader.js`
 - `src/runtime/php-compat.js`
+- `src/runtime/crash-recovery.js`
 - `sw.js`
 - `src/remote/main.js`
+- `php-worker.js`
 - `lib/moodle-loader.js`
 - `scripts/patch-moodle-source.sh`
 - `scripts/generate-install-snapshot.sh`
@@ -327,6 +365,17 @@ These areas have repeatedly caused regressions during the SQLite migration:
     `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
     runtime `patchFile()` for files that need modification at boot
     (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
+
+- `src/runtime/crash-recovery.js`
+  - `collectFiles()` uses `rawPhp.isDir()` and `rawPhp.readFileAsBuffer()` to snapshot
+    plugin directories and filedir — these are `@php-wasm/universal` APIs on the raw
+    PHP instance (`php._php`), not the compat wrapper
+  - The snapshot `restore()` runs **after** full bootstrap completes — the fresh runtime
+    has a clean install DB which is then overwritten by the crash snapshot
+  - `reRegisterPluginsAfterRestore()` must refresh the `alternative_component_cache` for
+    each restored plugin before `moodle_needs_upgrading()` will detect them
+  - The filedir restore preserves user-uploaded content (SCORM packages, activity files)
+    that Moodle references via `mdl_files` rows in the restored DB
 
 If a change touches any of these files, prefer validating in a real browser, not only with syntax checks.
 
@@ -478,9 +527,11 @@ The project uses [Biome](https://biomejs.dev/) for linting and formatting. Confi
 ```bash
 node --check sw.js
 node --check php-worker.js
+node --check lib/moodle-loader.js
 node --check src/runtime/bootstrap.js
 node --check src/runtime/php-loader.js
 node --check src/runtime/php-compat.js
+node --check src/runtime/crash-recovery.js
 node --check src/shell/main.js
 node --check src/remote/main.js
 node --check src/blueprint/index.js

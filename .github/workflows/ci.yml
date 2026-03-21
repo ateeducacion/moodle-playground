@@ -27,9 +27,11 @@ jobs:
         run: |
           node --check sw.js
           node --check php-worker.js
+          node --check lib/moodle-loader.js
           node --check src/runtime/bootstrap.js
           node --check src/runtime/php-loader.js
           node --check src/runtime/php-compat.js
+          node --check src/runtime/crash-recovery.js
           node --check src/shell/main.js
           node --check src/remote/main.js
           node --check src/blueprint/index.js

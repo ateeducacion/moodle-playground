@@ -1,5 +1,9 @@
 # Moodle Playground
 
+<p align="center">
+  <img src="ogimage.png" alt="Moodle Playground" width="600">
+</p>
+
 [Live demo](https://ateeducacion.github.io/moodle-playground/) · [Documentation](docs/) · [Blueprints](docs/blueprint-json.md)
 
 > Run a full Moodle site in the browser — no server required.
@@ -37,14 +41,15 @@ index.html          Shell UI (toolbar, address bar, log panel)
        ├─ sw.js     Intercepts requests → routes to PHP worker
        └─ php-worker.js
             └─ @php-wasm/web (WebAssembly, PHP 8.3)
-                 ├─ Readonly Moodle core  (pre-built VFS bundle)
-                 └─ In-memory state       (SQLite + moodledata in MEMFS)
+                 ├─ Moodle core in writable MEMFS  (extracted from ZIP bundle)
+                 └─ In-memory state                (SQLite + moodledata in MEMFS)
 ```
 
 1. The shell boots a scoped runtime host inside an iframe.
 2. The Service Worker intercepts all requests under `/playground/<scope>/<runtime>/…`.
-3. The PHP worker loads the readonly Moodle VFS bundle and a pre-built install snapshot.
+3. The PHP worker extracts the Moodle ZIP bundle into writable MEMFS and loads a pre-built install snapshot.
 4. Moodle runs against an in-memory SQLite database — fully ephemeral, no persistence.
+5. If the PHP runtime crashes (WASM OOM / file descriptor exhaustion), the worker snapshots the DB and user files, boots a fresh runtime, and restores state automatically.
 
 ### No persistence by design
 
@@ -100,7 +105,7 @@ Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-
 | `make prepare-dev` | Install npm deps, build the worker, and build the default Moodle bundle |
 | `make prepare-dev-pretty` | Build the worker and default bundle in parallel with colorized local output |
 | `make prepare-all` | Install npm deps, build the worker, and build all Moodle bundles |
-| `make bundle` | Rebuild the default Moodle VFS bundle and manifest (`BRANCH=...` to override) |
+| `make bundle` | Rebuild the default Moodle bundle and manifest (`BRANCH=...` to override) |
 | `make bundle-all` | Rebuild all Moodle bundles; supports parallel jobs via `JOBS=...` |
 | `make bundle-all-pretty` | Rebuild all Moodle bundles with colorized per-branch output |
 | `make serve` | Start a local server on port 8080 |

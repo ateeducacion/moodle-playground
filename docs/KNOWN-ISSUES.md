@@ -113,11 +113,10 @@ Status:
 
 - **resolved**
 
-The bundle loader in `lib/moodle-loader.js` was reworked to preallocate a single destination
-buffer when `content-length` is known and fill it incrementally, eliminating the double-buffer
-allocation that previously caused `RangeError: Array buffer allocation failed`. This is no
-longer an issue in practice. (The project has since migrated from the custom readonly VFS
-overlay to extracting the Moodle ZIP bundle directly into writable MEMFS.)
+The bundle loader in `lib/moodle-loader.js` preallocates a single destination buffer when
+`content-length` is known and fills it incrementally, eliminating the double-buffer allocation
+that previously caused `RangeError: Array buffer allocation failed`. This is no longer an
+issue in practice.
 
 ## 6. Asset routing issues may still recur after changes to SW/CGI logic
 

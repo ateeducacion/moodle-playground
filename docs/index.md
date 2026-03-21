@@ -1,5 +1,9 @@
 # Moodle Playground
 
+<p align="center">
+  <img src="../ogimage.png" alt="Moodle Playground" width="600">
+</p>
+
 Moodle running entirely in your browser using WebAssembly. No server required.
 
 ## What is this?

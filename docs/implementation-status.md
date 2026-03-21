@@ -7,7 +7,7 @@ Fecha de referencia: 2026-03-10
 Levantar Moodle en navegador con `php-wasm`, evitando:
 
 - descargar Moodle oficial en tiempo de ejecución;
-- descomprimir y escribir decenas de miles de ficheros en el VFS en cada arranque;
+- minimizar el tiempo de extracción de ~30k ficheros en MEMFS en cada arranque;
 - depender de limpiar manualmente el Service Worker entre pruebas.
 
 ## Arquitectura actual
@@ -47,18 +47,14 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
   - cachea bundle e índice en Cache Storage;
   - ya no hace fallback a descarga remota de Moodle en runtime.
 
-### Mount de VFS (reemplazado)
+### Extracción del bundle en MEMFS
 
-> **Nota (marzo 2026)**: El mount VFS read-only custom (`lib/vfs-mount.js`,
-> `.vfs.bin` + `.vfs.index.json`) ha sido reemplazado. Ahora el core de Moodle
-> se extrae desde un bundle ZIP directamente en Emscripten MEMFS, donde todos
-> los ficheros son escribibles. `lib/vfs-mount.js` y `scripts/build-vfs-image.mjs`
-> han sido eliminados.
-
-- ~~[`lib/vfs-mount.js`](/Users/ernesto/Downloads/moodle-playground/lib/vfs-mount.js)~~ (eliminado)
-  - implementaba un FS read-only custom sobre `vfs.bin + vfs.index.json`;
-  - permitía overlay writable solo para ficheros concretos, por ahora sobre todo `config.php`;
-  - se fue corrigiendo para respetar offsets, `stream.position`, `llseek`, `node.contents`, `usedBytes`, `mmap` y `msync`.
+- [`lib/moodle-loader.js`](/Users/ernesto/Downloads/moodle-playground/lib/moodle-loader.js)
+  - `writeEntriesToPhp()` extrae el ZIP directamente en Emscripten MEMFS usando
+    operaciones síncronas del FS (`mkdirTree` + `writeFile`) con deduplicación
+    de directorios ancestro para rendimiento (~30k archivos en ~2s).
+  - todos los ficheros quedan escribibles, lo que permite instalar plugins y
+    aplicar parches en runtime sin restricciones.
 
 ## Pipeline offline
 
@@ -67,12 +63,8 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 - [`scripts/build-moodle-bundle.sh`](/Users/ernesto/Downloads/moodle-playground/scripts/build-moodle-bundle.sh)
   - descarga o reutiliza la release oficial;
   - aplica parches offline al árbol fuente;
-  - genera el ZIP de Moodle (anteriormente también generaba la imagen VFS, ya eliminada);
+  - genera el ZIP de Moodle;
   - genera el manifiesto final.
-
-- ~~[`scripts/build-vfs-image.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/build-vfs-image.mjs)~~ (eliminado)
-  - empaquetaba todos los ficheros en `.vfs.bin` + `.vfs.index.json`
-  - reemplazado por extracción directa del ZIP de Moodle en MEMFS
 
 - [`scripts/generate-manifest.mjs`](/Users/ernesto/Downloads/moodle-playground/scripts/generate-manifest.mjs)
   - genera `assets/manifests/latest.json` con hashes, tamaños y paths.
@@ -114,9 +106,9 @@ Levantar Moodle en navegador con `php-wasm`, evitando:
 
 ### Bundle y tiempo de arranque
 
-- Se implementó inicialmente una imagen VFS offline (`.vfs.bin` + `.vfs.index.json`) para
-  evitar descomprimir ZIP y escribir fichero a fichero en cada arranque. Posteriormente,
-  esta imagen fue reemplazada por extracción directa del ZIP en MEMFS.
+- El core de Moodle se extrae desde un ZIP preconstruido directamente en Emscripten MEMFS.
+  `writeEntriesToPhp()` usa operaciones síncronas del FS con deduplicación de directorios
+  ancestro, lo que permite escribir ~30k archivos en ~2 segundos.
 
 ### Extensiones PHP dinámicas
 
@@ -144,13 +136,11 @@ Se corrigieron variables importantes:
 
 Esto arregló varios problemas de generación de URLs y warnings en el instalador.
 
-### Validación del VFS (histórico)
+### Validación del bundle
 
-Se comprobó en la etapa de VFS read-only (ya reemplazada) que:
-
-- `install.php` dentro de la VFS coincidía byte a byte con el fichero fuente;
-- el propio FS montado podía leerlo con el tamaño correcto;
-- el final del fichero era correcto.
+Se comprueba la integridad del ZIP descargado mediante SHA-256 (`verifyBundle()` en
+`lib/moodle-loader.js`). Si el checksum no coincide con el manifest, el bundle cacheado
+se descarta y se re-descarga automáticamente.
 
 ## Problemas encontrados durante la implementación
 
@@ -163,16 +153,6 @@ Han aparecido errores de clases/interfaces no encontradas que no deberían falla
 - `core_cache\loader_interface`
 
 Se han ido parcheando offline con `require_once` explícitos.
-
-### VFS custom (histórico, ya eliminado)
-
-El mount custom VFS necesitó varias correcciones antes de ser reemplazado por MEMFS:
-
-- rutas montadas incorrectas;
-- lecturas sin respetar `stream.position`;
-- `llseek()` sin actualizar realmente la posición;
-- acceso a `node.contents` fuera de scope;
-- soporte insuficiente para `mmap`.
 
 ### Bridge SW <-> PHP worker
 
@@ -194,8 +174,7 @@ Ahora:
 
 - bootstrap offline;
 - bundle local y manifiesto local;
-- bundle ZIP generado (anteriormente imagen VFS, ya reemplazada);
-- extracción del bundle en MEMFS funcionando;
+- bundle ZIP generado y extraído en MEMFS;
 - `install.php` existe y se lee con el tamaño correcto;
 - la request HTTP llega al worker PHP.
 
