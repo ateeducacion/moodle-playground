@@ -2,6 +2,10 @@
 
 Fecha de análisis: 2026-03-10
 
+> **Este documento es histórico.** La arquitectura actual extrae un ZIP
+> preconstruido directamente en Emscripten MEMFS escribible. No se usa VFS
+> readonly, OPFS ni PGlite. El runtime es completamente efímero.
+
 ## Objetivo
 
 Levantar Moodle completo en navegador con `php-wasm` y publicarlo desde GitHub Pages con el menor tiempo posible hasta tener una instancia utilizable.

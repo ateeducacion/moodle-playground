@@ -6,6 +6,16 @@ For the full migration history and rationale, see [`sqlite-wasm-migration-notes.
 
 ## Quick checks
 
+Runtime debug mode in the browser:
+
+```text
+http://localhost:8080/?debug=true
+```
+
+Use this first when debugging runtime/bootstrap issues. It forces Moodle
+developer debug mode and enables PHP `display_errors` for the booted session.
+Accepted values include `true`, `developer`, `normal`, `minimal`, and `0`.
+
 Syntax:
 
 ```bash
@@ -35,6 +45,7 @@ If the browser is failing during install or first load, inspect these in order:
 2. network requests for `/playground/main/php83-cgi/...`
 3. shell progress log
 4. `PHP Info` panel
+5. rerun with `?debug=true` if the page is hiding PHP/Moodle errors
 
 The most useful files for runtime debugging are:
 
@@ -106,7 +117,8 @@ Notes:
 
 Likely cause:
 
-- `sodium` is now available via `@php-wasm/web` but this error may still appear if the runtime fails to load
+- the current WASM runtime does not ship `sodium`
+- some Moodle paths still assume sodium-first encryption unless the local fallback patch is active
 
 Files:
 
@@ -119,6 +131,7 @@ Current workaround:
 
 - `rememberusername` is disabled by default
 - `core\\encryption` falls back to OpenSSL in this prototype
+- `admin/environment.xml` is downgraded at runtime so upgrades are not blocked by the missing extension
 
 ### `Undefined array key "HTTP_USER_AGENT"`
 
@@ -181,6 +194,7 @@ Immediate actions:
 1. hard reload
 2. `Reset`
 3. check shell log for the last bootstrap step reached
+4. retry with `?debug=true` to surface hidden PHP/bootstrap errors
 
 ### `PHP worker bridge timed out`
 
@@ -208,7 +222,7 @@ If this symptom reappears after changes to routing or bootstrap:
 
 ### `RangeError: Array buffer allocation failed` — resolved
 
-This was caused by the VFS loader double-buffering (chunk buffers + full output buffer).
+This was caused by the bundle loader double-buffering (chunk buffers + full output buffer).
 Fixed by preallocating a single destination buffer when `content-length` is known.
 
 If this reappears after changes to the loader, inspect `lib/moodle-loader.js`.

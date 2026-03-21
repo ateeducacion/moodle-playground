@@ -21,9 +21,9 @@ It follows the same product shape as `omeka-s-playground`:
 3. Request routing: `sw.js` and `php-worker.js`
 4. PHP/Moodle runtime: `src/runtime/*` + generated assets under `assets/moodle/`
 
-The readonly Moodle core is loaded from a prebuilt VFS bundle while mutable state lives
-in Emscripten MEMFS (in-memory). The runtime is fully ephemeral — all state is lost when
-the browser tab closes or the page is reloaded.
+The Moodle core is extracted from a prebuilt ZIP bundle into Emscripten MEMFS (in-memory)
+at boot. All files — core and mutable state — live in writable MEMFS. The runtime is fully
+ephemeral — all state is lost when the browser tab closes or the page is reloaded.
 
 ## Build System
 
@@ -64,7 +64,7 @@ automatically.
 
 ### Generated Assets
 
-- `assets/moodle/`: readonly runtime bundle files (`.vfs.bin`, index, optional zip)
+- `assets/moodle/`: runtime bundle files (`.zip`, snapshot, manifests)
 - `assets/moodle/snapshot/`: pre-built install snapshot (`install.sq3`)
 - `assets/manifests/`: generated bundle manifests
 - `dist/`: esbuild output (php-worker bundle, WASM files, ICU data)
@@ -130,10 +130,16 @@ all encryption needs.
   - Owns the PHP runtime instance for a scope
   - Boots Moodle and serves HTTP requests through the bridge
 - `src/runtime/bootstrap.js`
-  - Prepares storage
-  - Mounts the readonly Moodle bundle
-  - Writes `config.php`
+  - Extracts the Moodle ZIP bundle into writable MEMFS
+  - Writes `config.php` and runtime helper scripts
+  - Applies runtime patches to Moodle PHP sources
   - Loads a pre-built install snapshot (or falls back to full CLI install)
+  - Executes blueprint steps (courses, users, plugins, etc.)
+- `src/runtime/crash-recovery.js`
+  - Detects fatal WASM errors (OOM, file descriptor exhaustion)
+  - Snapshots the DB, plugin files, and user uploads before runtime destruction
+  - Restores state onto a fresh runtime after crash
+  - Replays safe (GET/HEAD) requests automatically
 
 ## Storage Model
 
@@ -143,7 +149,7 @@ durable browser storage during normal operation. Closing the tab destroys all st
 
 Current layout:
 
-- Readonly core: custom VFS mount under `/www/moodle` (from prebuilt `.vfs.bin` image)
+- Moodle core: extracted from ZIP bundle into `/www/moodle` (writable MEMFS)
 - Mutable data: `/persist/moodledata` (MEMFS — the `/persist` name is legacy, not durable)
 - SQLite database: `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (MEMFS file)
 - Config and install markers: `/persist/config` (MEMFS)
@@ -160,6 +166,36 @@ but persists across PHP script executions within the same worker session.
 
 Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
 Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
+
+## Crash Recovery (PHP Runtime Restart)
+
+The PHP WASM runtime can crash mid-session due to resource exhaustion (file descriptor
+limits, memory access out of bounds, `unreachable` traps). This is a known limitation of
+running PHP inside WebAssembly — WordPress Playground documents the same class of errors.
+See: https://github.com/WordPress/wordpress-playground/issues/1137
+
+When a fatal WASM error is detected (`src/runtime/crash-recovery.js`), the worker:
+
+1. **Snapshots state** from the dying runtime (MEMFS is in JS heap, readable even with
+   corrupted WASM linear memory):
+   - SQLite database file (`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`)
+   - Plugin files installed during this session (tracked via `trackPluginDir()`)
+   - User-uploaded files (`/persist/moodledata/filedir/`)
+2. **Destroys** the old PHP instance and creates a fresh one
+3. **Bootstraps** Moodle from scratch (ZIP extraction → install snapshot → config)
+4. **Restores** the saved DB, plugin files, and filedir onto the fresh runtime
+5. **Re-registers plugins** with Moodle's component cache and runs `upgrade_noncore()`
+6. **Re-creates** the admin session (the DB restore invalidates the bootstrap session)
+7. **Replays** the original request if it was idempotent (GET/HEAD)
+
+Anti-loop guards prevent infinite restart cycles:
+- Maximum 20 reactive restarts per session (`MAX_REACTIVE_RESTARTS`)
+- No restart if fewer than 10 requests were processed (`MIN_REQUESTS_BEFORE_RESTART`)
+- Non-idempotent requests (POST) are never replayed
+
+Key files:
+- `src/runtime/crash-recovery.js` — `isFatalWasmError()`, `createSnapshotManager()`
+- `php-worker.js` — `resetRuntime()`, `reRegisterPluginsAfterRestore()`
 
 ## Patch Layout
 
@@ -189,7 +225,7 @@ Current database assumptions:
 - Moodle runs against the deprecated SQLite PDO driver
 - The SQLite database file lives in MEMFS (pure memory, no durable storage)
 - The DB file path is `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
-- The readonly Moodle core lives under `/www/moodle` (custom VFS mount)
+- The Moodle core lives under `/www/moodle` (writable MEMFS, extracted from ZIP at boot)
 - `config.php` is generated at boot and points at the MEMFS database file
 - SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
   `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
@@ -203,7 +239,7 @@ When touching the migration/runtime path, preserve these invariants:
 
 1. Do not reintroduce PGlite as the active DB path
 2. Do not move the DB out of the writable MEMFS filesystem
-3. Do not turn the readonly core mount back into a full persistent copy of Moodle
+3. Do not copy the full Moodle core into persistent (OPFS/IndexedDB) storage
 4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
 5. Keep the default scope stable unless there is a deliberate migration plan
 6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
@@ -217,8 +253,10 @@ Important files for this prototype:
 - `src/runtime/bootstrap.js`
 - `src/runtime/php-loader.js`
 - `src/runtime/php-compat.js`
+- `src/runtime/crash-recovery.js`
 - `sw.js`
 - `src/remote/main.js`
+- `php-worker.js`
 - `lib/moodle-loader.js`
 - `scripts/patch-moodle-source.sh`
 - `scripts/generate-install-snapshot.sh`
@@ -234,6 +272,9 @@ Prototype-specific defaults currently matter during first boot:
 - Debug defaults to disabled (`$CFG->debug = 0`) but is configurable via blueprint `runtime.debug`
   (0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER) and `runtime.debugdisplay` (0 or 1),
   or via the Settings dialog in the playground UI
+- For browser/runtime debugging, prefer opening the app with `?debug=true` first.
+  This forces `DEBUG_DEVELOPER`, `debugdisplay=1`, and PHP `display_errors=1`
+  for the booted runtime without editing the blueprint.
 - `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
 - PHP `display_errors` is off by default; configurable via `runtime.debugdisplay` in blueprint
@@ -310,8 +351,7 @@ These areas have repeatedly caused regressions during the SQLite migration:
   - historically, the nested iframe could stall with a valid URL/title but an empty body
     (this is now resolved; the watchdog recovery code remains as a safety net)
 - `lib/moodle-loader.js`
-  - historically, large VFS downloads could trigger memory pressure due to double-buffer
-    allocation (this is now resolved; the loader preallocates a single destination buffer)
+  - handles ZIP bundle download, caching, and extraction
 - `src/runtime/bootstrap.js`
   - many install-time compatibility shims live here and are easy to break accidentally
   - **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets
@@ -321,10 +361,21 @@ These areas have repeatedly caused regressions during the SQLite migration:
     to `upgradesettings.php`. Fix: add the missing setting with a safe static default to the
     `$postinstalldefaults` array. Known examples: `noreplyaddress`, `supportemail`.
   - **Runtime patches vs `patches/` directory**: Patches applied via the `patches/` directory
-    (copied at VFS build time) should NOT also be applied at runtime via `patchFile()` in
+    (copied at bundle build time) should NOT also be applied at runtime via `patchFile()` in
     `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
-    runtime `patchFile()` for files that are in the readonly VFS and need modification at
-    boot (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
+    runtime `patchFile()` for files that need modification at boot
+    (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
+
+- `src/runtime/crash-recovery.js`
+  - `collectFiles()` uses `rawPhp.isDir()` and `rawPhp.readFileAsBuffer()` to snapshot
+    plugin directories and filedir — these are `@php-wasm/universal` APIs on the raw
+    PHP instance (`php._php`), not the compat wrapper
+  - The snapshot `restore()` runs **after** full bootstrap completes — the fresh runtime
+    has a clean install DB which is then overwritten by the crash snapshot
+  - `reRegisterPluginsAfterRestore()` must refresh the `alternative_component_cache` for
+    each restored plugin before `moodle_needs_upgrading()` will detect them
+  - The filedir restore preserves user-uploaded content (SCORM packages, activity files)
+    that Moodle references via `mdl_files` rows in the restored DB
 
 If a change touches any of these files, prefer validating in a real browser, not only with syntax checks.
 
@@ -484,9 +535,11 @@ The project uses [Biome](https://biomejs.dev/) for linting and formatting. Confi
 ```bash
 node --check sw.js
 node --check php-worker.js
+node --check lib/moodle-loader.js
 node --check src/runtime/bootstrap.js
 node --check src/runtime/php-loader.js
 node --check src/runtime/php-compat.js
+node --check src/runtime/crash-recovery.js
 node --check src/shell/main.js
 node --check src/remote/main.js
 node --check src/blueprint/index.js

@@ -87,6 +87,16 @@ These settings can also be changed from the Settings dialog in the playground UI
 without editing the blueprint JSON directly. The playground UI resets the initial
 boot values; Moodle's own admin settings can still change the debug level afterward.
 
+For ad hoc browser debugging, you can also use a URL override instead of editing
+the blueprint:
+
+```text
+http://localhost:8080/?debug=true
+```
+
+This applies to the current boot only and forces developer debug mode with
+`debugdisplay=1` and PHP `display_errors=1`.
+
 ## Constants
 
 The `constants` object defines `{{KEY}}` placeholders that are substituted into

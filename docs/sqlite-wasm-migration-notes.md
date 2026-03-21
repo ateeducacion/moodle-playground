@@ -21,11 +21,11 @@ Constraints followed during the migration:
 
 ## Resulting runtime model
 
-- readonly Moodle core is mounted at `/www/moodle`
+- Moodle core is extracted from a prebuilt ZIP bundle into writable MEMFS at `/www/moodle`
 - mutable state lives under `/persist`
 - `moodledata` lives at `/persist/moodledata`
 - the SQLite database file lives at `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
-- `config.php`, bootstrap helpers, and a few patched PHP files are written into the writable overlay at boot
+- `config.php`, bootstrap helpers, and a few patched PHP files are written into MEMFS at boot
 
 ## Main migration changes
 
@@ -123,6 +123,7 @@ Why these extra files were needed:
   - current Moodle assumes `sodium` is always present
   - this wasm runtime does not currently ship `sodium`
   - a local OpenSSL fallback was restored so login/session-related encryption can work in the prototype
+  - runtime bootstrap also downgrades the `admin/environment.xml` sodium requirement to optional so upgrades can proceed
 
 ## Runtime bootstrap changes
 
@@ -134,7 +135,7 @@ Main file:
 
 What it does now:
 
-- mounts the readonly VFS bundle
+- extracts the Moodle ZIP bundle into writable MEMFS
 - writes runtime files such as:
   - `/www/moodle/config.php`
   - `/www/moodle/__install_database.php`
@@ -150,6 +151,7 @@ Important runtime-local overrides added during debugging:
 - cache config warnings are suppressed when `CACHE_DISABLE_ALL` is active
 - the deprecated SQLite driver is patched in-place to handle current PHP/Moodle behavior
 - `lib/classes/encryption.php` is patched in-place to add the OpenSSL fallback
+- `admin/environment.xml` is patched in-place to avoid blocking upgrades on the missing `sodium` extension
 - plugin settings files with brittle `$ADMIN->locate(...)` assumptions are patched so install does not abort
 - install/finalize logic hydrates `$CFG` from database-backed config during the special bootstrap path
 
@@ -192,7 +194,7 @@ What changed:
 
 This was needed because Moodle reads normal CGI server variables and emitted warnings when they were missing.
 
-## Readonly bundle loading fix
+## Bundle loading fix
 
 Main file:
 
@@ -200,7 +202,7 @@ Main file:
 
 Problem:
 
-- the readonly VFS image is large
+- the Moodle bundle is large
 - the old `fetchWithProgress()` implementation kept all chunks and then allocated a second full buffer
 - that doubled peak memory and could fail with `RangeError: Array buffer allocation failed`
 

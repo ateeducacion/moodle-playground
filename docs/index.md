@@ -1,5 +1,9 @@
 # Moodle Playground
 
+<p align="center">
+  <img src="../ogimage.png" alt="Moodle Playground" width="600">
+</p>
+
 Moodle running entirely in your browser using WebAssembly. No server required.
 
 ## What is this?
@@ -16,7 +20,7 @@ The project follows a layered architecture:
 2. **Runtime host** (`remote.html` + `src/remote/main.js`) — registers the service worker and hosts the playground iframe
 3. **Request routing** (`sw.js` + `php-worker.js`) — intercepts requests and routes them to the PHP runtime
 4. **PHP/Moodle runtime** (`src/runtime/*`) — boots Moodle via `@php-wasm/web` and serves HTTP requests through a bridge
-5. **Generated assets** (`assets/moodle/`) — prebuilt VFS bundle with readonly Moodle core
+5. **Generated assets** (`assets/moodle/`) — prebuilt ZIP bundle with Moodle core (extracted into writable MEMFS at runtime)
 
 ## Quick start
 
@@ -51,6 +55,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 - [Getting started](getting-started.md)
 - [Architecture](architecture.md)
 - [Blueprint reference](blueprint-json.md)
+- [Plugin install notes for this branch](plugin-install-branch-notes.md)
 
 ---
 

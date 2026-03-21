@@ -109,19 +109,9 @@ fi
 SAFE_RELEASE=$(printf '%s' "$RELEASE" | sed 's/[^A-Za-z0-9._-]/_/g')
 BUNDLE_NAME="moodle-core-$SAFE_RELEASE.zip"
 BUNDLE_PATH="$DIST_DIR/$BUNDLE_NAME"
-VFS_DATA_NAME="moodle-core-$SAFE_RELEASE.vfs.bin"
-VFS_DATA_PATH="$DIST_DIR/$VFS_DATA_NAME"
-VFS_INDEX_NAME="moodle-core-$SAFE_RELEASE.vfs.index.json"
-VFS_INDEX_PATH="$DIST_DIR/$VFS_INDEX_NAME"
 
 echo "Packing $BUNDLE_NAME" >&2
 (cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" .)
-
-echo "Building VFS image $VFS_DATA_NAME" >&2
-node "$SCRIPT_DIR/build-vfs-image.mjs" \
-  --source "$MOODLE_DIR" \
-  --data "$VFS_DATA_PATH" \
-  --index "$VFS_INDEX_PATH"
 
 FILE_COUNT=$(find "$MOODLE_DIR" -type f | wc -l | tr -d ' ')
 
@@ -133,9 +123,6 @@ fi
 node "$SCRIPT_DIR/generate-manifest.mjs" \
   --bundle "$BUNDLE_PATH" \
   --channel "${BRANCH:-$CHANNEL}" \
-  --imageData "$VFS_DATA_PATH" \
-  --imageFormat moodle-vfs-image-v1 \
-  --imageIndex "$VFS_INDEX_PATH" \
   --manifest "$MANIFEST_PATH" \
   --runtimeVersion "$RUNTIME_VERSION" \
   --release "$RELEASE" \
@@ -144,8 +131,6 @@ node "$SCRIPT_DIR/generate-manifest.mjs" \
   $SNAPSHOT_ARGS
 
 echo "Bundle written to $BUNDLE_PATH" >&2
-echo "VFS data written to $VFS_DATA_PATH" >&2
-echo "VFS index written to $VFS_INDEX_PATH" >&2
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
   echo "Snapshot written to $SNAPSHOT_DIR/install.sq3" >&2
 fi

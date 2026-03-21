@@ -76,37 +76,6 @@ if (args.bundle) {
   };
 }
 
-if (args.imageData && args.imageIndex) {
-  const imageDataPath = resolve(args.imageData);
-  const imageIndexPath = resolve(args.imageIndex);
-  const imageDataStats = statSync(imageDataPath);
-  const imageIndexStats = statSync(imageIndexPath);
-
-  manifest.vfs = {
-    format: args.imageFormat || "moodle-vfs-image-v1",
-    mountMode: "readonly-vfs-overlay-v1",
-    data: {
-      path: relative(resolve(manifestPath, ".."), imageDataPath).replaceAll(
-        "\\",
-        "/",
-      ),
-      fileName: basename(imageDataPath),
-      size: imageDataStats.size,
-      sha256: sha256For(imageDataPath),
-    },
-    index: {
-      path: relative(resolve(manifestPath, ".."), imageIndexPath).replaceAll(
-        "\\",
-        "/",
-      ),
-      fileName: basename(imageIndexPath),
-      size: imageIndexStats.size,
-      sha256: sha256For(imageIndexPath),
-    },
-    fileCount: Number(args.fileCount || 0),
-  };
-}
-
 if (args.snapshot) {
   const snapshotPath = resolve(args.snapshot);
   const snapshotStats = statSync(snapshotPath);

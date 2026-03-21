@@ -5,7 +5,7 @@
 ```bash
 npm install          # Install dependencies
 npm run build:worker # Bundle the PHP worker
-npm run bundle       # Full bundle (VFS + snapshot)
+npm run bundle       # Full bundle (ZIP + snapshot)
 
 make prepare         # Install deps and build the worker only
 make prepare-dev     # Worker + default Moodle bundle
@@ -42,7 +42,7 @@ Run `npm run build:worker` after changes to any runtime file.
 
 | Path | Description |
 |------|-------------|
-| `assets/moodle/` | Readonly runtime bundle (`.vfs.bin`, index) |
+| `assets/moodle/` | Prebuilt Moodle ZIP bundle (extracted into MEMFS at runtime) |
 | `assets/moodle/snapshot/` | Pre-built install snapshot (`install.sq3`) |
 | `assets/manifests/` | Bundle manifests |
 | `dist/` | esbuild output (worker bundle, WASM, ICU data) |
