@@ -64,16 +64,10 @@ let reactiveRestartCount = 0;
 // --- DB snapshot for crash recovery state preservation ---
 let snapshot = null;
 
-function getShellChannel() {
-  if (!shellChannel) {
-    shellChannel = new BroadcastChannel(createShellChannel(scopeId));
-  }
-
-  return shellChannel;
-}
-
 function postShell(message) {
-  getShellChannel().postMessage(message);
+  const channel = new BroadcastChannel(createShellChannel(scopeId));
+  channel.postMessage(message);
+  channel.close();
 }
 
 snapshot = createSnapshotManager({ postShell });

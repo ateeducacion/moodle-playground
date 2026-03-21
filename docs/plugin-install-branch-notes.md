@@ -164,4 +164,3 @@ The main implementation points behind this branch work are:
 - [`php-worker.js`](../php-worker.js)
 - [`lib/moodle-loader.js`](../lib/moodle-loader.js)
 - [`scripts/generate-install-snapshot.sh`](../scripts/generate-install-snapshot.sh)
-
