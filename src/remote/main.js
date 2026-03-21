@@ -1,10 +1,14 @@
 import { loadBlueprint } from "../blueprint/index.js";
-import { getDefaultRuntime, loadPlaygroundConfig } from "../shared/config.js";
+import { loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
 import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
 import { saveSessionState } from "../shared/storage.js";
-import { parseRuntimeId } from "../shared/version-resolver.js";
+import {
+  resolveRuntimeConfig,
+  resolveRuntimeSelection,
+  shouldTraceRuntimeSelection,
+} from "../shared/version-resolver.js";
 
 const overlayEl = document.querySelector(".remote-boot__card");
 const titleEl = document.querySelector("#remote-title");
@@ -94,6 +98,17 @@ function emit(scopeId, message) {
   const channel = new BroadcastChannel(createShellChannel(scopeId));
   channel.postMessage(message);
   channel.close();
+}
+
+function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
+  if (!shouldTraceRuntimeSelection({ debug, profile })) {
+    return;
+  }
+
+  emit(scopeId, {
+    kind: "trace",
+    detail: `[runtime-selection][remote:${stage}] ${detail}`,
+  });
 }
 
 async function registerRuntimeServiceWorker() {
@@ -263,7 +278,7 @@ async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
         return;
       }
 
-      if (message.scopeId !== scopeId || message.runtimeId !== runtimeId) {
+      if (message.scopeId !== scopeId) {
         return;
       }
 
@@ -477,34 +492,50 @@ async function bootstrapRemote() {
   const resetNonce = url.searchParams.get("reload") || "";
   const phpVersion = url.searchParams.get("phpVersion") || null;
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
+  const debug = url.searchParams.get("debug") || null;
+  const profile = url.searchParams.get("profile") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
-  const blueprint = loadBlueprint(scopeId);
-  let runtime = config.runtimes.find(
-    (entry) => entry.id === requestedRuntimeId,
-  );
-  if (!runtime) {
-    const parsed = parseRuntimeId(requestedRuntimeId);
-    if (parsed) {
-      runtime = config.runtimes.find((entry) => {
-        const entryParsed = parseRuntimeId(entry.id);
-        return (
-          entryParsed &&
-          entryParsed.phpVersion === parsed.phpVersion &&
-          entryParsed.moodleBranch === parsed.moodleBranch
-        );
-      });
-    }
-    if (!runtime) {
-      runtime = getDefaultRuntime(config);
+  let blueprint = loadBlueprint(scopeId);
+  // If sessionStorage has no blueprint (first load, or session cleared),
+  // fetch the default blueprint directly instead of relying on the shell
+  // having saved it first — avoids a race condition on cold start.
+  if (!blueprint && config.defaultBlueprintUrl) {
+    try {
+      const response = await fetch(
+        new URL(config.defaultBlueprintUrl, window.location.href),
+        { cache: "no-store" },
+      );
+      if (response.ok) {
+        blueprint = await response.json();
+        console.log("[blueprint] remote: resolved from defaultBlueprintUrl.");
+      }
+    } catch {
+      // Fall through — worker will boot without blueprint steps
     }
   }
+  const selection = resolveRuntimeSelection({
+    runtimeId: requestedRuntimeId,
+    phpVersion,
+    moodleBranch,
+  });
+  const runtime = resolveRuntimeConfig(config, selection);
+  if (!runtime) {
+    throw new Error("Unable to resolve a runtime configuration.");
+  }
+  traceRuntimeSelection(
+    scopeId,
+    debug,
+    profile,
+    "resolved",
+    `requestedRuntimeId=${requestedRuntimeId || "null"} requestedPhp=${phpVersion || "null"} requestedMoodleBranch=${moodleBranch || "null"} -> runtimeId=${selection.runtimeId} php=${selection.phpVersion} moodleBranch=${selection.moodleBranch} runtimeConfig=${runtime.id}`,
+  );
   setOverlayVisible(true);
 
   if (
     await resetRuntimeStorage({
       scopeId,
-      runtimeId: runtime.id,
+      runtimeId: selection.runtimeId,
       includePersistentOverlay: cleanBoot,
       resetNonce,
     })
@@ -521,7 +552,7 @@ async function bootstrapRemote() {
   });
 
   await registerRuntimeServiceWorker();
-  if (ensureRemoteServiceWorkerControl(scopeId, runtime.id)) {
+  if (ensureRemoteServiceWorkerControl(scopeId, selection.runtimeId)) {
     return;
   }
   await waitForServiceWorkerControl();
@@ -533,13 +564,26 @@ async function bootstrapRemote() {
       import.meta.url,
     );
     workerUrl.searchParams.set("scope", scopeId);
-    workerUrl.searchParams.set("runtime", runtime.id);
-    if (phpVersion) {
-      workerUrl.searchParams.set("phpVersion", phpVersion);
+    workerUrl.searchParams.set("runtime", selection.runtimeId);
+    if (selection.phpVersion) {
+      workerUrl.searchParams.set("phpVersion", selection.phpVersion);
     }
-    if (moodleBranch) {
-      workerUrl.searchParams.set("moodleBranch", moodleBranch);
+    if (selection.moodleBranch) {
+      workerUrl.searchParams.set("moodleBranch", selection.moodleBranch);
     }
+    if (debug) {
+      workerUrl.searchParams.set("debug", debug);
+    }
+    if (profile) {
+      workerUrl.searchParams.set("profile", profile);
+    }
+    traceRuntimeSelection(
+      scopeId,
+      debug,
+      profile,
+      "worker-url",
+      workerUrl.toString(),
+    );
     phpWorker = new Worker(workerUrl, { type: "module" });
     phpWorker.addEventListener("error", (event) => {
       const parts = [
@@ -576,34 +620,44 @@ async function bootstrapRemote() {
       if (msg.path && msg.path !== activePath) {
         activePath = msg.path;
         readyNavigated = true;
-        navigateFrame(scopeId, runtime.id, activePath, { force: true });
+        navigateFrame(scopeId, selection.runtimeId, activePath, {
+          force: true,
+        });
       }
     }
   });
 
   const workerReadyPromise = waitForPhpWorkerReady(
     scopeId,
-    runtime.id,
+    selection.runtimeId,
     phpWorker,
   );
   phpWorker.postMessage({
     kind: "configure-blueprint",
     blueprint,
+    runtimeParams: {
+      scopeId,
+      runtimeId: selection.runtimeId,
+      phpVersion: selection.phpVersion,
+      moodleBranch: selection.moodleBranch,
+      debug,
+      profile,
+    },
   });
   await workerReadyPromise;
 
   saveSessionState(scopeId, {
-    runtimeId: runtime.id,
+    runtimeId: selection.runtimeId,
     path: requestedPath,
   });
 
-  bindShellCommands(scopeId, runtime.id);
-  bindFrameNavigation(scopeId, runtime.id);
+  bindShellCommands(scopeId, selection.runtimeId);
+  bindFrameNavigation(scopeId, selection.runtimeId);
   // Navigate to the requested path only if the ready handler hasn't
   // already navigated to a fresh readyPath from bootstrap. This avoids
   // a wasted PHP request to a stale path from a previous session.
   if (!readyNavigated) {
-    navigateFrame(scopeId, runtime.id, activePath);
+    navigateFrame(scopeId, selection.runtimeId, activePath);
   }
   setRemoteProgress("Loading Moodle…", 0.98);
 }

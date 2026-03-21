@@ -58,6 +58,8 @@ $CFG->alternative_component_cache = '${escapePhpSingleQuoted(resolvedComponentCa
 $CFG->directorypermissions = 0777;
 $CFG->sslproxy = false;
 $CFG->reverseproxy = false;
+$CFG->disableupdatenotifications = true;
+$CFG->updateautocheck = false;
 // Display debug messages on page when explicitly enabled for this runtime.
 $CFG->debugdisplay = ${Number(debugdisplay) ? 1 : 0};
 $CFG->showcrondebugging = false;
@@ -119,6 +121,9 @@ if (!defined('MOODLE_INTERNAL')) {
 }
 if (!defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE')) {
     define('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE', true);
+}
+if (!defined('PLAYGROUND_SKIP_NAV_UPGRADE_REDIRECTS')) {
+    define('PLAYGROUND_SKIP_NAV_UPGRADE_REDIRECTS', true);
 }
 // MUC caching is enabled — the filesystem is MEMFS (pure memory) so file-backed
 // cache stores are fast and persist for the lifetime of the worker session.

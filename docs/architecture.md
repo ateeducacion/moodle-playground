@@ -22,6 +22,7 @@ The PHP 8.3 WASM binary includes all required extensions built-in: `sqlite3`, `p
 
 !!! note
     `sodium` is **not** available in the WASM binary. The OpenSSL fallback patch handles all encryption needs.
+    The runtime also downgrades Moodle's environment check for `sodium` so upgrades are not blocked.
 
 ## Storage model
 
@@ -29,7 +30,7 @@ The runtime is **fully ephemeral**. All mutable state lives in Emscripten's MEMF
 
 | Path | Type | Description |
 |------|------|-------------|
-| `/www/moodle` | Readonly VFS | Prebuilt Moodle core from `.vfs.bin` image |
+| `/www/moodle` | MEMFS | Moodle core extracted from ZIP bundle into writable MEMFS |
 | `/persist/moodledata` | MEMFS | Mutable data directory |
 | `/persist/moodledata/moodle_*.sq3.php` | MEMFS | SQLite database file |
 | `/persist/config` | MEMFS | Config and install markers |
@@ -61,7 +62,7 @@ A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) is generated
 
 ## Moodle patches
 
-Some patches are applied at build time (copied into the VFS), others at runtime (written to the writable overlay at boot):
+Some patches are applied at build time (copied into the Moodle source before ZIP bundling), others at runtime (written into MEMFS at boot):
 
 **Build-time patches**:
 

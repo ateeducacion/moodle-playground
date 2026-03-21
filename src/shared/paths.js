@@ -18,7 +18,7 @@ export function resolveRemoteUrl(
   scopeId,
   runtimeId,
   path = "/",
-  { phpVersion, moodleBranch } = {},
+  { phpVersion, moodleBranch, debug, profile } = {},
 ) {
   const url = new URL("./remote.html", window.location.href);
   url.searchParams.set("scope", scopeId);
@@ -29,6 +29,12 @@ export function resolveRemoteUrl(
   }
   if (moodleBranch) {
     url.searchParams.set("moodleBranch", moodleBranch);
+  }
+  if (debug) {
+    url.searchParams.set("debug", debug);
+  }
+  if (profile) {
+    url.searchParams.set("profile", profile);
   }
   return url;
 }

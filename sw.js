@@ -68,6 +68,7 @@ function isSensitiveStaticPath(pathname) {
     || strippedPathname === "/playground.config.json"
     || strippedPathname === "/assets/build-version.json"
     || /^\/assets\/manifests\/[^/]+\.json$/u.test(strippedPathname)
+    || strippedPathname.startsWith("/assets/moodle/")
   );
 }
 
@@ -453,6 +454,11 @@ self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     await self.clients.claim();
     await purgeOldStaticCaches();
+    // Clear the bundle cache so stale ZIPs from a previous build don't
+    // cause checksum mismatches. The next boot re-downloads the correct bundle.
+    try {
+      await caches.delete("moodle-playground-bundles-v1");
+    } catch {}
   })());
 });
 
@@ -495,11 +501,6 @@ self.addEventListener("fetch", (event) => {
       }
 
       const forwardedUrl = new URL(requestPath, `${url.origin}/`);
-
-      await broadcastToClients({
-        kind: "sw-debug",
-        detail: `Intercepting ${event.request.method} ${url.pathname}`,
-      });
 
       const response = await forwardToPhpWorker({
         request: buildPhpRequest(event.request, forwardedUrl, earlyBody),

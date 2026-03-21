@@ -65,25 +65,6 @@ jobs:
             --exclude "tests/" \
             --exclude "patches/" \
             --exclude "scripts/"
-          # Remove VFS binaries to reduce deploy size (~376MB savings)
-          find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
-          find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
-
-      - name: Strip VFS from manifests
-        run: |
-          node -e "
-            const fs = require('fs');
-            for (const f of [
-              'dist-preview/assets/manifests/MOODLE_500_STABLE.json',
-              'dist-preview/assets/manifests/latest.json'
-            ]) {
-              if (fs.existsSync(f)) {
-                const m = JSON.parse(fs.readFileSync(f, 'utf8'));
-                delete m.vfs;
-                fs.writeFileSync(f, JSON.stringify(m, null, 2) + '\n');
-              }
-            }
-          "
 
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3

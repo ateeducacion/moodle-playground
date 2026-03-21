@@ -252,6 +252,18 @@ try {
 } catch (Throwable \$e) {
     echo 'Warning: admin_apply_default_settings failed: ' . \$e->getMessage() . PHP_EOL;
 }
+
+// Persist upgrade/version hashes into the snapshot so the first browser request
+// does not look like a fresh post-upgrade visit and bounce into admin/index.php.
+try {
+    require_once(\$CFG->libdir . '/classes/component.php');
+    require_once(\$CFG->libdir . '/upgradelib.php');
+    set_config('allversionshash', core_component::get_all_versions_hash());
+    set_config('allcomponenthash', core_component::get_all_component_hash());
+    echo 'Upgrade hashes persisted.' . PHP_EOL;
+} catch (Throwable \$e) {
+    echo 'Warning: upgrade hash persistence failed: ' . \$e->getMessage() . PHP_EOL;
+}
 " 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
 
 # Note: $CFG->wwwroot comes from config.php (generated at runtime), not from

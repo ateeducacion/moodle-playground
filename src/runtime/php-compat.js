@@ -1,7 +1,7 @@
 /**
  * Compatibility layer that wraps WordPress Playground's PHP instance
  * to match the API surface expected by bootstrap.js, php-worker.js,
- * bootstrap-fs.js, moodle-loader.js, and vfs-mount.js.
+ * bootstrap-fs.js, and moodle-loader.js.
  */
 
 import { __private__dont__use } from "@php-wasm/universal";
@@ -341,7 +341,7 @@ export function wrapPhpInstance(
     },
 
     /**
-     * The Emscripten module for low-level FS access (vfs-mount.js).
+     * The Emscripten module for low-level FS access.
      */
     get binary() {
       return emscriptenModule;
