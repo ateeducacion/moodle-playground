@@ -121,17 +121,6 @@ function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
   });
 }
 
-function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
-  if (!shouldTraceRuntimeSelection({ debug, profile })) {
-    return;
-  }
-
-  emit(scopeId, {
-    kind: "trace",
-    detail: `[runtime-selection][remote:${stage}] ${detail}`,
-  });
-}
-
 async function registerRuntimeServiceWorker() {
   const registration = await registerVersionedServiceWorker(
     new URL("../../sw.js", import.meta.url),

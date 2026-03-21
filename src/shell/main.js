@@ -101,25 +101,6 @@ function traceRuntimeSelection(stage, detail) {
   appendLog(`[runtime-selection][shell:${stage}] ${detail}`);
 }
 
-function applyRuntimeSelection(selection) {
-  currentPhpVersion = selection.phpVersion;
-  currentMoodleBranch = selection.moodleBranch;
-  currentRuntimeId = selection.runtimeId;
-}
-
-function traceRuntimeSelection(stage, detail) {
-  if (
-    !shouldTraceRuntimeSelection({
-      debug: currentDebugParam,
-      profile: currentProfileParam,
-    })
-  ) {
-    return;
-  }
-
-  appendLog(`[runtime-selection][shell:${stage}] ${detail}`);
-}
-
 function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
 }
