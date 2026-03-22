@@ -25,7 +25,14 @@ check-php:
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
 .PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test lint format
+.PHONY: prepare-e2e-artifact test-e2e test-e2e-chrome test-e2e-firefox
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
+
+E2E_ARTIFACT ?= preview
+E2E_BROWSER ?= chromium
+E2E_REUSE_ARTIFACT ?= 0
+E2E_OUTPUT_PREFIX ?= $(E2E_ARTIFACT)
+E2E_WORKFLOW_LABEL ?= $(E2E_ARTIFACT)
 
 deps:
 	npm install
@@ -98,10 +105,37 @@ test:
 	node --test tests/**/*.test.js
 
 lint:
-	npx @biomejs/biome check
+	npx @biomejs/biome check src tests scripts
 
 format:
-	npx @biomejs/biome check --fix
+	npx @biomejs/biome check --fix src tests scripts
+
+prepare-e2e-artifact:
+	@if [ "$(E2E_REUSE_ARTIFACT)" = "1" ]; then \
+		echo "Reusing prebuilt $(E2E_ARTIFACT) E2E artifact"; \
+	else \
+		case "$(E2E_ARTIFACT)" in \
+			preview) \
+				$(MAKE) --no-print-directory build-version build-worker bundle && \
+				./scripts/prepare-e2e-artifact.sh preview ;; \
+			pages) \
+				$(MAKE) --no-print-directory build-version build-worker bundle-all && \
+				python -m pip install -r requirements-docs.txt && \
+				./scripts/prepare-e2e-artifact.sh pages ;; \
+			*) \
+				echo "Unknown E2E_ARTIFACT=$(E2E_ARTIFACT)"; \
+				exit 1 ;; \
+		esac; \
+	fi
+
+test-e2e: prepare-e2e-artifact
+	./scripts/run-e2e.sh $(E2E_ARTIFACT) $(E2E_BROWSER)
+
+test-e2e-chrome:
+	$(MAKE) --no-print-directory test-e2e E2E_BROWSER=chromium
+
+test-e2e-firefox:
+	$(MAKE) --no-print-directory test-e2e E2E_BROWSER=firefox
 
 clean:
 	rm -rf .cache

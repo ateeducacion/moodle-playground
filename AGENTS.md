@@ -462,6 +462,7 @@ When changing blueprint semantics, update the schema, step handlers, docs, and t
 make test      # Run all unit tests (186 tests across 45 suites)
 make lint      # Run Biome linter on src/, tests/, scripts/
 make format    # Auto-fix lint and formatting issues
+npm run test:e2e  # Run Playwright browser validation (requires built static output)
 ```
 
 These are also available as npm scripts:
@@ -469,6 +470,7 @@ These are also available as npm scripts:
 ```bash
 npm test                  # All tests
 npm run test:blueprint    # Blueprint tests only
+npm run test:e2e          # Playwright browser validation
 ```
 
 ### Test suites
@@ -512,6 +514,12 @@ Tests live in `tests/` and run with Node.js built-in `node:test` (no framework).
 |------|---------------|
 | `sw-helpers.test.js` | HTML entity decoding (`&amp;`, `&#x2F;`, `&colon;`, Moodle URLs), scoped runtime path extraction (scope/runtime/path parsing, subpath deployments) |
 
+#### Browser validation (`tests/e2e/`)
+
+| File | What it tests |
+|------|---------------|
+| `app-load.spec.js` | Playwright validation that the built app shell boots, the remote host overlay clears, and the nested Moodle login form renders in Chromium and Firefox |
+
 ### Linting and formatting
 
 The project uses [Biome](https://biomejs.dev/) for linting and formatting. Configuration is in `biome.json`.
@@ -545,6 +553,14 @@ The `.github/workflows/ci.yml` workflow runs on push to `main` and on pull reque
 2. Syntax check all runtime files
 3. `make test` (81 unit tests)
 4. `make lint` (Biome)
+
+Deployment workflows add a Playwright validation stage before publishing:
+
+1. Build the static artifact (`dist-pages/` or `dist-preview/`)
+2. Serve the built output with `http-server`
+3. Validate the shell, runtime host, and nested Moodle login screen in Chromium and Firefox
+4. Upload Playwright screenshots, traces, DOM dumps, console logs, request failures, and static-server logs
+5. Continue to deploy only if both browser runs succeed
 
 ### Manual validation areas
 

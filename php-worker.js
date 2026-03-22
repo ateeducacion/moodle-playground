@@ -31,6 +31,7 @@ let moodleBranch = selection.moodleBranch;
 let debug = workerUrl.searchParams.get("debug") || null;
 let profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
+let shellChannel = null;
 let runtimeStatePromise = null;
 let requestQueue = Promise.resolve();
 let activeBlueprint = null;
@@ -704,6 +705,16 @@ function installBridgeListener() {
 
 function installMessageListener() {
   self.addEventListener("message", (event) => {
+    if (event.data?.kind === "bootstrap-runtime") {
+      void getRuntimeState().catch((error) => {
+        postShell({
+          kind: "error",
+          detail: formatErrorDetail(error),
+        });
+      });
+      return;
+    }
+
     if (event.data?.kind !== "configure-blueprint") {
       if (event.data?.kind === "capture-phpinfo") {
         void publishPhpInfo(activeRuntimeConfig, "manual");

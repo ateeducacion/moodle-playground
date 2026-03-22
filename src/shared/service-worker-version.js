@@ -14,15 +14,19 @@ export function buildVersionedServiceWorkerUrl(
 
 export async function registerVersionedServiceWorker(
   serviceWorkerUrl,
-  { scope = "./", type = "module", updateViaCache = "none" } = {},
+  { scope = "./", type = "classic", updateViaCache = "none" } = {},
 ) {
+  const registrationOptions = {
+    scope,
+    updateViaCache,
+  };
+  if (type) {
+    registrationOptions.type = type;
+  }
+
   const registration = await navigator.serviceWorker.register(
     buildVersionedServiceWorkerUrl(serviceWorkerUrl),
-    {
-      scope,
-      type,
-      updateViaCache,
-    },
+    registrationOptions,
   );
 
   try {

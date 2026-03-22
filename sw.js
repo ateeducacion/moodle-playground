@@ -1,9 +1,8 @@
-import { createPhpBridgeChannel, createWorkerRequestId } from "./src/shared/protocol.js";
-
 const bridges = new Map();
 const pending = new Map();
 const clientContexts = new Map();
 const BUILD_VERSION = new URL(self.location.href).searchParams.get("build") || "dev";
+const PHP_BRIDGE_CHANNEL_PREFIX = "moodle-playground-php";
 const STATIC_CACHE_PREFIX = "moodle-playground-static";
 const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
 const STATIC_PREFIXES = [
@@ -26,6 +25,16 @@ function getAppBasePath() {
   const scopeUrl = new URL(self.registration.scope);
   const pathname = scopeUrl.pathname;
   return pathname.endsWith("/") ? pathname.slice(0, -1) || "/" : pathname || "/";
+}
+
+// Keep these helpers inlined because the service worker must also run as a
+// classic script for Firefox validation, so it cannot import shared ESM helpers.
+function createPhpBridgeChannel(scopeId) {
+  return `${PHP_BRIDGE_CHANNEL_PREFIX}:${scopeId}`;
+}
+
+function createWorkerRequestId() {
+  return globalThis.crypto.randomUUID();
 }
 
 function stripAppBasePath(pathname) {

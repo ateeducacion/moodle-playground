@@ -26,6 +26,18 @@ let frameRecoveryTimer = 0;
 let frameRecoveryAttempted = false;
 let dotsTimer = 0;
 let dotsCount = 0;
+const shellChannels = new Map();
+
+function getShellChannel(scopeId) {
+  if (!shellChannels.has(scopeId)) {
+    shellChannels.set(
+      scopeId,
+      new BroadcastChannel(createShellChannel(scopeId)),
+    );
+  }
+
+  return shellChannels.get(scopeId);
+}
 
 function startDotsAnimation() {
   if (dotsTimer) return;
@@ -95,9 +107,7 @@ function emit(scopeId, message) {
     setRemoteProgress(message.detail);
   }
 
-  const channel = new BroadcastChannel(createShellChannel(scopeId));
-  channel.postMessage(message);
-  channel.close();
+  getShellChannel(scopeId).postMessage(message);
 }
 
 function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
@@ -614,16 +624,13 @@ async function bootstrapRemote() {
     }
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
-      // If bootstrap returns a readyPath (e.g. "/my/" after auto-login),
-      // override the stale path from the URL so we don't navigate to
-      // a previous session's install.php or other outdated path.
-      if (msg.path && msg.path !== activePath) {
+      // Bootstrap the runtime before the first iframe navigation so Firefox
+      // doesn't time out a long-lived service-worker navigation request.
+      if (msg.path) {
         activePath = msg.path;
-        readyNavigated = true;
-        navigateFrame(scopeId, selection.runtimeId, activePath, {
-          force: true,
-        });
       }
+      readyNavigated = true;
+      navigateFrame(scopeId, selection.runtimeId, activePath, { force: true });
     }
   });
 
@@ -645,6 +652,9 @@ async function bootstrapRemote() {
     },
   });
   await workerReadyPromise;
+  phpWorker.postMessage({
+    kind: "bootstrap-runtime",
+  });
 
   saveSessionState(scopeId, {
     runtimeId: selection.runtimeId,
@@ -653,13 +663,9 @@ async function bootstrapRemote() {
 
   bindShellCommands(scopeId, selection.runtimeId);
   bindFrameNavigation(scopeId, selection.runtimeId);
-  // Navigate to the requested path only if the ready handler hasn't
-  // already navigated to a fresh readyPath from bootstrap. This avoids
-  // a wasted PHP request to a stale path from a previous session.
   if (!readyNavigated) {
-    navigateFrame(scopeId, selection.runtimeId, activePath);
+    setRemoteProgress("Bootstrapping Moodle before first navigation…", 0.98);
   }
-  setRemoteProgress("Loading Moodle…", 0.98);
 }
 
 bootstrapRemote().catch((error) => {

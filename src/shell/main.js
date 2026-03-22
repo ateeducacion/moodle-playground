@@ -78,7 +78,9 @@ let pendingCleanBoot = false;
 let latestPhpInfoHtml = "";
 // biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
 let phpInfoCapturePromise = null;
+let activeProgressLogLine = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
+const MAX_LOG_LINES = 400;
 
 function applyRuntimeSelection(selection) {
   currentPhpVersion = selection.phpVersion;
@@ -103,14 +105,26 @@ function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
 }
 
-function appendLog(message, isError = false) {
+function appendLog(message, isError = false, { replaceProgress = false } = {}) {
   const line = `[${new Date().toISOString()}] ${message}`;
+
+  if (replaceProgress && activeProgressLogLine?.isConnected) {
+    activeProgressLogLine.textContent = `${line}\n`;
+    els.logPanel.scrollTop = els.logPanel.scrollHeight;
+    return;
+  }
+
   const span = document.createElement("span");
   span.textContent = `${line}\n`;
   if (isError) {
     span.className = "error";
   }
   els.logPanel.append(span);
+  activeProgressLogLine = replaceProgress ? span : null;
+
+  while (els.logPanel.childNodes.length > MAX_LOG_LINES) {
+    els.logPanel.firstChild?.remove();
+  }
   els.logPanel.scrollTop = els.logPanel.scrollHeight;
 }
 
@@ -365,7 +379,9 @@ function bindShellChannel() {
     switch (message.kind) {
       case "progress":
         setUiLocked(true);
-        appendLog(`${message.title}: ${message.detail}`);
+        appendLog(`${message.title}: ${message.detail}`, false, {
+          replaceProgress: true,
+        });
         break;
       case "ready":
         setUiLocked(false);
@@ -638,6 +654,7 @@ els.phpInfoTab.addEventListener("click", () => {
 els.blueprintTab.addEventListener("click", () => setActivePanel("blueprint"));
 els.clearLogs.addEventListener("click", () => {
   els.logPanel.textContent = "";
+  activeProgressLogLine = null;
 });
 els.copyLogs.addEventListener("click", () => {
   const text = els.logPanel.textContent || "";

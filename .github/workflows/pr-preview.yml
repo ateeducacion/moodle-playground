@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy-preview:
+  build-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
@@ -50,21 +50,93 @@ jobs:
         run: make bundle BRANCH=MOODLE_500_STABLE
 
       - name: Assemble preview artifact
+        run: ./scripts/prepare-e2e-artifact.sh preview
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview
+
+  browser-validation:
+    if: github.event.action != 'closed'
+    needs: build-preview
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            make_target: test-e2e-chrome
+          - browser: firefox
+            make_target: test-e2e-firefox
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview
+
+      - name: Validate preview build in ${{ matrix.browser }}
+        env:
+          E2E_ARTIFACT: preview
+          E2E_REUSE_ARTIFACT: 1
+          E2E_OUTPUT_PREFIX: pr-preview
+          E2E_WORKFLOW_LABEL: pr-preview
+        run: make ${{ matrix.make_target }}
+
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-pr-preview-${{ matrix.browser }}
+          path: playwright-artifacts/pr-preview-${{ matrix.browser }}
+          if-no-files-found: warn
+
+  deploy-preview:
+    if: github.event.action != 'closed'
+    needs:
+      - build-preview
+      - browser-validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview
+
+      - name: Strip VFS from deploy preview artifact
         run: |
-          rm -rf dist-preview
-          mkdir -p dist-preview
-          rsync -a ./ ./dist-preview/ \
-            --exclude ".git/" \
-            --exclude ".github/" \
-            --exclude ".venv/" \
-            --exclude ".cache/" \
-            --exclude "dist-preview/" \
-            --exclude "docs/" \
-            --exclude "node_modules/" \
-            --exclude "site/" \
-            --exclude "tests/" \
-            --exclude "patches/" \
-            --exclude "scripts/"
+          find dist-preview/assets/moodle -name "*.vfs.bin" -delete 2>/dev/null || true
+          find dist-preview/assets/moodle -name "*.vfs.index.json" -delete 2>/dev/null || true
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync, existsSync } from "node:fs";
+            for (const manifestPath of [
+              "dist-preview/assets/manifests/MOODLE_500_STABLE.json",
+              "dist-preview/assets/manifests/latest.json",
+            ]) {
+              if (!existsSync(manifestPath)) {
+                continue;
+              }
+              const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+              delete manifest.vfs;
+              writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+            }
+          '
 
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3
