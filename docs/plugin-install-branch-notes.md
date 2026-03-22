@@ -158,9 +158,9 @@ When testing plugin support in this branch:
 
 The main implementation points behind this branch work are:
 
-- [`src/runtime/bootstrap.js`](../src/runtime/bootstrap.js)
-- [`src/runtime/crash-recovery.js`](../src/runtime/crash-recovery.js)
-- [`src/runtime/config-template.js`](../src/runtime/config-template.js)
-- [`php-worker.js`](../php-worker.js)
-- [`lib/moodle-loader.js`](../lib/moodle-loader.js)
-- [`scripts/generate-install-snapshot.sh`](../scripts/generate-install-snapshot.sh)
+- [`src/runtime/bootstrap.js`](https://github.com/ateeducacion/moodle-playground/blob/main/src/runtime/bootstrap.js)
+- [`src/runtime/crash-recovery.js`](https://github.com/ateeducacion/moodle-playground/blob/main/src/runtime/crash-recovery.js)
+- [`src/runtime/config-template.js`](https://github.com/ateeducacion/moodle-playground/blob/main/src/runtime/config-template.js)
+- [`php-worker.js`](https://github.com/ateeducacion/moodle-playground/blob/main/php-worker.js)
+- [`lib/moodle-loader.js`](https://github.com/ateeducacion/moodle-playground/blob/main/lib/moodle-loader.js)
+- [`scripts/generate-install-snapshot.sh`](https://github.com/ateeducacion/moodle-playground/blob/main/scripts/generate-install-snapshot.sh)
