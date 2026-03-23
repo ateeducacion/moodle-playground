@@ -14,7 +14,7 @@
     "test:blueprint": "node --test tests/blueprint/*.test.js"
   },
   "dependencies": {
-    "@php-wasm/universal": "^3.1.12",
+    "@php-wasm/universal": "^3.1.13",
     "@php-wasm/web": "^3.1.12",
     "fflate": "^0.8.2"
   },
