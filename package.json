@@ -19,7 +19,7 @@
     "fflate": "^0.8.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.7",
+    "@biomejs/biome": "^2.4.8",
     "concurrently": "^9.2.1",
     "esbuild": "^0.27.4",
     "http-server": "^14.1.1"
