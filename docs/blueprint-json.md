@@ -259,6 +259,10 @@ Named resources can be defined once and referenced from steps using `@name`:
 
 ### addModule
 
+Adds a course module (activity) to an existing course. The `module` field is the
+Moodle module name (e.g., `label`, `assign`, `folder`, `board`). For third-party
+modules, install the plugin first with `installMoodlePlugin`.
+
 ```json
 {
   "step": "addModule",
@@ -270,7 +274,32 @@ Named resources can be defined once and referenced from steps using `@name`:
 }
 ```
 
+| Field | Required | Description |
+|-------|----------|-------------|
+| `module` | yes | Module type name (`label`, `assign`, `folder`, `board`, etc.) |
+| `course` | yes | Course shortname |
+| `section` | no | Section number (default: 0) |
+| `name` | no | Activity name (defaults to module type) |
+| `intro` | no | Description HTML |
+
+Works with any installed module type, including plugins installed via
+`installMoodlePlugin` in earlier blueprint steps. The module is created using
+direct database inserts (not `add_moduleinfo()`) for SQLite WASM compatibility.
+
 ### installMoodlePlugin
+
+Installs a Moodle plugin from a GitHub ZIP URL. Both `pluginType` and `pluginName`
+are auto-detected from the GitHub repository name (e.g., `moodle-mod_board` →
+type `mod`, name `board`). Only the `url` is required:
+
+```json
+{
+  "step": "installMoodlePlugin",
+  "url": "https://github.com/brickfield/moodle-mod_board/archive/refs/heads/MOODLE_405_STABLE.zip"
+}
+```
+
+You can override the detected values if needed:
 
 ```json
 {
@@ -281,14 +310,17 @@ Named resources can be defined once and referenced from steps using `@name`:
 }
 ```
 
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | yes | GitHub archive ZIP URL |
+| `pluginType` | no | Auto-detected from URL. Override for non-standard repo names |
+| `pluginName` | no | Auto-detected from URL. Override for non-standard repo names |
+
 Supported plugin types: `mod`, `block`, `local`, `theme`, `auth`, `enrol`, `filter`,
 `format`, `report`, `tool`, `editor`, `atto`, `tiny`, `qtype`, `qbehaviour`,
 `gradeexport`, `gradeimport`, `gradereport`, `repository`, `plagiarism`,
 `availability`, `calendartype`, `message`, `profilefield`, `datafield`,
 `assignsubmission`, `assignfeedback`, `booktool`, `quizaccess`, `ltisource`.
-
-If `pluginName` is omitted, it is guessed from the GitHub URL (e.g.,
-`moodle-block_participants` becomes `participants`).
 
 ### installTheme
 

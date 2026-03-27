@@ -1,0 +1,54 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/course/view.php?id=2",
+  "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Moodle + eXeLearning"
+      }
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "installMoodlePlugin",
+      "url": "https://github.com/exelearning/mod_exeweb/archive/refs/heads/main.zip",
+      "pluginType": "mod",
+      "pluginName": "exeweb"
+    },
+    {
+      "step": "createCategory",
+      "name": "Interactive Content"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "eXeLearning Demo Course",
+      "shortname": "EXEDEMO",
+      "category": "Interactive Content",
+      "summary": "Demonstrates the exeweb activity module for embedding eXeLearning content in Moodle."
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "EXEDEMO",
+      "section": 1,
+      "name": "About this course",
+      "intro": "<h3>eXeLearning + Moodle</h3><p>This course demonstrates the <strong>exeweb</strong> activity module, which allows embedding eXeLearning interactive content directly into Moodle courses.</p>"
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/course/view.php?id=2"
+    }
+  ]
+}

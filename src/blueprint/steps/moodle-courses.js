@@ -4,6 +4,7 @@ import {
   phpCreateSection,
   phpCreateSections,
 } from "../php/helpers.js";
+import { checkPhpResult } from "./check-result.js";
 
 export function registerMoodleCourseSteps(register) {
   register("createCourse", handleCreateCourse);
@@ -42,17 +43,4 @@ async function handleCreateSections(step, { php }) {
   const code = phpCreateSections(step.sections);
   const result = await php.run(code);
   checkPhpResult(result, "createSections");
-}
-
-function checkPhpResult(result, stepName) {
-  const text = result?.text || "";
-  const errors = result?.errors || "";
-  if (errors) {
-    console.warn(`[blueprint] ${stepName} PHP errors:`, errors);
-  }
-  if (text?.includes('"ok":false')) {
-    throw new Error(
-      `${stepName}: PHP returned failure: ${text.substring(0, 500)}`,
-    );
-  }
 }

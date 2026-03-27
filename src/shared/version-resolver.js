@@ -7,7 +7,7 @@ export const MOODLE_BRANCHES = [
   {
     branch: "MOODLE_404_STABLE",
     version: "4.4",
-    label: "Moodle 4.4",
+    label: "Moodle 4.4.x",
     gitRef: "MOODLE_404_STABLE",
     webRoot: "/www/moodle",
     manifestFile: "MOODLE_404_STABLE.json",
@@ -19,7 +19,7 @@ export const MOODLE_BRANCHES = [
   {
     branch: "MOODLE_405_STABLE",
     version: "4.5",
-    label: "Moodle 4.5 (LTS)",
+    label: "Moodle 4.5.x (LTS)",
     gitRef: "MOODLE_405_STABLE",
     webRoot: "/www/moodle",
     manifestFile: "MOODLE_405_STABLE.json",
@@ -31,7 +31,7 @@ export const MOODLE_BRANCHES = [
   {
     branch: "MOODLE_500_STABLE",
     version: "5.0",
-    label: "Moodle 5.0",
+    label: "Moodle 5.0.x",
     gitRef: "MOODLE_500_STABLE",
     webRoot: "/www/moodle",
     manifestFile: "MOODLE_500_STABLE.json",
@@ -43,7 +43,7 @@ export const MOODLE_BRANCHES = [
   {
     branch: "MOODLE_501_STABLE",
     version: "5.1",
-    label: "Moodle 5.1",
+    label: "Moodle 5.1.x",
     gitRef: "MOODLE_501_STABLE",
     webRoot: "/www/moodle/public",
     manifestFile: "MOODLE_501_STABLE.json",
@@ -55,7 +55,7 @@ export const MOODLE_BRANCHES = [
   {
     branch: "main",
     version: "dev",
-    label: "Development (main)",
+    label: "Moodle 5.2dev (main)",
     gitRef: "main",
     webRoot: "/www/moodle/public",
     manifestFile: "main.json",

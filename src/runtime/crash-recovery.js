@@ -37,15 +37,25 @@ export function isFatalWasmError(error) {
     return false;
   }
 
+  // Check for actual WebAssembly.RuntimeError instances first
+  if (
+    typeof WebAssembly !== "undefined" &&
+    error instanceof WebAssembly.RuntimeError
+  ) {
+    return true;
+  }
+
   const message = String(error.message || error);
   return (
-    (typeof WebAssembly !== "undefined" &&
-      error instanceof WebAssembly.RuntimeError) ||
     message.includes("memory access out of bounds") ||
-    message.includes("unreachable") ||
-    message.includes("RuntimeError") ||
+    message.includes("table index is out of bounds") ||
+    message.includes("null function or function signature mismatch") ||
+    // Match "unreachable" as a WASM trap keyword
+    /\bunreachable\b/u.test(message) ||
+    // Match wrapped RuntimeError messages from WASM
+    /\bRuntimeError\b/u.test(message) ||
     message.includes("No file descriptors available") ||
-    message.includes("Failed opening required")
+    message.includes("Failed opening required '/internal/shared/")
   );
 }
 

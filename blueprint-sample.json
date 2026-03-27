@@ -4,7 +4,7 @@
     "php": "8.3",
     "moodle": "5.0"
   },
-  "landingPage": "/my/",
+  "landingPage": "/course/view.php?id=2",
   "constants": {
     "ADMIN_USER": "admin",
     "ADMIN_PASS": "password",
@@ -29,14 +29,14 @@
     },
     {
       "step": "installMoodlePlugin",
-      "pluginType": "block",
-      "pluginName": "participants",
+      "url": "https://github.com/ateeducacion/moodle-mod_simplemod/archive/refs/heads/main.zip"
+    },
+    {
+      "step": "installMoodlePlugin",
       "url": "https://github.com/moodlehq/moodle-block_participants/archive/refs/heads/master.zip"
     },
     {
       "step": "installMoodlePlugin",
-      "pluginType": "local",
-      "pluginName": "staticpage",
       "url": "https://github.com/moodle-an-hochschulen/moodle-local_staticpage/archive/refs/heads/MOODLE_404_STABLE.zip"
     },
     {
@@ -79,6 +79,14 @@
     },
     {
       "step": "addModule",
+      "module": "simplemod",
+      "course": "INTRO101",
+      "section": 1,
+      "name": "My Simple Activity",
+      "intro": "A simple activity module installed via blueprint."
+    },
+    {
+      "step": "addModule",
       "module": "label",
       "course": "INTRO101",
       "section": 1,
@@ -95,7 +103,7 @@
     },
     {
       "step": "setLandingPage",
-      "path": "/my/"
+      "path": "/course/view.php?id=2"
     }
   ]
 }

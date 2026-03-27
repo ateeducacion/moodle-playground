@@ -214,8 +214,9 @@ describe("PHP helpers: addModule", () => {
       intro: "<p>Hello</p>",
     });
     assert.ok(script.includes("'label'"));
-    assert.ok(script.includes("add_moduleinfo"));
+    assert.ok(script.includes("insert_record"));
     assert.ok(script.includes("PHYS101"));
+    assert.ok(script.includes("course_add_cm_to_section"));
   });
 
   it("generates assign module code", () => {
@@ -226,6 +227,6 @@ describe("PHP helpers: addModule", () => {
       name: "HW1",
     });
     assert.ok(script.includes("'assign'"));
-    assert.ok(script.includes("add_moduleinfo"));
+    assert.ok(script.includes("insert_record"));
   });
 });

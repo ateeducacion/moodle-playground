@@ -41,3 +41,14 @@ jobs:
 
       - name: Lint
         run: make lint
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build worker bundle
+        run: npm run build:worker
+
+      - name: Run Playwright e2e tests
+        run: npm run test:e2e
+        env:
+          CI: "true"
