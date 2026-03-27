@@ -56,20 +56,10 @@ async function handleLogin(step, { php, webRoot }) {
   }
 }
 
-async function writeAndRun(php, webRoot, code) {
-  const scriptPath = `${webRoot || "/www/moodle"}/__blueprint_step.php`;
-  await php.writeFile(scriptPath, new TextEncoder().encode(code));
-  try {
-    const result = await php.run(code);
-    if (result.errors) {
-      console.warn("[blueprint] Step PHP errors:", result.errors);
-    }
-    return result;
-  } finally {
-    try {
-      await php.run(`<?php @unlink('${scriptPath.replaceAll("'", "\\'")}');`);
-    } catch {
-      /* non-fatal */
-    }
+async function writeAndRun(php, _webRoot, code) {
+  const result = await php.run(code);
+  if (result.errors) {
+    console.warn("[blueprint] Step PHP errors:", result.errors);
   }
+  return result;
 }

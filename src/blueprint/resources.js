@@ -88,13 +88,24 @@ export class ResourceRegistry {
       const resolved = this.#appBaseUrl
         ? new URL(descriptor.url, this.#appBaseUrl).toString()
         : descriptor.url;
-      const response = await fetch(resolved);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let response;
+      try {
+        response = await fetch(resolved, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (!response.ok) {
         throw new Error(
           `Failed to fetch resource from ${resolved}: ${response.status}`,
         );
       }
-      return new Uint8Array(await response.arrayBuffer());
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > 50 * 1024 * 1024) {
+        throw new Error(`Resource from ${resolved} exceeds 50MB size limit.`);
+      }
+      return new Uint8Array(buffer);
     }
 
     if (descriptor.base64) {

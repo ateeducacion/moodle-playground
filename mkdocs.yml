@@ -23,6 +23,7 @@ nav:
   - Getting started: getting-started.md
   - Architecture: architecture.md
   - Blueprint reference: blueprint-json.md
+  - Blueprint gallery: blueprint-gallery.md
   - Development: development.md
   - Troubleshooting: TROUBLESHOOTING.md
   - Known issues: KNOWN-ISSUES.md

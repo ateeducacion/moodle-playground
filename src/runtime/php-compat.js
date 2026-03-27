@@ -212,18 +212,20 @@ export function wrapPhpInstance(
         PATH_INFO: pathInfo || "",
       };
 
-      // Add HTTP_* headers from the request
+      // Add HTTP_* headers from the request.
+      // Per CGI spec, Content-Type and Content-Length use CONTENT_TYPE and
+      // CONTENT_LENGTH without the HTTP_ prefix (RFC 3875 §4.1.3/4.1.2).
       const headers = req.headers || {};
       for (const [key, value] of Object.entries(headers)) {
-        if (key.toLowerCase() === "host") continue;
-        const envKey = `HTTP_${key.toUpperCase().replace(/-/g, "_")}`;
-        serverVars[envKey] = value;
-        // Also set content-type/content-length without HTTP_ prefix
-        if (key.toLowerCase() === "content-type") {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey === "host") continue;
+        if (lowerKey === "content-type") {
           serverVars.CONTENT_TYPE = value;
-        }
-        if (key.toLowerCase() === "content-length") {
+        } else if (lowerKey === "content-length") {
           serverVars.CONTENT_LENGTH = value;
+        } else {
+          const envKey = `HTTP_${key.toUpperCase().replace(/-/g, "_")}`;
+          serverVars[envKey] = value;
         }
       }
 

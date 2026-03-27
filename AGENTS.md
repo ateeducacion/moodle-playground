@@ -5,6 +5,8 @@ MAINTENANCE: Update this file when:
 - Modifying the Moodle bundle format, manifest schema, or storage model
 - Changing deployment assumptions for GitHub Pages or other static hosting
 - Adding new conventions for blueprints, extensions, or persistent state
+- Updating upstream project references (WordPress Playground, Omeka S Playground)
+- Adding or removing agent skills under .agents/skills/
 -->
 
 # AGENTS.md
@@ -24,6 +26,86 @@ It follows the same product shape as `omeka-s-playground`:
 The Moodle core is extracted from a prebuilt ZIP bundle into Emscripten MEMFS (in-memory)
 at boot. All files — core and mutable state — live in writable MEMFS. The runtime is fully
 ephemeral — all state is lost when the browser tab closes or the page is reloaded.
+
+## Related Projects and Upstream References
+
+This project builds on top of two key upstream projects. Agents should consult them
+when investigating bugs, understanding API surfaces, or looking for implementation patterns:
+
+### WordPress Playground (`@php-wasm/*`)
+
+- **Repository**: https://github.com/WordPress/wordpress-playground
+- **What it provides**: The PHP WebAssembly runtime (`@php-wasm/web`, `@php-wasm/universal`)
+  that powers the PHP execution layer. This includes the WASM-compiled PHP 8.3 binary,
+  the `PHP` class API (`php.run()`, `php.writeFile()`, `php.readFileAsBuffer()`,
+  `php.mkdir()`, `php.isDir()`, `setPhpIniEntries()`, etc.), and the web worker
+  infrastructure for running PHP in the browser.
+- **When to look there**:
+  - Understanding PHP instance lifecycle, request execution, and `PHPRequestHandler`
+  - Debugging WASM-level crashes, memory limits, or file descriptor exhaustion
+  - Checking available PHP extensions in the WASM build
+  - Understanding `php.ini` handling (hardcoded path `/internal/shared/php.ini`)
+  - Investigating Emscripten MEMFS behavior and filesystem APIs
+  - Looking for known issues with the PHP WASM runtime (e.g., [#1137](https://github.com/WordPress/wordpress-playground/issues/1137))
+- **Key difference**: WordPress Playground runs WordPress; we adapted the same PHP runtime
+  to run Moodle and Omeka S. The `php-compat.js` layer in this repo bridges the WP
+  Playground PHP API to our request/response model.
+
+### Omeka S Playground
+
+- **Repository**: https://github.com/ateeducacion/omeka-s-playground
+- **What it is**: The first playground we built using this architecture. Moodle Playground
+  follows the same product shape and many of the same patterns. Omeka S Playground was the
+  proving ground where the shell/remote/sw/worker architecture was designed.
+- **When to look there**:
+  - Understanding the original design intent behind the shell → remote → sw → worker flow
+  - Comparing how a simpler PHP application (Omeka S) handles the same challenges
+    (service worker routing, subpath deployment, ZIP extraction, config generation)
+  - Finding patterns that were proven in Omeka S before being adapted for Moodle
+  - Debugging service worker or iframe communication issues — the pattern originated there
+- **Key differences from Moodle Playground**:
+  - Omeka S uses MySQL via PGlite; Moodle uses SQLite (deprecated PDO driver)
+  - Omeka S has a simpler install flow; Moodle requires a pre-built install snapshot
+  - Moodle Playground adds blueprints, crash recovery, and plugin installation support
+  - Moodle's codebase is significantly larger, requiring more aggressive caching and
+    memory management strategies
+
+### How to use these references
+
+1. **Before inventing a solution**, check if WordPress Playground or Omeka S Playground
+   already solved the same problem — especially for WASM runtime issues, service worker
+   routing, and PHP-in-browser quirks.
+2. **When debugging `@php-wasm/*` APIs**, read the WordPress Playground source code for
+   the authoritative behavior — our `php-compat.js` is a thin adapter, not a replacement.
+3. **When adding new architecture**, check if Omeka S Playground established a pattern
+   first. Consistency across playgrounds reduces maintenance burden.
+
+## Specialist Agent Skills
+
+This project includes domain-expert agent skills under `.agents/skills/`. Each skill
+provides deep context for a specific area of the codebase. Activate the appropriate
+skill when working in its domain — the skill file contains API references, checklists,
+known pitfalls, and conventions that are not repeated elsewhere in this document.
+
+| Skill | Directory | When to use |
+|-------|-----------|-------------|
+| **Moodle Internals** | `@.agents/skills/moodle-internals/SKILL.md` | Moodle APIs, plugin system, database schema, install/upgrade lifecycle, config settings, course structure, user management, enrollment, MUC caching, SQLite compatibility |
+| **WP Playground & php-wasm** | `@.agents/skills/wp-playground-php-wasm/SKILL.md` | `@php-wasm/web` and `@php-wasm/universal` APIs, PHP instance lifecycle, `php.run()` execution model, filesystem operations, `setPhpIniEntries()`, request/response conversion, `php-compat.js` adapter |
+| **WASM & Browser Runtime** | `@.agents/skills/wasm-browser-runtime/SKILL.md` | WASM crashes and memory limits, Emscripten MEMFS, service worker routing and caching, Web Worker communication, crash recovery, GitHub Pages subpath deployment, browser storage constraints |
+| **Blueprint Provisioning** | `@.agents/skills/blueprint-provisioning/SKILL.md` | Blueprint JSON format, step handlers, executor engine, resource resolution, PHP code generation, plugin/theme installation, constant substitution, adding new step types |
+| **Unit Testing** | `@.agents/skills/unit-testing/SKILL.md` | Writing and reviewing unit tests with `node:test`, mocking `php.run()` and MEMFS, testing PHP code generators, service worker helpers, runtime utilities, test organization conventions |
+| **E2E Testing (Playwright)** | `@.agents/skills/e2e-playwright/SKILL.md` | Browser-based end-to-end tests with Playwright, WASM boot waiting strategies, iframe navigation, blueprint execution verification, shell UI interaction, debugging flaky tests |
+
+### Skill activation guidelines
+
+1. **Read the skill file** when entering its domain — it contains the authoritative
+   reference for conventions and known issues in that area.
+2. **Cross-reference skills** when a change spans domains. For example, adding a new
+   blueprint step that installs a plugin touches both `blueprint-provisioning` and
+   `moodle-internals` (plugin type system, upgrade lifecycle).
+3. **Follow the checklists** at the end of each skill file before submitting changes.
+4. **Do not duplicate** skill content in this file — AGENTS.md provides the architectural
+   overview; skills provide the deep domain knowledge.
 
 ## Build System
 
@@ -459,7 +541,8 @@ When changing blueprint semantics, update the schema, step handlers, docs, and t
 ### Quick reference
 
 ```bash
-make test      # Run all unit tests (186 tests across 45 suites)
+make test      # Run all unit tests (286+ tests across 63 suites)
+make test-e2e  # Run Playwright browser tests (shell, boot, blueprints)
 make lint      # Run Biome linter on src/, tests/, scripts/
 make format    # Auto-fix lint and formatting issues
 ```
@@ -467,8 +550,10 @@ make format    # Auto-fix lint and formatting issues
 These are also available as npm scripts:
 
 ```bash
-npm test                  # All tests
+npm test                  # All unit tests
 npm run test:blueprint    # Blueprint tests only
+npm run test:e2e          # Playwright e2e tests
+npm run test:e2e:install  # Install Chromium for Playwright (first time)
 ```
 
 ### Test suites
@@ -511,6 +596,20 @@ Tests live in `tests/` and run with Node.js built-in `node:test` (no framework).
 | File | What it tests |
 |------|---------------|
 | `sw-helpers.test.js` | HTML entity decoding (`&amp;`, `&#x2F;`, `&colon;`, Moodle URLs), scoped runtime path extraction (scope/runtime/path parsing, subpath deployments) |
+
+#### End-to-End (`tests/e2e/`)
+
+E2E tests use [Playwright](https://playwright.dev/) and run against a real browser (Chromium).
+They verify the full playground flow: shell boot → WASM PHP runtime → Moodle loading → blueprint execution.
+
+| File | What it tests |
+|------|---------------|
+| `shell.spec.mjs` | Shell UI: boot, side panel tabs, logs, blueprint display, settings popover, `?blueprint=` param |
+| `moodle-boot.spec.mjs` | Runtime boot lifecycle, PHP Info capture |
+| `blueprint-courses.spec.mjs` | Blueprint execution: course creation, user creation, enrollment, module addition |
+
+Run with `make test-e2e` (requires `npm run test:e2e:install` for first-time Chromium setup).
+Configuration in `playwright.config.mjs`. The dev server auto-starts on port 8085.
 
 ### Linting and formatting
 
@@ -555,3 +654,32 @@ The `.github/workflows/ci.yml` workflow runs on push to `main` and on pull reque
 - Cache file creation in `/persist/moodledata/cache` (verify Moodle cache system initializes)
 
 If a change touches routing or HTML rewriting, prefer checking real browser behavior, not only syntax.
+
+## Architecture Decision Records (ADRs)
+
+Every significant technical decision must be documented as an Architecture Decision Record.
+ADRs capture the context, options considered, rationale, consequences, and review criteria
+so that future contributors (human or AI) understand **why** a choice was made — not just what.
+
+### Rules
+
+1. **When to write an ADR**: Any change that introduces a new pattern, modifies the request
+   pipeline, changes the storage model, adds a dependency, or alters build/deployment behavior.
+   When in doubt, write one — a short ADR is better than no ADR.
+2. **Template**: Always start from `.templates/adr-template.md`. Do not invent a new format.
+3. **Location**: `docs/decisions/NNNN-kebab-case-title.md`, numbered sequentially.
+4. **Language**: English.
+5. **Status values**: `Proposed`, `Accepted`, `Rejected`, `Obsolete`, `Superseded by ADR-NNNN`.
+6. **Cross-reference**: When an ADR supersedes another, update the old ADR's status.
+7. **Link from code**: When code implements an ADR, add a brief comment referencing it
+   (e.g., `// See docs/decisions/0001-sw-level-scoped-static-asset-caching.md`).
+
+### Current ADRs
+
+| ADR | Topic | Status |
+|-----|-------|--------|
+| [0001](docs/decisions/0001-sw-level-scoped-static-asset-caching.md) | SW-level caching for scoped static assets | Accepted |
+| [0002](docs/decisions/0002-plugin-auto-detection-from-github-urls.md) | Plugin type & name auto-detection from GitHub URLs | Accepted |
+| [0003](docs/decisions/0003-direct-db-inserts-for-course-modules.md) | Direct DB inserts for course modules (WASM SQLite compat) | Accepted |
+| [0004](docs/decisions/0004-opcache-tuning-and-runtime-ux-defaults.md) | OPcache tuning and runtime UX defaults | Accepted |
+| [0005](docs/decisions/0005-resilient-blueprint-step-execution.md) | Resilient blueprint step execution with graceful errors | Accepted |

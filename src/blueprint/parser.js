@@ -41,7 +41,9 @@ export function parseBlueprint(input) {
   }
 
   // base64-encoded JSON — typically starts with "ey" (base64 of "{")
-  if (/^[A-Za-z0-9+/=]+$/u.test(trimmed)) {
+  // Accept both standard base64 (+/=) and base64url (-_) variants.
+  // Require minimum length to avoid false positives on short strings like "hello"
+  if (trimmed.length >= 20 && /^[A-Za-z0-9+/=_-]+$/u.test(trimmed)) {
     try {
       const decoded = decodeBase64(trimmed);
       return JSON.parse(decoded);
@@ -78,10 +80,27 @@ function parseDataUrl(dataUrl) {
   }
 }
 
+function normalizeBase64(str) {
+  // Convert base64url to standard base64: - → +, _ → /
+  let b64 = str.replaceAll("-", "+").replaceAll("_", "/");
+  // Add padding if missing
+  const pad = b64.length % 4;
+  if (pad === 2) b64 += "==";
+  else if (pad === 3) b64 += "=";
+  return b64;
+}
+
 function decodeBase64(str) {
+  const normalized = normalizeBase64(str);
   if (typeof atob === "function") {
-    return atob(str);
+    // atob returns Latin-1; decode via Uint8Array for correct UTF-8 handling
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
   }
   // Node.js fallback
-  return Buffer.from(str, "base64").toString("utf-8");
+  return Buffer.from(normalized, "base64").toString("utf-8");
 }

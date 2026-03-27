@@ -1,0 +1,49 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/my/",
+  "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Plugin Showcase"
+      }
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "installMoodlePlugin",
+      "url": "https://github.com/bynfrancesco/moodle-mod_board/archive/refs/heads/main.zip",
+      "pluginType": "mod",
+      "pluginName": "board"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Plugin Showcase Course",
+      "shortname": "PLUGINS",
+      "summary": "A course that demonstrates third-party Moodle plugins."
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "PLUGINS",
+      "section": 1,
+      "name": "Board Plugin",
+      "intro": "<h3>Board Activity</h3><p>The Board plugin provides a Kanban-style collaborative board within Moodle courses.</p>"
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/my/"
+    }
+  ]
+}

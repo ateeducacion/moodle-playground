@@ -1,6 +1,7 @@
 /**
  * Filesystem step handlers: mkdir, rmdir, writeFile, writeFiles, copyFile, moveFile, unzip.
  */
+import { escapePhp } from "../php/helpers.js";
 
 export function registerFilesystemSteps(register) {
   register("mkdir", handleMkdir);
@@ -22,7 +23,7 @@ async function handleMkdir(step, { php }) {
   for (const seg of segments) {
     current += `/${seg}`;
     try {
-      await php.run(`<?php @mkdir('${escapePath(current)}', 0777);`);
+      await php.run(`<?php @mkdir('${escapePhp(current)}', 0777);`);
     } catch {
       /* already exists */
     }
@@ -46,7 +47,7 @@ function rrmdir($dir, $recursive) {
     }
     rmdir($dir);
 }
-rrmdir('${escapePath(path)}', ${recursive});
+rrmdir('${escapePhp(path)}', ${recursive});
 echo json_encode(['ok' => true]);
 `);
 }
@@ -101,7 +102,7 @@ async function handleMoveFile(step, { php }) {
 
   const data = await php.readFile(from);
   await php.writeFile(to, data);
-  await php.run(`<?php @unlink('${escapePath(from)}');`);
+  await php.run(`<?php @unlink('${escapePhp(from)}');`);
 }
 
 async function handleUnzip(step, { php, resources }) {
@@ -109,15 +110,10 @@ async function handleUnzip(step, { php, resources }) {
   if (!destination)
     throw new Error("unzip: 'destination' (or 'path') is required.");
 
-  let zipBytes;
-  if (step.data) {
-    zipBytes =
-      typeof step.data === "string" && step.data.startsWith("@")
-        ? await resources.resolve(step.data)
-        : await resources.resolve(step.data);
-  } else {
+  if (!step.data) {
     throw new Error("unzip: 'data' is required.");
   }
+  const zipBytes = await resources.resolve(step.data);
 
   // Use fflate for decompression
   const { unzipSync } = await import("fflate");
@@ -130,13 +126,9 @@ async function handleUnzip(step, { php, resources }) {
     // Ensure parent directory exists
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir) {
-      await php.run(`<?php @mkdir('${escapePath(parentDir)}', 0777, true);`);
+      await php.run(`<?php @mkdir('${escapePhp(parentDir)}', 0777, true);`);
     }
 
     await php.writeFile(fullPath, entryData);
   }
-}
-
-function escapePath(path) {
-  return String(path).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
 }
