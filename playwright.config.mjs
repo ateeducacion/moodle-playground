@@ -10,7 +10,7 @@ const reportDir = process.env.PLAYWRIGHT_REPORT_DIR || "playwright-report";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
-  workers: 1,
+  workers: process.env.CI ? 1 : 3,
   timeout: 180_000,
   expect: {
     timeout: 30_000,
