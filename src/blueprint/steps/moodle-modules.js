@@ -20,13 +20,9 @@ async function handleAddModule(step, { php, publish }) {
     if (stdout?.includes('"ok":true')) {
       return;
     }
-    // Log but don't fail the blueprint — subsequent steps should continue.
-    if (publish)
-      publish(
-        `addModule ${step.module} failed: ${String(err.message || err).slice(0, 150)}`,
-        0.95,
-      );
-    return;
+    const detail = `addModule ${step.module} failed: ${String(err.message || err).slice(0, 150)}`;
+    if (publish) publish(detail, 0.95);
+    throw new Error(detail);
   }
   const text = result?.text || "";
   const errors = result?.errors || "";
@@ -36,7 +32,9 @@ async function handleAddModule(step, { php, publish }) {
       0.95,
     );
   }
-  if (text?.includes('"ok":false') && publish) {
-    publish(`addModule ${step.module} failed: ${text.slice(0, 200)}`, 0.95);
+  if (text?.includes('"ok":false')) {
+    const detail = `addModule ${step.module} failed: ${text.slice(0, 200)}`;
+    if (publish) publish(detail, 0.95);
+    throw new Error(detail);
   }
 }

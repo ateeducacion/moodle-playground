@@ -8,8 +8,13 @@
 // script file, so __DIR__ does not resolve to the Moodle directory.
 const MOODLE_ROOT = "/www/moodle";
 
-function escapePhp(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+export function escapePhp(value) {
+  return String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll("'", "\\'")
+    .replaceAll("\0", "\\0")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r");
 }
 
 const CLI_HEADER = `<?php
@@ -54,6 +59,15 @@ try {
     $instance->intro = $moduleInfo->intro ?? '';
     $instance->introformat = $moduleInfo->introformat ?? 1;
     $instance->timemodified = time();
+    // Copy module-specific fields (e.g. assign grade, submissiondrafts)
+    // that type-specific generators set on $moduleInfo.
+    $skip = ['modulename','name','intro','introformat','course','section',
+             'visible','cmidnumber','groupmode','groupingid','files','display'];
+    foreach (get_object_vars($moduleInfo) as $k => $v) {
+        if (!isset($instance->$k) && !in_array($k, $skip)) {
+            $instance->$k = $v;
+        }
+    }
     $instanceid = $DB->insert_record($moduleInfo->modulename, $instance);
 
     $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
@@ -203,12 +217,16 @@ echo json_encode(['ok' => true, 'section' => $sectionnum]);
 }
 
 export function phpCreateSections(sections) {
-  const blocks = sections.map(
-    (s, i) => `
+  const blocks = sections.map((s, i) => {
+    const nameEscaped = escapePhp(s.name || "");
+    return `
 $course${i} = $DB->get_record('course', ['shortname' => '${escapePhp(s.course)}'], '*', MUST_EXIST);
 $sec${i} = course_create_section($course${i}->id, ${parseInt(s.position || 0, 10)});
-$results[] = $sec${i};`,
-  );
+if ('${nameEscaped}') {
+    course_update_section($course${i}->id, $sec${i}, ['name' => '${nameEscaped}']);
+}
+$results[] = $sec${i};`;
+  });
 
   return `${CLI_HEADER}
 require_once($CFG->dirroot . '/course/lib.php');
@@ -230,6 +248,7 @@ export function phpEnrolUsers(enrolments) {
 $user${i} = $DB->get_record('user', ['username' => '${escapePhp(e.username)}'], '*', MUST_EXIST);
 $course${i} = $DB->get_record('course', ['shortname' => '${escapePhp(e.course)}'], '*', MUST_EXIST);
 $roleId${i} = $DB->get_field('role', 'id', ['shortname' => '${role}']);
+if (!$roleId${i}) { throw new \\moodle_exception('invalidroleid', 'error', '', '${role}'); }
 enrol_try_internal_enrol($course${i}->id, $user${i}->id, $roleId${i});
 $enrolled[] = ['user' => '${escapePhp(e.username)}', 'course' => '${escapePhp(e.course)}'];`;
   });

@@ -105,6 +105,8 @@ function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
 }
 
+const MAX_LOG_ENTRIES = 500;
+
 function appendLog(message, isError = false) {
   const line = `[${new Date().toISOString()}] ${message}`;
   const span = document.createElement("span");
@@ -113,6 +115,10 @@ function appendLog(message, isError = false) {
     span.className = "error";
   }
   els.logPanel.append(span);
+  // Prune oldest entries to prevent unbounded DOM growth
+  while (els.logPanel.childElementCount > MAX_LOG_ENTRIES) {
+    els.logPanel.firstElementChild?.remove();
+  }
   els.logPanel.scrollTop = els.logPanel.scrollHeight;
 }
 
@@ -357,7 +363,8 @@ async function importPayload(file) {
   activeBlueprint = blueprint;
   saveBlueprint(scopeId, activeBlueprint);
   pendingCleanBoot = true;
-  currentPath = activeBlueprint.landingPage || config.landingPath || "/?redirect=0";
+  currentPath =
+    activeBlueprint.landingPage || config.landingPath || "/?redirect=0";
   els.address.value = currentPath;
   updateBlueprintTextarea();
   saveState({ importedBlueprintAt: new Date().toISOString() });
@@ -686,7 +693,7 @@ els.importInput.addEventListener("change", async () => {
   }
 });
 
-els.reset.addEventListener("click", () => {
+els.reset.addEventListener("click", async () => {
   if (uiLocked) {
     return;
   }
@@ -699,14 +706,15 @@ els.reset.addEventListener("click", () => {
     !url.searchParams.has("blueprint-url")
   ) {
     clearBlueprint(scopeId);
-    activeBlueprint = resolveBlueprint({
+    activeBlueprint = await resolveBlueprint({
       scopeId,
       location: window.location,
       defaultBlueprintUrl: config.defaultBlueprintUrl,
     });
     updateBlueprintTextarea();
   }
-  currentPath = activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+  currentPath =
+    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
   els.address.value = currentPath;
   pendingCleanBoot = true;
   remoteFrameBooted = false;

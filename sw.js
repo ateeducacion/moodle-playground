@@ -184,9 +184,13 @@ async function purgeOldStaticCaches() {
   );
 }
 
+function escapeHtml(str) {
+  return String(str).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
 function buildErrorResponse(message, status = 500) {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Moodle Playground Error</title><body><pre>${message}</pre></body>`,
+    `<!doctype html><meta charset="utf-8"><title>Moodle Playground Error</title><body><pre>${escapeHtml(message)}</pre></body>`,
     {
       status,
       headers: {
@@ -483,23 +487,19 @@ function buildScopedUrl(url, { scopeId, runtimeId, requestPath }) {
   return new URL(`${scopedPath}`, url.origin);
 }
 
-function forwardToPhpWorker({ request, scopeId }) {
+async function forwardToPhpWorker({ request, scopeId }) {
   const bridge = ensureBridge(scopeId);
   const id = createWorkerRequestId();
+  const serialized = await serializeRequest(request);
 
-  return new Promise(async (resolve) => {
+  return new Promise((resolve) => {
     const timeoutId = self.setTimeout(() => {
       pending.delete(id);
       resolve(buildErrorResponse("PHP worker bridge timed out.", 504));
     }, 300000);
 
     pending.set(id, { resolve, timeoutId });
-
-    bridge.postMessage({
-      kind: "http-request",
-      id,
-      request: await serializeRequest(request),
-    });
+    bridge.postMessage({ kind: "http-request", id, request: serialized });
   });
 }
 
@@ -581,6 +581,15 @@ self.addEventListener("fetch", (event) => {
         clientContexts.set(event.clientId, { scopeId, runtimeId });
       }
 
+      // Prune stale clientContexts entries periodically
+      if (clientContexts.size > 50) {
+        const activeClients = await self.clients.matchAll({ type: "window" });
+        const activeIds = new Set(activeClients.map((c) => c.id));
+        for (const cid of clientContexts.keys()) {
+          if (!activeIds.has(cid)) clientContexts.delete(cid);
+        }
+      }
+
       const directScoped = extractScopedRuntime(url.pathname, url.search);
       if (!directScoped && event.request.mode === "navigate" && event.request.method === "GET") {
         return Response.redirect(buildScopedUrl(url, scopedRequest), 302);
@@ -615,6 +624,14 @@ self.addEventListener("fetch", (event) => {
           // Never cache HTML responses — they need URL rewriting and are dynamic.
           if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) {
             scopedCache.put(cacheKey, fresh.clone()).catch(() => {});
+            // Evict oldest entries when cache grows too large
+            scopedCache.keys().then((keys) => {
+              if (keys.length > 300) {
+                for (let i = 0; i < keys.length - 300; i++) {
+                  scopedCache.delete(keys[i]).catch(() => {});
+                }
+              }
+            }).catch(() => {});
           }
         }
         return fresh;

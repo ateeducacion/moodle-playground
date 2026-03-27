@@ -93,6 +93,8 @@ known pitfalls, and conventions that are not repeated elsewhere in this document
 | **WP Playground & php-wasm** | `@.agents/skills/wp-playground-php-wasm/SKILL.md` | `@php-wasm/web` and `@php-wasm/universal` APIs, PHP instance lifecycle, `php.run()` execution model, filesystem operations, `setPhpIniEntries()`, request/response conversion, `php-compat.js` adapter |
 | **WASM & Browser Runtime** | `@.agents/skills/wasm-browser-runtime/SKILL.md` | WASM crashes and memory limits, Emscripten MEMFS, service worker routing and caching, Web Worker communication, crash recovery, GitHub Pages subpath deployment, browser storage constraints |
 | **Blueprint Provisioning** | `@.agents/skills/blueprint-provisioning/SKILL.md` | Blueprint JSON format, step handlers, executor engine, resource resolution, PHP code generation, plugin/theme installation, constant substitution, adding new step types |
+| **Unit Testing** | `@.agents/skills/unit-testing/SKILL.md` | Writing and reviewing unit tests with `node:test`, mocking `php.run()` and MEMFS, testing PHP code generators, service worker helpers, runtime utilities, test organization conventions |
+| **E2E Testing (Playwright)** | `@.agents/skills/e2e-playwright/SKILL.md` | Browser-based end-to-end tests with Playwright, WASM boot waiting strategies, iframe navigation, blueprint execution verification, shell UI interaction, debugging flaky tests |
 
 ### Skill activation guidelines
 
@@ -539,7 +541,8 @@ When changing blueprint semantics, update the schema, step handlers, docs, and t
 ### Quick reference
 
 ```bash
-make test      # Run all unit tests (186 tests across 45 suites)
+make test      # Run all unit tests (286+ tests across 63 suites)
+make test-e2e  # Run Playwright browser tests (shell, boot, blueprints)
 make lint      # Run Biome linter on src/, tests/, scripts/
 make format    # Auto-fix lint and formatting issues
 ```
@@ -547,8 +550,10 @@ make format    # Auto-fix lint and formatting issues
 These are also available as npm scripts:
 
 ```bash
-npm test                  # All tests
+npm test                  # All unit tests
 npm run test:blueprint    # Blueprint tests only
+npm run test:e2e          # Playwright e2e tests
+npm run test:e2e:install  # Install Chromium for Playwright (first time)
 ```
 
 ### Test suites
@@ -591,6 +596,20 @@ Tests live in `tests/` and run with Node.js built-in `node:test` (no framework).
 | File | What it tests |
 |------|---------------|
 | `sw-helpers.test.js` | HTML entity decoding (`&amp;`, `&#x2F;`, `&colon;`, Moodle URLs), scoped runtime path extraction (scope/runtime/path parsing, subpath deployments) |
+
+#### End-to-End (`tests/e2e/`)
+
+E2E tests use [Playwright](https://playwright.dev/) and run against a real browser (Chromium).
+They verify the full playground flow: shell boot → WASM PHP runtime → Moodle loading → blueprint execution.
+
+| File | What it tests |
+|------|---------------|
+| `shell.spec.mjs` | Shell UI: boot, side panel tabs, logs, blueprint display, settings popover, `?blueprint=` param |
+| `moodle-boot.spec.mjs` | Runtime boot lifecycle, PHP Info capture |
+| `blueprint-courses.spec.mjs` | Blueprint execution: course creation, user creation, enrollment, module addition |
+
+Run with `make test-e2e` (requires `npm run test:e2e:install` for first-time Chromium setup).
+Configuration in `playwright.config.mjs`. The dev server auto-starts on port 8085.
 
 ### Linting and formatting
 

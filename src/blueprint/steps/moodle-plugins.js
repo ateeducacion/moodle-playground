@@ -40,6 +40,17 @@ const PLUGIN_TYPE_DIRS = {
   booktool: "mod/book/tool",
   quizaccess: "mod/quiz/accessrule",
   ltisource: "mod/lti/source",
+  workshopform: "mod/workshop/form",
+  workshopallocation: "mod/workshop/allocation",
+  workshopeval: "mod/workshop/eval",
+  contenttype: "contentbank/contenttype",
+  customfield: "customfield/field",
+  media: "media/player",
+  paygw: "payment/gateway",
+  qbank: "question/bank",
+  search: "search/engine",
+  aiprovider: "ai/provider",
+  aiplacement: "ai/placement",
 };
 
 export function registerMoodlePluginSteps(register) {

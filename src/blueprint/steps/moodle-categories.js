@@ -1,4 +1,5 @@
 import { phpCreateCategories, phpCreateCategory } from "../php/helpers.js";
+import { checkPhpResult } from "./check-result.js";
 
 export function registerMoodleCategorySteps(register) {
   register("createCategory", handleCreateCategory);
@@ -18,17 +19,4 @@ async function handleCreateCategories(step, { php }) {
   const code = phpCreateCategories(step.categories);
   const result = await php.run(code);
   checkPhpResult(result, "createCategories");
-}
-
-function checkPhpResult(result, stepName) {
-  const text = result?.text || "";
-  const errors = result?.errors || "";
-  if (errors) {
-    console.warn(`[blueprint] ${stepName} PHP errors:`, errors);
-  }
-  if (text?.includes('"ok":false')) {
-    throw new Error(
-      `${stepName}: PHP returned failure: ${text.substring(0, 500)}`,
-    );
-  }
 }

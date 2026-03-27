@@ -1,0 +1,150 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/course/view.php?id=2",
+  "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com",
+    "TEACHER_USER": "teacher1",
+    "TEACHER_PASS": "Teacher1!",
+    "TEACHER_EMAIL": "teacher1@example.com"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Classroom Ready Demo"
+      }
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    },
+    {
+      "step": "createUsers",
+      "users": [
+        {
+          "username": "{{TEACHER_USER}}",
+          "password": "{{TEACHER_PASS}}",
+          "email": "{{TEACHER_EMAIL}}",
+          "firstname": "Jane",
+          "lastname": "Smith"
+        },
+        {
+          "username": "student1",
+          "password": "Student1!",
+          "email": "student1@example.com",
+          "firstname": "Alice",
+          "lastname": "Johnson"
+        },
+        {
+          "username": "student2",
+          "password": "Student2!",
+          "email": "student2@example.com",
+          "firstname": "Bob",
+          "lastname": "Williams"
+        },
+        {
+          "username": "student3",
+          "password": "Student3!",
+          "email": "student3@example.com",
+          "firstname": "Carlos",
+          "lastname": "Garcia"
+        }
+      ]
+    },
+    {
+      "step": "createCategory",
+      "name": "Languages"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "English for Beginners",
+      "shortname": "ENG101",
+      "category": "Languages",
+      "numsections": 4,
+      "summary": "A beginner's course in English language with assignments, forums, and quizzes."
+    },
+    {
+      "step": "enrolUsers",
+      "enrolments": [
+        { "username": "{{TEACHER_USER}}", "course": "ENG101", "role": "editingteacher" },
+        { "username": "student1", "course": "ENG101", "role": "student" },
+        { "username": "student2", "course": "ENG101", "role": "student" },
+        { "username": "student3", "course": "ENG101", "role": "student" }
+      ]
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "ENG101",
+      "section": 1,
+      "name": "Unit 1 Introduction",
+      "intro": "<h3>Unit 1: Greetings and Introductions</h3><p>Learn how to introduce yourself and greet others in English.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "assign",
+      "course": "ENG101",
+      "section": 1,
+      "name": "Self-Introduction Essay",
+      "intro": "Write a short paragraph introducing yourself in English (100-200 words)."
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "ENG101",
+      "section": 2,
+      "name": "Unit 2 Introduction",
+      "intro": "<h3>Unit 2: Daily Routines</h3><p>Describe your daily activities using present tense verbs.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "url",
+      "course": "ENG101",
+      "section": 2,
+      "name": "English Grammar Reference",
+      "intro": "Present tense verb conjugation guide."
+    },
+    {
+      "step": "addModule",
+      "module": "assign",
+      "course": "ENG101",
+      "section": 2,
+      "name": "My Daily Routine",
+      "intro": "Describe your typical day using at least 10 present tense verbs."
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "ENG101",
+      "section": 3,
+      "name": "Unit 3 Introduction",
+      "intro": "<h3>Unit 3: Food and Shopping</h3><p>Learn vocabulary for food, shopping, and ordering at a restaurant.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "label",
+      "course": "ENG101",
+      "section": 4,
+      "name": "Final Project",
+      "intro": "<h3>Final Project</h3><p>Create a short video introducing yourself, your daily routine, and your favorite food.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "assign",
+      "course": "ENG101",
+      "section": 4,
+      "name": "Final Video Project",
+      "intro": "Record a 2-minute video in English covering all topics from the course."
+    },
+    {
+      "step": "setLandingPage",
+      "path": "/course/view.php?id=2"
+    }
+  ]
+}

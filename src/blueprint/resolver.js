@@ -1,4 +1,5 @@
 import { parseBlueprint } from "./parser.js";
+import { validateBlueprint } from "./schema.js";
 import { loadBlueprint, saveBlueprint } from "./storage.js";
 
 /**
@@ -52,6 +53,10 @@ export async function resolveBlueprint({
           throw new Error(`HTTP ${response.status}`);
         }
         const blueprint = await response.json();
+        const validation = validateBlueprint(blueprint);
+        if (!validation.valid) {
+          throw new Error(`Invalid blueprint: ${validation.errors.join(", ")}`);
+        }
         console.log("[blueprint] Resolved from ?blueprint-url= param.");
         saveBlueprint(scopeId, blueprint);
         return blueprint;
@@ -80,6 +85,13 @@ export async function resolveBlueprint({
       });
       if (response.ok) {
         const blueprint = await response.json();
+        const validation = validateBlueprint(blueprint);
+        if (!validation.valid) {
+          console.warn(
+            "[blueprint] Default blueprint invalid:",
+            validation.errors,
+          );
+        }
         console.log("[blueprint] Resolved from defaultBlueprintUrl.");
         saveBlueprint(scopeId, blueprint);
         return blueprint;

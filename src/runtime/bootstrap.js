@@ -1763,7 +1763,7 @@ async function loadInstallSnapshot(
     }
   }
 
-  if (!response || !response.ok) {
+  if (!response?.ok) {
     publish("Snapshot not available, falling back to full install.", 0.875);
     return false;
   }
@@ -2433,7 +2433,7 @@ export async function bootstrapMoodle({
   // opens directly to the dashboard, just like WordPress Playground does.
   // If the blueprint already includes a `login` step, skip this hardcoded login.
   const AUTO_LOGIN_PATH = `${webRoot}/__playground_autologin.php`;
-  let readyPath = blueprintLandingPage || "/my/";
+  let readyPath = blueprintLandingPage || blueprint?.landingPage || "/my/";
   if (!hasLoginStep) {
     try {
       publish("Creating admin session for auto-login.", 0.95);
