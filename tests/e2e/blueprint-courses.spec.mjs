@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   captureDiagnostics,
   createDiagnosticsCollector,
-  waitForPlaygroundReady,
+  waitForShellReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -75,7 +75,7 @@ test("blueprint creates a course with a user and enrollment", async ({
 
   try {
     await page.goto(`/?blueprint=${bp}`);
-    await waitForPlaygroundReady(page, "/course/view.php?id=2");
+    await waitForShellReady(page);
 
     // Verify the address bar shows the course view
     const address = await page.locator("#address-input").inputValue();

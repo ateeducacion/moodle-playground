@@ -3,7 +3,7 @@ import {
   captureDiagnostics,
   createDiagnosticsCollector,
   openPlayground,
-  waitForPlaygroundReady,
+  waitForShellReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -44,7 +44,7 @@ test("loads the shell and boots the Moodle runtime", async ({
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     const address = await page.locator("#address-input").inputValue();
     expect(address).toBeTruthy();
@@ -58,7 +58,7 @@ test("side panel opens and shows tabs", async ({ page }, testInfo) => {
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await expect(page.locator("#panel-toggle-button")).toHaveAttribute(
       "aria-expanded",
@@ -84,7 +84,7 @@ test("logs tab displays runtime log entries", async ({ page }, testInfo) => {
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await page.locator("#panel-toggle-button").click();
     await page.locator("#logs-tab").click();
@@ -103,7 +103,7 @@ test("blueprint tab shows the active blueprint JSON", async ({
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await page.locator("#panel-toggle-button").click();
     await page.locator("#blueprint-tab").click();
@@ -125,7 +125,7 @@ test("settings popover opens and shows version selectors", async ({
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await page.locator("#settings-button").click();
     await expect(page.locator("#settings-popover")).toHaveClass(/is-open/);
@@ -170,7 +170,7 @@ test("accepts blueprint via ?blueprint= query param", async ({
     });
 
     await page.goto(`/?blueprint=${bp}`);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await page.locator("#panel-toggle-button").click();
     await page.locator("#blueprint-tab").click();

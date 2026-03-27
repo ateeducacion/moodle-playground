@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 export const DEFAULT_LANDING_PATH = "/my/";
-export const readyTimeoutMs = 5 * 60 * 1000;
+export const readyTimeoutMs = 120_000;
 
 export function createDiagnosticsCollector(page) {
   const consoleMessages = [];
@@ -145,6 +145,23 @@ export async function openPlayground(page) {
   });
 }
 
+/**
+ * Light wait: shell UI is ready (address bar enabled, runtime label populated).
+ * Use for tests that only interact with the shell, not Moodle content inside the iframe.
+ */
+export async function waitForShellReady(page) {
+  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
+    timeout: readyTimeoutMs,
+  });
+  await expect(page.locator("#address-input")).toBeEnabled({
+    timeout: readyTimeoutMs,
+  });
+}
+
+/**
+ * Full wait: shell ready + Moodle content rendered inside the nested iframe.
+ * Use for tests that need to interact with Moodle UI (forms, navigation).
+ */
 export async function waitForPlaygroundReady(
   page,
   expectedPath = DEFAULT_LANDING_PATH,

@@ -3,7 +3,7 @@ import {
   captureDiagnostics,
   createDiagnosticsCollector,
   openPlayground,
-  waitForPlaygroundReady,
+  waitForShellReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -16,7 +16,7 @@ test("Moodle dashboard loads after boot", async ({ page }, testInfo) => {
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     const address = await page.locator("#address-input").inputValue();
     expect(address).toMatch(/^\//);
@@ -31,7 +31,7 @@ test("PHP Info tab captures runtime diagnostics", async ({
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     await page.locator("#panel-toggle-button").click();
     await page.locator("#phpinfo-tab").click();
