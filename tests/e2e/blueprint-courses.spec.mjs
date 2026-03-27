@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import {
+  captureDiagnostics,
+  createDiagnosticsCollector,
+  waitForPlaygroundReady,
+} from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -6,23 +11,15 @@ function buildBlueprintParam(payload) {
   return Buffer.from(JSON.stringify(payload)).toString("base64url");
 }
 
-async function waitForRuntimeReady(page) {
-  await expect(page.locator("#address-input")).toBeEnabled({
-    timeout: 120_000,
-  });
-  await expect(page.locator("#site-frame")).toHaveAttribute(
-    "src",
-    /scope=|playground\//,
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Blueprint: course creation with users and enrollment
+// Blueprint: course creation with users, enrollment, and modules
 // ---------------------------------------------------------------------------
 
 test("blueprint creates a course with a user and enrollment", async ({
   page,
-}) => {
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildBlueprintParam({
     landingPage: "/course/view.php?id=2",
     steps: [
@@ -76,43 +73,29 @@ test("blueprint creates a course with a user and enrollment", async ({
     ],
   });
 
-  // Capture browser console for debugging
-  const consoleLogs = [];
-  page.on("console", (msg) =>
-    consoleLogs.push(`[${msg.type()}] ${msg.text()}`),
-  );
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page, "/course/view.php?id=2");
 
-  await page.goto(`/?blueprint=${bp}`);
-  await waitForRuntimeReady(page);
+    // Verify the address bar shows the course view
+    const address = await page.locator("#address-input").inputValue();
+    expect(address).toContain("/course/view.php");
 
-  // Dump runtime logs for debugging if address doesn't match
-  const address = await page.locator("#address-input").inputValue();
-  if (!address.includes("/course/view.php")) {
+    // Verify the blueprint tab contains our custom data
     await page.locator("#panel-toggle-button").click();
+    await page.locator("#blueprint-tab").click();
+    await expect(page.locator("#blueprint-textarea")).toHaveValue(
+      /E2E Test Course/,
+    );
+    await expect(page.locator("#blueprint-textarea")).toHaveValue(
+      /E2E Assignment/,
+    );
+
+    // Verify logs show successful bootstrap
     await page.locator("#logs-tab").click();
-    const runtimeLogs = await page.locator("#log-panel").textContent();
-    console.log("=== RUNTIME LOGS (last 3000 chars) ===");
-    console.log(runtimeLogs.slice(-3000));
-    console.log("=== BROWSER CONSOLE (last 30 lines) ===");
-    for (const line of consoleLogs.slice(-30)) console.log(line);
-    console.log("=== ADDRESS BAR ===", address);
+    const logText = await page.locator("#log-panel").textContent();
+    expect(logText).toContain("Moodle");
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
   }
-
-  // Verify the address bar shows the course view
-  expect(address).toContain("/course/view.php");
-
-  // Verify the blueprint tab contains our custom data
-  await page.locator("#panel-toggle-button").click();
-  await page.locator("#blueprint-tab").click();
-  await expect(page.locator("#blueprint-textarea")).toHaveValue(
-    /E2E Test Course/,
-  );
-  await expect(page.locator("#blueprint-textarea")).toHaveValue(
-    /E2E Assignment/,
-  );
-
-  // Verify logs show successful bootstrap
-  await page.locator("#logs-tab").click();
-  const logText = await page.locator("#log-panel").textContent();
-  expect(logText).toContain("Moodle");
 });

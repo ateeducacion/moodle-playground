@@ -11,3 +11,5 @@ src/generated/
 .playwright-mcp/
 vendor/
 test-results/
+playwright-report/
+playwright-artifacts/

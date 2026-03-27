@@ -1,43 +1,47 @@
 import { expect, test } from "@playwright/test";
+import {
+  captureDiagnostics,
+  createDiagnosticsCollector,
+  openPlayground,
+  waitForPlaygroundReady,
+} from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
-
-async function waitForRuntimeReady(page) {
-  await expect(page.locator("#address-input")).toBeEnabled({
-    timeout: 120_000,
-  });
-  await expect(page.locator("#site-frame")).toHaveAttribute(
-    "src",
-    /scope=|playground\//,
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Moodle runtime boot tests
 // ---------------------------------------------------------------------------
 
-test("Moodle dashboard loads after boot", async ({ page }) => {
-  await page.goto("/");
-  await waitForRuntimeReady(page);
+test("Moodle dashboard loads after boot", async ({ page }, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  try {
+    await openPlayground(page);
+    await waitForPlaygroundReady(page);
 
-  // The address should point to a Moodle page
-  const address = await page.locator("#address-input").inputValue();
-  expect(address).toMatch(/^\//);
+    const address = await page.locator("#address-input").inputValue();
+    expect(address).toMatch(/^\//);
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
 });
 
-test("PHP Info tab captures runtime diagnostics", async ({ page }) => {
-  await page.goto("/");
-  await waitForRuntimeReady(page);
+test("PHP Info tab captures runtime diagnostics", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  try {
+    await openPlayground(page);
+    await waitForPlaygroundReady(page);
 
-  await page.locator("#panel-toggle-button").click();
-  await page.locator("#phpinfo-tab").click();
+    await page.locator("#panel-toggle-button").click();
+    await page.locator("#phpinfo-tab").click();
+    await page.locator("#refresh-phpinfo-button").click();
 
-  // Click refresh to capture PHP info
-  await page.locator("#refresh-phpinfo-button").click();
-
-  // Wait for the phpinfo frame to contain PHP version info
-  const phpinfoFrame = page.locator("#phpinfo-frame");
-  await expect(phpinfoFrame).toHaveAttribute("srcdoc", /PHP Version/, {
-    timeout: 30_000,
-  });
+    const phpinfoFrame = page.locator("#phpinfo-frame");
+    await expect(phpinfoFrame).toHaveAttribute("srcdoc", /PHP Version/, {
+      timeout: 30_000,
+    });
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
 });

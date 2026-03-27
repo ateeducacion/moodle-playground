@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy-preview:
+  build-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
@@ -65,6 +65,66 @@ jobs:
             --exclude "tests/" \
             --exclude "patches/" \
             --exclude "scripts/"
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-artifact
+          path: dist-preview/
+          retention-days: 1
+
+  browser-validation:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    needs: build-preview
+    strategy:
+      matrix:
+        browser: [chromium]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-artifact
+          path: dist-preview
+
+      - name: Run Playwright e2e tests
+        run: npx playwright test --project=${{ matrix.browser }}
+        env:
+          CI: "true"
+          PLAYWRIGHT_WEB_ROOT: dist-preview
+          PLAYWRIGHT_EXTERNAL_SERVER: "0"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-preview-${{ matrix.browser }}
+          path: test-results/
+          retention-days: 7
+
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    needs: [build-preview, browser-validation]
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-artifact
+          path: dist-preview
 
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3

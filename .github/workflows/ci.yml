@@ -48,7 +48,7 @@ jobs:
       - name: Build worker bundle
         run: npm run build:worker
 
-      - name: Run Playwright e2e tests
-        run: npm run test:e2e
+      - name: Run Playwright e2e tests (Chromium)
+        run: npx playwright test --project=chromium
         env:
           CI: "true"
