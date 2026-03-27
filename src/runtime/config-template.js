@@ -112,6 +112,17 @@ if (!property_exists($CFG, 'registerauth')) {
 if (!property_exists($CFG, 'langmenu')) {
     $CFG->langmenu = 0;
 }
+// Extend session timeout to 8 hours and disable the JS timeout warning.
+// The runtime is ephemeral (tab close = full reset) so session expiry is
+// irrelevant. The default config makes Moodle's network.js initialize a
+// session-timeout watcher on every page load, logging "Starting Moodle
+// session timeout warning" to the console — noise with no value here.
+if (!property_exists($CFG, 'sessiontimeout')) {
+    $CFG->sessiontimeout = 28800;
+}
+if (!property_exists($CFG, 'sessiontimeoutwarning')) {
+    $CFG->sessiontimeoutwarning = 0;
+}
 
 if (!defined('NO_DEBUG_DISPLAY')) {
     define('NO_DEBUG_DISPLAY', ${Number(debugdisplay) ? "false" : "true"});
@@ -253,5 +264,16 @@ export function createPhpIniEntries({
     upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
     "session.save_path": `${TEMP_ROOT}/sessions`,
+    // OPcache tuning — use in-memory file cache with a high file limit
+    // and no timestamp checks (the readonly bundle never changes within
+    // a session), so PHP avoids recompiling on every request.
+    "opcache.enable": "1",
+    "opcache.file_cache": "/internal/shared/opcache",
+    "opcache.file_cache_only": "1",
+    "opcache.max_accelerated_files": "10000",
+    "opcache.memory_consumption": "128",
+    "opcache.interned_strings_buffer": "32",
+    "opcache.validate_timestamps": "0",
+    "opcache.file_cache_consistency_checks": "0",
   };
 }

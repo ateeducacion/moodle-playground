@@ -24,7 +24,7 @@ check-php:
 	fi
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
-.PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test lint format
+.PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test test-e2e lint format
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
 
 deps:
@@ -96,6 +96,9 @@ up-local: deps build-version bundle
 
 test:
 	node --test tests/**/*.test.js
+
+test-e2e:
+	npm run test:e2e
 
 lint:
 	npx @biomejs/biome check

@@ -1,0 +1,248 @@
+---
+name: wp-playground-php-wasm
+description: WordPress Playground and @php-wasm runtime expert. Use when working with the PHP WebAssembly runtime, PHP instance lifecycle, php.run() execution model, file system operations (writeFile, readFileAsBuffer, mkdir, isDir), php.ini configuration via setPhpIniEntries(), request/response conversion, or debugging issues that originate in the upstream @php-wasm/web and @php-wasm/universal packages.
+metadata:
+  author: moodle-playground
+  version: "1.0"
+---
+
+# WordPress Playground & @php-wasm Runtime Expert
+
+## Role
+
+You are an expert in WordPress Playground's PHP WebAssembly runtime — the `@php-wasm/web`
+and `@php-wasm/universal` packages that power the PHP execution layer. You understand the
+PHP instance lifecycle, the Emscripten virtual filesystem, and the bridge between JavaScript
+and PHP execution. You know where the upstream APIs behave unexpectedly and where our
+compatibility layer (`php-compat.js`) adapts the WP Playground API for Moodle's needs.
+
+## When to activate
+
+- Working with `src/runtime/php-loader.js` (PHP instance creation)
+- Working with `src/runtime/php-compat.js` (API adapter layer)
+- Debugging PHP execution issues (`php.run()` behavior, exit codes, output capture)
+- Investigating WASM-level crashes or memory issues
+- Configuring PHP settings (`setPhpIniEntries()`)
+- Working with the Emscripten MEMFS filesystem
+- Debugging file I/O operations in the PHP runtime
+- Investigating upstream issues in WordPress Playground
+
+## Upstream repository
+
+**Source**: https://github.com/WordPress/wordpress-playground
+
+Key packages we depend on:
+- `@php-wasm/web` (v3.1.12+) — Browser-specific PHP runtime, WASM binary loading
+- `@php-wasm/universal` (v3.1.12+) — Platform-agnostic PHP API, filesystem, ini config
+
+## PHP instance lifecycle
+
+### Creation
+
+```javascript
+import { loadWebRuntime } from '@php-wasm/web';
+
+const php = await loadWebRuntime('8.3', {
+    // Options passed to Emscripten module
+});
+```
+
+In our project, `src/runtime/php-loader.js` wraps this:
+
+```javascript
+const rawPhp = await loadWebRuntime(phpVersion, emscriptenOptions);
+setPhpIniEntries(rawPhp, iniEntries);  // from @php-wasm/universal
+```
+
+The raw `PHP` instance is then wrapped by `php-compat.js` into a compatibility layer
+that maps WP Playground's API to the interface expected by `bootstrap.js` and `php-worker.js`.
+
+### Execution model
+
+Each `php.run()` call is a **complete PHP lifecycle**:
+
+1. PHP globals are initialized fresh
+2. `$_SERVER`, `$_GET`, `$_POST`, etc. are populated from the request object
+3. The PHP script executes to completion (or fatal error)
+4. All PHP state is destroyed (variables, open handles, PDO connections)
+5. Output (stdout) and headers are captured and returned
+
+**Critical implication**: PHP state does NOT persist between `php.run()` calls. This is
+why the SQLite database must be a file in MEMFS, not `:memory:` — a `:memory:` DB would
+be empty on the next request because the PDO connection is closed and reopened.
+
+### Request format
+
+```javascript
+const response = await php.run({
+    scriptPath: '/www/moodle/admin/index.php',
+    method: 'GET',
+    headers: { 'Host': 'localhost', 'Cookie': 'MoodleSession=abc123' },
+    url: '/admin/index.php?redirect=0',
+    body: '',  // For POST requests
+});
+```
+
+The response object:
+```javascript
+{
+    httpStatusCode: 200,
+    headers: { 'content-type': ['text/html; charset=utf-8'], ... },
+    text: '<html>...',        // Output as string
+    bytes: Uint8Array,        // Output as bytes
+    errors: '',               // stderr output
+    exitCode: 0,              // 0 = success
+}
+```
+
+### CLI mode execution
+
+For provisioning (blueprint steps), we use CLI mode:
+
+```javascript
+const response = await php.run({
+    scriptPath: '/tmp/script.php',
+    // No method, url, or headers — runs as CLI
+});
+```
+
+The PHP script should define `CLI_SCRIPT` before requiring Moodle's `config.php`:
+
+```php
+define('CLI_SCRIPT', true);
+require('/www/moodle/config.php');
+// ... Moodle API calls
+```
+
+## Filesystem API
+
+The PHP instance exposes Emscripten's MEMFS through these methods:
+
+| Method | Description |
+|--------|-------------|
+| `php.writeFile(path, data)` | Write string or Uint8Array to path |
+| `php.readFileAsText(path)` | Read file as UTF-8 string |
+| `php.readFileAsBuffer(path)` | Read file as Uint8Array |
+| `php.mkdir(path)` | Create directory (parent must exist) |
+| `php.mkdirTree(path)` | Create directory and all parents |
+| `php.isDir(path)` | Check if path is a directory |
+| `php.fileExists(path)` | Check if path exists (file or directory) |
+| `php.unlink(path)` | Delete a file |
+| `php.listFiles(path)` | List directory contents |
+| `php.analyzePath(path)` | Emscripten `FS.analyzePath()` — returns `{ exists, object }` |
+
+**Important**: These operate on the raw `PHP` instance (`php._php` in our compat layer),
+not on the compatibility wrapper. The compat wrapper (`php-compat.js`) exposes a subset
+and adds error handling.
+
+**MEMFS characteristics**:
+- All data lives in JavaScript heap memory (RAM)
+- No durability — tab close = data loss
+- No size limits beyond available heap memory
+- File operations are synchronous and fast (no I/O wait)
+- Permissions are emulated but not enforced
+- Symlinks are supported but rarely used
+
+## php.ini configuration
+
+**Critical**: WP Playground hardcodes the ini path to `/internal/shared/php.ini`. Writing
+a separate `php.ini` file anywhere else has NO effect. All settings must go through:
+
+```javascript
+import { setPhpIniEntries } from '@php-wasm/universal';
+
+setPhpIniEntries(php, {
+    'date.timezone': 'UTC',
+    'memory_limit': '512M',
+    'max_execution_time': '0',
+    'display_errors': 'Off',
+    'session.save_path': '/tmp/moodle/sessions',
+    'upload_tmp_dir': '/tmp',
+    // ... etc
+});
+```
+
+This must be called **before** any `php.run()` — settings applied after execution has
+started may not take effect for all directives.
+
+Our project applies ini settings in `src/runtime/php-loader.js` during runtime creation,
+with timezone overrides applied later in `src/runtime/bootstrap.js` after blueprint parsing.
+
+## The compatibility layer (php-compat.js)
+
+Our `src/runtime/php-compat.js` wraps the raw WP Playground `PHP` instance to provide:
+
+1. **Request conversion**: Browser `Request` → PHP request object format
+2. **Response conversion**: PHP response → browser `Response`
+3. **`$_SERVER` population**: `SCRIPT_NAME`, `PHP_SELF`, `REQUEST_URI`, `PATH_INFO`,
+   `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `HTTP_*` headers
+4. **Base path injection**: Prepends URL base path (e.g., `/moodle-playground`) to
+   `SCRIPT_NAME` and `PHP_SELF` for correct Moodle URL construction
+5. **PATH_INFO resolution**: Splits URLs like `/theme/styles.php/boost/123/all` into
+   script path (`/theme/styles.php`) and PATH_INFO (`/boost/123/all`)
+6. **MIME type detection**: Returns correct Content-Type for static files
+7. **`analyzePath` emulation**: Wraps Emscripten's `FS.analyzePath()` for path checking
+
+### PATH_INFO handling (critical)
+
+Moodle uses PATH_INFO extensively for resource URLs:
+- `/theme/styles.php/boost/1234567890/all` — CSS delivery
+- `/theme/javascript.php/1234567890/boost/head` — JS delivery
+- `/pluginfile.php/1/mod_resource/content/0/file.pdf` — File serving
+
+`resolveScriptPath()` in `php-compat.js` must:
+1. Walk the URL path segments
+2. Find the first segment ending in `.php`
+3. Split into script path (before and including `.php`) and PATH_INFO (after)
+
+Without this, `isPhpScript()` returns false (URL doesn't end in `.php`) → 404.
+
+## Known issues and upstream bugs
+
+### File descriptor exhaustion
+- PHP WASM has a limited number of file descriptors (~1024)
+- Long sessions with many requests can exhaust them
+- Manifests as `RuntimeError: unreachable` or WASM traps
+- Our crash recovery system detects and handles this
+- See: https://github.com/WordPress/wordpress-playground/issues/1137
+
+### Memory limits
+- WASM linear memory has a growth limit (~2-4 GB depending on browser)
+- Large Moodle operations (file uploads, backup/restore) can hit this
+- OOM manifests as `RuntimeError: memory access out of bounds`
+- No way to free WASM memory — must restart the runtime
+
+### Extension availability
+Available in PHP 8.3 WASM: `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`,
+`mbstring`, `openssl`, `intl`, `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`,
+`fileinfo`, `xmlreader`, `xmlwriter`.
+
+**NOT available**: `sodium` (despite being listed in some docs). The OpenSSL fallback
+patch in `patches/shared/lib/classes/encryption.php` handles encryption needs.
+
+### Session handling
+- Sessions use file-based storage in MEMFS (`/tmp/moodle/sessions/`)
+- Session data persists across `php.run()` calls (files survive in MEMFS)
+- Session IDs are generated by PHP and tracked via `MoodleSession` cookie
+- After crash recovery, sessions are invalidated — a new admin session must be created
+
+## Debugging tips
+
+1. **Check `response.errors`** — stderr output often contains PHP warnings/notices
+2. **Check `response.exitCode`** — non-zero means PHP script failed
+3. **Enable PHP display_errors** — set `display_errors=On` in ini entries for debugging
+4. **Use `?debug=true`** — forces `DEBUG_DEVELOPER` and `display_errors=1` at boot
+5. **Read upstream source** — when `php-compat.js` behavior is unclear, check the
+   `@php-wasm/universal` source at `node_modules/@php-wasm/universal/`
+6. **MEMFS inspection** — use `php.listFiles()` and `php.readFileAsText()` to inspect
+   the virtual filesystem during debugging
+
+## Checklist for php-wasm-touching changes
+
+- [ ] Does the change work with the stateless `php.run()` model? (no PHP state persists)
+- [ ] Are ini settings applied via `setPhpIniEntries()`, not a php.ini file?
+- [ ] Does PATH_INFO resolution handle the URL pattern correctly?
+- [ ] Are `$_SERVER` variables correct, including base path prefix?
+- [ ] Does the change account for `sodium` not being available?
+- [ ] Could this hit file descriptor limits in long sessions?
+- [ ] Is the raw PHP instance (`php._php`) used for filesystem ops, not the wrapper?

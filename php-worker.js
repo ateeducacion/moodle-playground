@@ -130,6 +130,17 @@ const PLUGIN_TYPE_DIRS = {
   booktool: "mod/book/tool",
   quizaccess: "mod/quiz/accessrule",
   ltisource: "mod/lti/source",
+  workshopform: "mod/workshop/form",
+  workshopallocation: "mod/workshop/allocation",
+  workshopeval: "mod/workshop/eval",
+  contenttype: "contentbank/contenttype",
+  customfield: "customfield/field",
+  media: "media/player",
+  paygw: "payment/gateway",
+  qbank: "question/bank",
+  search: "search/engine",
+  aiprovider: "ai/provider",
+  aiplacement: "ai/placement",
 };
 
 /**
@@ -401,9 +412,13 @@ function deserializeRequest(requestLike) {
   return new Request(requestLike.url, init);
 }
 
+function escapeHtml(str) {
+  return String(str).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
 function buildLoadingResponse(message, status = 503) {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Moodle Playground</title><body><pre>${message}</pre></body>`,
+    `<!doctype html><meta charset="utf-8"><title>Moodle Playground</title><body><pre>${escapeHtml(message)}</pre></body>`,
     {
       status,
       headers: {
@@ -565,7 +580,7 @@ async function getRuntimeState() {
     postShell({
       kind: "ready",
       detail: `Moodle bootstrapped for PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}. [${totalMs}ms total]`,
-      path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath,
+      path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath || "/?redirect=0",
     });
 
     return { php };
@@ -728,6 +743,12 @@ function installMessageListener() {
       if (params.profile !== undefined) profile = params.profile;
       // Reset any cached runtime state so it boots with the new params
       runtimeStatePromise = null;
+      // Recreate bridge channel if scopeId changed
+      if (params.scopeId !== undefined && bridgeChannel) {
+        bridgeChannel.close();
+        bridgeChannel = new BroadcastChannel(createPhpBridgeChannel(scopeId));
+        installBridgeListener();
+      }
     }
 
     activeBlueprint = event.data.blueprint || null;

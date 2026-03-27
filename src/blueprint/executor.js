@@ -55,6 +55,7 @@ export async function executeBlueprint(blueprint, context) {
     if (!handler) {
       return {
         success: false,
+        landingPage,
         failedStep: `${i + 1}:${stepName}`,
         error: `Unknown step type: ${stepName}`,
       };
@@ -75,6 +76,7 @@ export async function executeBlueprint(blueprint, context) {
       publish(`Blueprint step ${stepName} failed: ${message}`, progress);
       return {
         success: false,
+        landingPage,
         failedStep: `${i + 1}:${stepName}`,
         error: message,
       };

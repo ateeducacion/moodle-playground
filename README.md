@@ -51,6 +51,8 @@ index.html          Shell UI (toolbar, address bar, log panel)
 4. Moodle runs against an in-memory SQLite database — fully ephemeral, no persistence.
 5. If the PHP runtime crashes (WASM OOM / file descriptor exhaustion), the worker snapshots the DB and user files, boots a fresh runtime, and restores state automatically.
 
+**Default credentials:** username `admin`, password `password`.
+
 ### No persistence by design
 
 All state lives in memory (Emscripten MEMFS). Closing the tab destroys everything. This is intentional — the playground is meant for exploration, demos, and testing, not for storing data.
@@ -61,12 +63,13 @@ Blueprints are step-based JSON files that configure and provision a playground i
 
 ```json
 {
-  "landingPage": "/my/",
+  "landingPage": "/course/view.php?id=2",
   "steps": [
     { "step": "installMoodle", "options": { "siteName": "My Moodle" } },
     { "step": "login", "username": "admin" },
-    { "step": "createCategory", "name": "Science" },
-    { "step": "createCourse", "fullname": "Physics 101", "shortname": "PHYS101", "category": "Science" }
+    { "step": "installMoodlePlugin", "url": "https://github.com/moodlehq/moodle-block_participants/archive/refs/heads/master.zip" },
+    { "step": "createCourse", "fullname": "Physics 101", "shortname": "PHYS101" },
+    { "step": "addModule", "module": "label", "course": "PHYS101", "name": "Welcome", "intro": "<p>Hello World!</p>" }
   ]
 }
 ```
