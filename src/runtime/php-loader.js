@@ -72,6 +72,11 @@ export function createPhpRuntime(
       } catch {
         /* exists */
       }
+      try {
+        FS.mkdirTree("/internal/shared/opcache");
+      } catch {
+        /* exists */
+      }
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(

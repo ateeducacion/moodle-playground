@@ -565,7 +565,7 @@ async function getRuntimeState() {
     postShell({
       kind: "ready",
       detail: `Moodle bootstrapped for PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}. [${totalMs}ms total]`,
-      path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath,
+      path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath || "/?redirect=0",
     });
 
     return { php };

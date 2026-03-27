@@ -17,6 +17,54 @@ define('CLI_SCRIPT', true);
 require('${MOODLE_ROOT}/config.php');
 `;
 
+// Shared setup for addModule steps.
+// Overrides Moodle's default_exception_handler to prevent exit(1) on DB errors —
+// Moodle's handler calls abort_all_db_transactions() + die(1) which kills the
+// WASM process before our try/catch can capture the error.
+const ADD_MODULE_SETUP = `require_once($CFG->dirroot . '/course/lib.php');
+global $DB;
+set_exception_handler(function($e) {
+    while (ob_get_level()) ob_end_clean();
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    exit(0);
+});`;
+
+// Shared execution block — inserts course module records directly.
+// We avoid add_moduleinfo() because it uses delegated transactions that
+// crash in SQLite PDO WASM (nested savepoints + events/calendar/completion
+// writes cause "Error writing to database" + exit(1) via default_exception_handler).
+const ADD_MODULE_EXEC = `
+try {
+    $modid = $DB->get_field('modules', 'id', ['name' => $moduleInfo->modulename], MUST_EXIST);
+
+    $cm = new stdClass();
+    $cm->course = $course->id;
+    $cm->module = $modid;
+    $cm->instance = 0;
+    $cm->section = 0;
+    $cm->visible = $moduleInfo->visible ?? 1;
+    $cm->groupmode = $moduleInfo->groupmode ?? 0;
+    $cm->groupingid = $moduleInfo->groupingid ?? 0;
+    $cm->added = time();
+    $cmid = $DB->insert_record('course_modules', $cm);
+
+    $instance = new stdClass();
+    $instance->course = $course->id;
+    $instance->name = $moduleInfo->name;
+    $instance->intro = $moduleInfo->intro ?? '';
+    $instance->introformat = $moduleInfo->introformat ?? 1;
+    $instance->timemodified = time();
+    $instanceid = $DB->insert_record($moduleInfo->modulename, $instance);
+
+    $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
+    context_module::instance($cmid);
+    course_add_cm_to_section($course, $cmid, $moduleInfo->section);
+
+    echo json_encode(['ok' => true, 'cmid' => $cmid]);
+} catch (\\Throwable $e) {
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+}`;
+
 export function phpSetConfig(name, value, plugin = null) {
   const pluginArg = plugin ? `'${escapePhp(plugin)}'` : "null";
   return `${CLI_HEADER}
@@ -220,9 +268,7 @@ export function phpAddModule(mod) {
 
 function phpAddLabel(course, section, name, intro) {
   return `${CLI_HEADER}
-require_once($CFG->dirroot . '/course/modlib.php');
-require_once($CFG->dirroot . '/course/lib.php');
-global $DB;
+${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
 $moduleInfo = new stdClass();
 $moduleInfo->modulename = 'label';
@@ -235,16 +281,13 @@ $moduleInfo->visible = 1;
 $moduleInfo->cmidnumber = '';
 $moduleInfo->groupmode = 0;
 $moduleInfo->groupingid = 0;
-$cm = add_moduleinfo($moduleInfo, $course);
-echo json_encode(['ok' => true, 'cmid' => $cm->coursemodule]);
+${ADD_MODULE_EXEC}
 `;
 }
 
 function phpAddFolder(course, section, name, intro) {
   return `${CLI_HEADER}
-require_once($CFG->dirroot . '/course/modlib.php');
-require_once($CFG->dirroot . '/course/lib.php');
-global $DB;
+${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
 $moduleInfo = new stdClass();
 $moduleInfo->modulename = 'folder';
@@ -259,17 +302,14 @@ $moduleInfo->groupmode = 0;
 $moduleInfo->groupingid = 0;
 $moduleInfo->files = 0;
 $moduleInfo->display = 0;
-$cm = add_moduleinfo($moduleInfo, $course);
-echo json_encode(['ok' => true, 'cmid' => $cm->coursemodule]);
+${ADD_MODULE_EXEC}
 `;
 }
 
 function phpAddAssign(course, section, name, intro) {
   return `${CLI_HEADER}
-require_once($CFG->dirroot . '/course/modlib.php');
-require_once($CFG->dirroot . '/course/lib.php');
+${ADD_MODULE_SETUP}
 require_once($CFG->dirroot . '/mod/assign/lib.php');
-global $DB;
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
 $moduleInfo = new stdClass();
 $moduleInfo->modulename = 'assign';
@@ -293,16 +333,13 @@ $moduleInfo->requireallteammemberssubmit = 0;
 $moduleInfo->blindmarking = 0;
 $moduleInfo->markingworkflow = 0;
 $moduleInfo->markingallocation = 0;
-$cm = add_moduleinfo($moduleInfo, $course);
-echo json_encode(['ok' => true, 'cmid' => $cm->coursemodule]);
+${ADD_MODULE_EXEC}
 `;
 }
 
 function phpAddGenericModule(moduleName, course, section, name, intro) {
   return `${CLI_HEADER}
-require_once($CFG->dirroot . '/course/modlib.php');
-require_once($CFG->dirroot . '/course/lib.php');
-global $DB;
+${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
 $moduleInfo = new stdClass();
 $moduleInfo->modulename = '${escapePhp(moduleName)}';
@@ -315,8 +352,7 @@ $moduleInfo->visible = 1;
 $moduleInfo->cmidnumber = '';
 $moduleInfo->groupmode = 0;
 $moduleInfo->groupingid = 0;
-$cm = add_moduleinfo($moduleInfo, $course);
-echo json_encode(['ok' => true, 'cmid' => $cm->coursemodule]);
+${ADD_MODULE_EXEC}
 `;
 }
 

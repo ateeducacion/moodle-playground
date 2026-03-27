@@ -231,6 +231,12 @@ button.danger:hover {
 }
 
 /* Toolbar icon buttons (on orange background) */
+.nav-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .browser-toolbar .icon-button {
   width: 36px;
   min-width: 36px;
@@ -551,10 +557,12 @@ button.danger:hover {
 /* ── PHP info frame ───────────────────────────────── */
 .panel-frame {
   width: 100%;
-  min-height: 240px;
+  height: 100%;
+  min-height: 0;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   background: #fff;
+  display: block;
 }
 
 /* ── Blueprint textarea ───────────────────────────── */

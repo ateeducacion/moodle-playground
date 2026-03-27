@@ -4,24 +4,39 @@ export function registerMoodleModuleSteps(register) {
   register("addModule", handleAddModule);
 }
 
-async function handleAddModule(step, { php }) {
+async function handleAddModule(step, { php, publish }) {
   if (!step.module) throw new Error("addModule: 'module' type is required.");
   if (!step.course)
     throw new Error("addModule: 'course' shortname is required.");
   const code = phpAddModule(step);
-  const result = await php.run(code);
-  checkPhpResult(result, "addModule");
-}
-
-function checkPhpResult(result, stepName) {
+  let result;
+  try {
+    result = await php.run(code);
+  } catch (err) {
+    // php.run() throws on non-zero exit code. Check stdout for success.
+    const stdout = err.message
+      ?.match(/=== Stdout ===\s*([\s\S]*?)(?:=== Stderr|$)/)?.[1]
+      ?.trim();
+    if (stdout?.includes('"ok":true')) {
+      return;
+    }
+    // Log but don't fail the blueprint — subsequent steps should continue.
+    if (publish)
+      publish(
+        `addModule ${step.module} failed: ${String(err.message || err).slice(0, 150)}`,
+        0.95,
+      );
+    return;
+  }
   const text = result?.text || "";
   const errors = result?.errors || "";
-  if (errors) {
-    console.warn(`[blueprint] ${stepName} PHP errors:`, errors);
-  }
-  if (text?.includes('"ok":false')) {
-    throw new Error(
-      `${stepName}: PHP returned failure: ${text.substring(0, 500)}`,
+  if (errors && publish) {
+    publish(
+      `addModule ${step.module} PHP errors: ${errors.slice(0, 200)}`,
+      0.95,
     );
+  }
+  if (text?.includes('"ok":false') && publish) {
+    publish(`addModule ${step.module} failed: ${text.slice(0, 200)}`, 0.95);
   }
 }

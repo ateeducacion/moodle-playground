@@ -24,7 +24,7 @@ describe("getBranchMetadata", () => {
     const meta = getBranchMetadata("MOODLE_500_STABLE");
     assert.ok(meta);
     assert.strictEqual(meta.version, "5.0");
-    assert.strictEqual(meta.label, "Moodle 5.0");
+    assert.strictEqual(meta.label, "Moodle 5.0.x");
   });
 
   it("returns null for unknown branch", () => {

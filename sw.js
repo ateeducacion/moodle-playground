@@ -1,11 +1,34 @@
 import { createPhpBridgeChannel, createWorkerRequestId } from "./src/shared/protocol.js";
+import { BUILD_VERSION as IMPORTED_BUILD_VERSION } from "./src/generated/build-version.js";
 
 const bridges = new Map();
 const pending = new Map();
 const clientContexts = new Map();
-const BUILD_VERSION = new URL(self.location.href).searchParams.get("build") || "dev";
+// Use the imported build version so that when it changes, the SW file's
+// import tree changes → the browser detects a new SW → installs + activates
+// automatically on page reload. The URL param is a fallback for cache busting.
+const BUILD_VERSION = IMPORTED_BUILD_VERSION || new URL(self.location.href).searchParams.get("build") || "dev";
 const STATIC_CACHE_PREFIX = "moodle-playground-static";
 const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
+
+// Cache for scoped runtime static assets (CSS, JS, images, fonts, etc.)
+// that would otherwise queue through the serial PHP worker bridge.
+// See docs/decisions/0001-sw-level-scoped-static-asset-caching.md
+const SCOPED_STATIC_CACHE = `moodle-playground-scoped-static-${BUILD_VERSION}`;
+const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|map)$/iu;
+// PHP scripts that serve cacheable assets with revision numbers in the URL.
+// The revision acts as a natural cache key — when content changes, the URL changes.
+// Excludes pluginfile.php and draftfile.php (user content, not cacheable).
+const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|theme\/image\.php|theme\/font\.php)\//u;
+
+function isScopedStaticAsset(requestPath) {
+  return SCOPED_STATIC_RE.test(requestPath.split("?")[0]);
+}
+
+function isCacheablePhpAsset(requestPath) {
+  return CACHEABLE_PHP_ASSET_RE.test(requestPath);
+}
+
 const STATIC_PREFIXES = [
   "/assets/",
   "/dist/",
@@ -67,6 +90,7 @@ function isSensitiveStaticPath(pathname) {
     || strippedPathname === "/remote.html"
     || strippedPathname === "/playground.config.json"
     || strippedPathname === "/assets/build-version.json"
+    || strippedPathname === "/src/generated/build-version.js"
     || /^\/assets\/manifests\/[^/]+\.json$/u.test(strippedPathname)
     || strippedPathname.startsWith("/assets/moodle/")
   );
@@ -149,9 +173,13 @@ async function networkFirstStaticFetch(request) {
 
 async function purgeOldStaticCaches() {
   const cacheNames = await caches.keys();
+  const SCOPED_STATIC_PREFIX = "moodle-playground-scoped-static-";
   await Promise.all(
     cacheNames
-      .filter((cacheName) => cacheName.startsWith(`${STATIC_CACHE_PREFIX}-`) && cacheName !== STATIC_CACHE_NAME)
+      .filter((cacheName) =>
+        (cacheName.startsWith(`${STATIC_CACHE_PREFIX}-`) && cacheName !== STATIC_CACHE_NAME)
+        || (cacheName.startsWith(SCOPED_STATIC_PREFIX) && cacheName !== SCOPED_STATIC_CACHE),
+      )
       .map((cacheName) => caches.delete(cacheName)),
   );
 }
@@ -260,15 +288,15 @@ async function resolveScopedRequest(event, url) {
 
   const clientUrl = new URL(client.url);
   const scoped = extractScopedRuntime(clientUrl.pathname);
-  if (!scoped || clientUrl.origin !== url.origin) {
-    return null;
+  if (scoped && clientUrl.origin === url.origin) {
+    return {
+      scopeId: scoped.scopeId,
+      runtimeId: scoped.runtimeId,
+      requestPath: `${strippedPathname}${url.search}`,
+    };
   }
 
-  return {
-    scopeId: scoped.scopeId,
-    runtimeId: scoped.runtimeId,
-    requestPath: `${strippedPathname}${url.search}`,
-  };
+  return null;
 }
 
 async function serializeRequest(request) {
@@ -395,10 +423,39 @@ function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
 }
 
 function rewriteHtmlDocument(html, scope) {
-  return html.replace(
+  const { origin, scopeId, runtimeId } = scope;
+  const scopedBase = `${origin}${getScopedBasePath(scopeId, runtimeId)}`;
+
+  let result = html.replace(
     /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
     (match, prefix, rawValue, suffix) => `${prefix}${rewriteHtmlAttributeUrl(rawValue, scope)}${suffix}`,
   );
+
+  // Rewrite M.cfg.wwwroot in inline <script> blocks so Moodle's JavaScript
+  // (AJAX calls, dynamic navigation) uses the scoped URL instead of the bare
+  // origin. Without this, POST requests to /lib/ajax/service.php bypass the
+  // scoped runtime and hit the static dev server (405 Method Not Allowed).
+  // Moodle JSON-escapes forward slashes in its inline JS config, so we must
+  // match both escaped (http:\/\/host) and unescaped (http://host) forms.
+  const jsonEscapedOrigin = origin.replace(/\//gu, "\\/");
+  const jsonEscapedBase = scopedBase.replace(/\//gu, "\\/");
+  // Match JSON-escaped form: "wwwroot":"http:\/\/localhost:8080"
+  result = result.replaceAll(
+    `"wwwroot":"${jsonEscapedOrigin}"`,
+    `"wwwroot":"${jsonEscapedBase}"`,
+  );
+  // Match unescaped form (if present): "wwwroot":"http://localhost:8080"
+  result = result.replaceAll(
+    `"wwwroot":"${origin}"`,
+    `"wwwroot":"${scopedBase}"`,
+  );
+  // Also rewrite apibase which some Moodle JS uses for REST API calls
+  result = result.replaceAll(
+    `"apibase":"${jsonEscapedOrigin}\\/r.php\\/api"`,
+    `"apibase":"${jsonEscapedBase}\\/r.php\\/api"`,
+  );
+
+  return result;
 }
 
 async function rewriteScopedHtmlResponse(response, scope) {
@@ -446,6 +503,12 @@ function forwardToPhpWorker({ request, scopeId }) {
   });
 }
 
+self.addEventListener("message", (event) => {
+  if (event.data?.kind === "clear-scoped-static-cache") {
+    caches.delete(SCOPED_STATIC_CACHE).catch(() => {});
+  }
+});
+
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
@@ -467,6 +530,29 @@ self.addEventListener("fetch", (event) => {
     try {
       const url = new URL(event.request.url);
       if (url.origin !== self.location.origin) {
+        // Block moodle.org iframe loads (plugin directory) — the remote
+        // server sets X-Frame-Options: sameorigin which causes console
+        // errors. Return a friendly notice instead.
+        if (url.hostname === "moodle.org" || url.hostname === "www.moodle.org") {
+          return new Response(
+            `<!doctype html><meta charset="utf-8"><style>
+              body{font:14px/1.5 system-ui,sans-serif;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8f9fa;color:#333;text-align:center;padding:16px}
+              .box{max-width:420px}
+              h3{margin:0 0 8px}
+              p{margin:0 0 12px;color:#555}
+              code{background:#e9ecef;padding:2px 6px;border-radius:4px;font-size:13px}
+            </style>
+            <div class="box">
+              <h3>Moodle Plugin Directory unavailable</h3>
+              <p>The external plugin directory at moodle.org cannot be loaded inside the playground iframe.</p>
+              <p>To install plugins, use the <code>installMoodlePlugin</code> blueprint step with a direct GitHub ZIP URL.</p>
+            </div>`,
+            {
+              status: 200,
+              headers: { "content-type": "text/html; charset=utf-8" },
+            },
+          );
+        }
         return fetch(event.request);
       }
 
@@ -501,6 +587,38 @@ self.addEventListener("fetch", (event) => {
       }
 
       const forwardedUrl = new URL(requestPath, `${url.origin}/`);
+      const pathOnly = requestPath.split("?")[0];
+
+      // Serve cached scoped static assets without hitting the PHP worker queue.
+      // This avoids serializing CSS/JS/image requests through the BroadcastChannel
+      // bridge, significantly improving subsequent page load times.
+      if (
+        event.request.method === "GET"
+        && (isScopedStaticAsset(requestPath) || isCacheablePhpAsset(pathOnly))
+      ) {
+        const scopedCache = await caches.open(SCOPED_STATIC_CACHE);
+        const cacheKey = new URL(requestPath, url.origin).toString();
+        const cached = await scopedCache.match(cacheKey);
+        if (cached) {
+          return cached;
+        }
+
+        // Cache miss — forward to worker, then cache successful non-HTML responses.
+        const fresh = await forwardToPhpWorker({
+          request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
+          runtimeId,
+          scopeId,
+        }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
+
+        if (fresh.ok) {
+          const contentType = fresh.headers.get("content-type") || "";
+          // Never cache HTML responses — they need URL rewriting and are dynamic.
+          if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) {
+            scopedCache.put(cacheKey, fresh.clone()).catch(() => {});
+          }
+        }
+        return fresh;
+      }
 
       const response = await forwardToPhpWorker({
         request: buildPhpRequest(event.request, forwardedUrl, earlyBody),

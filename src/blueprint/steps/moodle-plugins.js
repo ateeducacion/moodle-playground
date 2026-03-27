@@ -48,24 +48,30 @@ export function registerMoodlePluginSteps(register) {
 }
 
 async function handleInstallMoodlePlugin(step, context) {
-  if (!step.pluginType) {
-    throw new Error("installMoodlePlugin: 'pluginType' is required.");
-  }
   if (!step.url) {
     throw new Error("installMoodlePlugin: 'url' is required.");
   }
 
-  const pluginName =
-    step.pluginName || guessPluginNameFromUrl(step.url, step.pluginType);
+  // Auto-detect pluginType and pluginName from the URL if not provided.
+  // GitHub repos follow the convention: moodle-{type}_{name}
+  const detected = detectPluginTypeAndName(step.url);
+  const pluginType = step.pluginType || detected.type;
+  const pluginName = step.pluginName || detected.name;
+
+  if (!pluginType) {
+    throw new Error(
+      "installMoodlePlugin: 'pluginType' could not be detected from URL. Provide it explicitly.",
+    );
+  }
   if (!pluginName) {
     throw new Error(
-      "installMoodlePlugin: 'pluginName' is required (or could not be guessed from URL).",
+      "installMoodlePlugin: 'pluginName' could not be detected from URL. Provide it explicitly.",
     );
   }
 
-  const targetDir = resolvePluginDir(step.pluginType, pluginName);
+  const targetDir = resolvePluginDir(pluginType, pluginName);
   await installPluginFiles(step.url, targetDir, context);
-  await runMoodleUpgrade(context);
+  await runMoodleUpgrade(pluginType, pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
 }
 
@@ -74,17 +80,17 @@ async function handleInstallTheme(step, context) {
     throw new Error("installTheme: 'url' is required.");
   }
 
-  const pluginName =
-    step.pluginName || guessPluginNameFromUrl(step.url, "theme");
+  const detected = detectPluginTypeAndName(step.url);
+  const pluginName = step.pluginName || detected.name;
   if (!pluginName) {
     throw new Error(
-      "installTheme: 'pluginName' is required (or could not be guessed from URL).",
+      "installTheme: 'pluginName' could not be detected from URL. Provide it explicitly.",
     );
   }
 
   const targetDir = resolvePluginDir("theme", pluginName);
   await installPluginFiles(step.url, targetDir, context);
-  await runMoodleUpgrade(context);
+  await runMoodleUpgrade("theme", pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
 }
 
@@ -290,8 +296,16 @@ async function installViaZipDownload(zipUrl, targetDir, { php, publish }) {
 /**
  * Run Moodle's upgrade process to register the newly installed plugin.
  */
-async function runMoodleUpgrade({ php, publish }) {
+async function runMoodleUpgrade(
+  pluginType,
+  pluginName,
+  targetDir,
+  { php, publish },
+) {
   if (publish) publish("Running Moodle upgrade to register plugin.", 0.945);
+
+  const component = `${pluginType}_${pluginName}`;
+  const safeDir = targetDir.replaceAll("'", "\\'");
 
   const code = `<?php
 define('CLI_SCRIPT', true);
@@ -300,52 +314,87 @@ require_once($CFG->libdir . '/upgradelib.php');
 require_once($CFG->libdir . '/clilib.php');
 require_once($CFG->libdir . '/adminlib.php');
 
-// Reset component cache so new plugin is discovered
+// Register the plugin in the alternative_component_cache.
+// This writes the updated cache file so core_component sees the new plugin.
+\\core_component::playground_refresh_installed_plugin_cache('${component}', '${safeDir}');
+
+// Reset clears in-memory state; next init() re-reads the updated cache file.
 \\core_component::reset();
 if (function_exists('purge_all_caches')) {
     purge_all_caches();
 }
 
-// Run the upgrade
+// Force upgrade detection by clearing the stored hash.
+set_config('allversionshash', '');
+
+// Run the upgrade unconditionally.
 try {
-    if (moodle_needs_upgrading()) {
-        upgrade_noncore(true);
-    }
+    upgrade_noncore(true);
     echo json_encode(['ok' => true]);
 } catch (\\Throwable $e) {
     echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
 }
 `;
 
-  const result = await php.run(code);
+  let result;
+  try {
+    result = await php.run(code);
+  } catch (err) {
+    // php.run() throws on non-zero exit code (e.g. Moodle's
+    // default_exception_handler calls exit(1) before our PHP catch runs).
+    // Log the error but don't fail the blueprint step — the plugin files
+    // are already installed and may work even without a full upgrade.
+    if (publish)
+      publish(
+        `Plugin upgrade crashed: ${String(err.message || err).slice(0, 200)}`,
+        0.95,
+      );
+    return;
+  }
   const text = result?.text || "";
   const errors = result?.errors || "";
-  if (errors) {
-    console.warn("[blueprint] Plugin upgrade PHP errors:", errors);
+  if (errors && publish) {
+    publish(`Plugin upgrade errors: ${errors.slice(0, 300)}`, 0.95);
   }
-  if (text.includes('"ok":false')) {
-    console.warn("[blueprint] Plugin upgrade returned:", text);
+  if (text.includes('"ok":false') && publish) {
+    publish(`Plugin upgrade failed: ${text.slice(0, 200)}`, 0.95);
   }
 }
 
 /**
- * Guess the plugin name from a GitHub ZIP URL.
+ * Detect plugin type and name from a URL.
+ *
+ * GitHub repos follow the convention: moodle-{type}_{name}
+ * Examples:
+ *   moodle-mod_board       → { type: "mod",   name: "board" }
+ *   moodle-block_participants → { type: "block", name: "participants" }
+ *   moodle-local_staticpage   → { type: "local", name: "staticpage" }
+ *
+ * @param {string} url
+ * @returns {{ type: string|null, name: string|null }}
  */
-function guessPluginNameFromUrl(url, pluginType) {
+function detectPluginTypeAndName(url) {
   try {
     const pathname = new URL(url).pathname;
     const repoMatch = pathname.match(/\/([^/]+)\/archive\//);
     if (repoMatch) {
-      const repoName = repoMatch[1];
-      const stripped = repoName
-        .replace(/^moodle-/i, "")
-        .replace(new RegExp(`^${pluginType}_`, "i"), "");
-      if (stripped) return stripped;
+      const repoName = repoMatch[1].replace(/^moodle-/i, "");
+      // Try to split on underscore: type_name
+      const underscoreIdx = repoName.indexOf("_");
+      if (underscoreIdx > 0) {
+        const candidateType = repoName.substring(0, underscoreIdx);
+        const candidateName = repoName.substring(underscoreIdx + 1);
+        if (PLUGIN_TYPE_DIRS[candidateType] && candidateName) {
+          return { type: candidateType, name: candidateName };
+        }
+      }
+      // No recognized type prefix — return name only
+      return { type: null, name: repoName || null };
     }
   } catch {
     // not a valid URL
   }
-  return null;
+  return { type: null, name: null };
 }
 
 function findCommonPrefix(paths) {

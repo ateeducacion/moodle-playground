@@ -101,7 +101,7 @@ export async function resolveBlueprint({
 
 function buildMinimalDefault() {
   return {
-    landingPage: "/my/",
+    landingPage: "/?redirect=0",
     preferredVersions: { php: "8.3", moodle: "5.0" },
     constants: {
       ADMIN_USER: "admin",

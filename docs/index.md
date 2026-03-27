@@ -12,6 +12,8 @@ Moodle Playground lets you run a full Moodle LMS instance in your browser for le
 
 The runtime is **fully ephemeral**: all state lives in memory and is lost when you close the tab.
 
+Default credentials: username `admin`, password `password`.
+
 ## How it works
 
 The project follows a layered architecture:

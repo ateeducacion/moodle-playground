@@ -819,6 +819,19 @@ try {
         $result['set']['adminsetuppending'] = 'unset';
     }
 
+    // Disable user tours — they are distracting in the playground and cover
+    // the UI on first visit to dashboard, courses, and course pages.
+    try {
+        $disabledTours = $DB->execute(
+            "UPDATE {tool_usertours_tours} SET enabled = 0 WHERE enabled = 1"
+        );
+        if ($disabledTours) {
+            $result['set']['usertours'] = 'disabled';
+        }
+    } catch (Throwable $tourError) {
+        $result['warning']['usertours'] = $tourError->getMessage();
+    }
+
     $result['ok'] = true;
 } catch (Throwable $error) {
     $result['error'] = [

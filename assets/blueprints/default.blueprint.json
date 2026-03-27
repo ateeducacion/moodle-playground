@@ -8,7 +8,7 @@
     "debug": 0,
     "debugdisplay": 0
   },
-  "landingPage": "/my/",
+  "landingPage": "/?redirect=0",
   "constants": {
     "ADMIN_USER": "admin",
     "ADMIN_PASS": "password",
@@ -49,7 +49,7 @@
     },
     {
       "step": "setLandingPage",
-      "path": "/my/"
+      "path": "/?redirect=0"
     }
   ]
 }

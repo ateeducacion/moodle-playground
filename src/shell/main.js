@@ -1,4 +1,5 @@
 import {
+  clearBlueprint,
   parseBlueprint,
   resolveBlueprint,
   saveBlueprint,
@@ -42,6 +43,7 @@ const els = {
   phpInfoPanel: document.querySelector("#phpinfo-panel"),
   phpInfoTab: document.querySelector("#phpinfo-tab"),
   refreshPhpInfoButton: document.querySelector("#refresh-phpinfo-button"),
+  home: document.querySelector("#home-button"),
   refresh: document.querySelector("#refresh-button"),
   reset: document.querySelector("#reset-button"),
   settingsButton: document.querySelector("#settings-button"),
@@ -67,13 +69,13 @@ let currentPhpVersion = DEFAULT_PHP_VERSION;
 let currentMoodleBranch = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
-let currentPath = "/";
+let currentPath = "/?redirect=0";
 let channel;
 let serviceWorkerReady = null;
 let activeBlueprint;
 let remoteFrameBooted = false;
 let uiLocked = true;
-let remoteReloadToken = 0;
+const remoteReloadToken = 0;
 let pendingCleanBoot = false;
 let latestPhpInfoHtml = "";
 // biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
@@ -212,21 +214,6 @@ function refreshWithinRuntime() {
   void updateFrame();
 }
 
-function restartRuntime() {
-  if (uiLocked) {
-    return;
-  }
-
-  pendingCleanBoot = true;
-  remoteReloadToken = Date.now();
-  remoteFrameBooted = false;
-  serviceWorkerReady = null;
-  setUiLocked(true);
-  appendLog(`Restarting runtime for ${currentRuntimeId}`);
-  els.frame.src = "about:blank";
-  void updateFrame();
-}
-
 function setPhpInfoContent(html = "") {
   latestPhpInfoHtml = typeof html === "string" ? html : "";
   if (!els.phpInfoFrame) {
@@ -235,13 +222,33 @@ function setPhpInfoContent(html = "") {
 
   if (!latestPhpInfoHtml) {
     els.phpInfoFrame.srcdoc = `<!doctype html><meta charset="utf-8"><style>
-      body{font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;color:#1f2937;background:#fff}
+      html,body{height:100%}
+      body{margin:0;font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;color:#1f2937;background:#fff;box-sizing:border-box}
       p{margin:0}
     </style><p>No PHP diagnostics captured yet.</p>`;
     return;
   }
 
-  els.phpInfoFrame.srcdoc = latestPhpInfoHtml;
+  const responsivePhpInfoHtml = latestPhpInfoHtml.replace(
+    "</head>",
+    `<style>
+      html,body{height:100%}
+      body{margin:0;padding:12px;box-sizing:border-box;overflow:auto;background:#fff;color:#222;font-family:sans-serif}
+      .center{width:100%}
+      .center table{width:100%;max-width:100%;margin:1em auto;text-align:left}
+      table{border-collapse:collapse;border:0;width:100%;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,.12);table-layout:auto}
+      td,th{border:1px solid #666;font-size:75%;vertical-align:baseline;padding:4px 5px}
+      th{position:sticky;top:0;background:inherit}
+      .e{width:28%;min-width:180px}
+      .v{max-width:none;overflow-wrap:anywhere;word-break:break-word}
+      hr{width:100%;max-width:100%}
+      img{max-width:100%;height:auto}
+      pre{white-space:pre-wrap;overflow-wrap:anywhere}
+      h1,h2{scroll-margin-top:12px}
+    </style></head>`,
+  );
+
+  els.phpInfoFrame.srcdoc = responsivePhpInfoHtml;
 }
 
 function requestPhpInfoCapture() {
@@ -350,7 +357,7 @@ async function importPayload(file) {
   activeBlueprint = blueprint;
   saveBlueprint(scopeId, activeBlueprint);
   pendingCleanBoot = true;
-  currentPath = activeBlueprint.landingPage || config.landingPath || "/";
+  currentPath = activeBlueprint.landingPage || config.landingPath || "/?redirect=0";
   els.address.value = currentPath;
   updateBlueprintTextarea();
   saveState({ importedBlueprintAt: new Date().toISOString() });
@@ -567,7 +574,7 @@ async function main() {
 
   const previous = loadSessionState(scopeId);
   const preferredPath =
-    activeBlueprint?.landingPage || config.landingPath || "/";
+    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
   const shouldBypassSavedLogin =
     config.autologin && previous?.path === "/login";
   const shouldBypassInternalPath = isInternalRuntimePath(previous?.path);
@@ -624,8 +631,12 @@ async function main() {
   await updateFrame();
 }
 
+els.home.addEventListener("click", () => {
+  navigateWithinRuntime("/?redirect=0");
+});
+
 els.refresh.addEventListener("click", () => {
-  restartRuntime();
+  navigateWithinRuntime(currentPath);
 });
 
 els.panelToggle.addEventListener("click", toggleSidePanel);
@@ -680,6 +691,23 @@ els.reset.addEventListener("click", () => {
     return;
   }
   clearScopeSession(scopeId);
+  // Clear the imported blueprint unless it was supplied via URL parameter,
+  // so a plain reset boots without any previously loaded blueprint.
+  const url = new URL(window.location.href);
+  if (
+    !url.searchParams.has("blueprint") &&
+    !url.searchParams.has("blueprint-url")
+  ) {
+    clearBlueprint(scopeId);
+    activeBlueprint = resolveBlueprint({
+      scopeId,
+      location: window.location,
+      defaultBlueprintUrl: config.defaultBlueprintUrl,
+    });
+    updateBlueprintTextarea();
+  }
+  currentPath = activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+  els.address.value = currentPath;
   pendingCleanBoot = true;
   remoteFrameBooted = false;
   serviceWorkerReady = null;
