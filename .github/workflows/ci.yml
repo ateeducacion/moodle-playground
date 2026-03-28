@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: ["main"]
     types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
   pull-requests: write
 
 concurrency:
@@ -53,19 +56,24 @@ jobs:
       - name: Lint
         run: make lint
 
-  # ── Build: worker + single Moodle branch, upload as artifact ──
-  # Only needed for PRs — on push to main, pages.yml builds all 5 branches
-  # and runs its own browser-validation against the production artifact.
+  # ── Build: all 5 Moodle branches + docs ──
   build:
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'push'
 
       - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -86,31 +94,42 @@ jobs:
           restore-keys: |
             snapshots-
 
-      - name: Build worker bundle
-        run: npm run build:worker
+      - name: Prepare runtime assets (all branches)
+        run: make prepare-all JOBS=2
 
-      - name: Build Moodle bundle (single branch)
-        run: make bundle BRANCH=MOODLE_500_STABLE
+      - name: Install docs dependencies
+        run: python -m pip install -r requirements-docs.txt
 
-      - name: Assemble artifact
+      - name: Assemble site artifact
         run: |
-          rm -rf dist-ci
-          mkdir -p dist-ci
-          rsync -a ./ ./dist-ci/ \
+          rm -rf dist-site
+          mkdir -p dist-site/docs
+          rsync -a ./ ./dist-site/ \
             --exclude ".git/" \
             --exclude ".github/" \
             --exclude ".venv/" \
             --exclude ".cache/" \
-            --exclude "dist-ci/" \
+            --exclude "dist-site/" \
+            --exclude "docs/" \
             --exclude "node_modules/" \
-            --exclude "site/"
+            --exclude "site/" \
+            --exclude "tests/" \
+            --exclude "patches/"
+          mkdocs build --strict --site-dir dist-site/docs
+          touch dist-site/.nojekyll
 
-      - name: Upload build artifact
+      - name: Upload site artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ci-build
-          path: dist-ci/
+          name: site-build
+          path: dist-site/
           retention-days: 1
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist-site
 
   # ── E2E: Chromium ──
   e2e-chromium:
@@ -130,17 +149,17 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Download build artifact
+      - name: Download site artifact
         uses: actions/download-artifact@v4
         with:
-          name: ci-build
-          path: dist-ci
+          name: site-build
+          path: dist-site
 
       - name: Run Playwright e2e tests (Chromium)
         run: npx playwright test --project=chromium
         env:
           CI: "true"
-          PLAYWRIGHT_WEB_ROOT: dist-ci
+          PLAYWRIGHT_WEB_ROOT: dist-site
           PLAYWRIGHT_EXTERNAL_SERVER: "0"
 
       - name: Upload test results
@@ -169,17 +188,17 @@ jobs:
       - name: Install Playwright Firefox
         run: npx playwright install --with-deps firefox
 
-      - name: Download build artifact
+      - name: Download site artifact
         uses: actions/download-artifact@v4
         with:
-          name: ci-build
-          path: dist-ci
+          name: site-build
+          path: dist-site
 
       - name: Run Playwright e2e tests (Firefox)
         run: npx playwright test --project=firefox
         env:
           CI: "true"
-          PLAYWRIGHT_WEB_ROOT: dist-ci
+          PLAYWRIGHT_WEB_ROOT: dist-site
           PLAYWRIGHT_EXTERNAL_SERVER: "0"
 
       - name: Upload test results
@@ -190,22 +209,34 @@ jobs:
           path: test-results/
           retention-days: 7
 
-  # ── Deploy PR Preview to Netlify (runs parallel with e2e) ──
+  # ── Deploy to GitHub Pages (push to main only) ──
+  deploy-pages:
+    if: github.event_name == 'push'
+    needs: [lint-and-test, build, e2e-chromium, e2e-firefox]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  # ── Deploy PR Preview to Netlify ──
   deploy-preview:
-    needs: build
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download build artifact
+      - name: Download site artifact
         uses: actions/download-artifact@v4
         with:
-          name: ci-build
-          path: dist-ci
+          name: site-build
+          path: dist-site
 
       - name: Deploy to Netlify
         uses: nwtgck/actions-netlify@v3
         with:
-          publish-dir: ./dist-ci
+          publish-dir: ./dist-site
           production-deploy: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
           deploy-message: "PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}"
