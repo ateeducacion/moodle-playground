@@ -1,7 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
-import { isFatalWasmError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
+import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import {
   getBranchMetadata,
@@ -634,6 +634,21 @@ function installBridgeListener() {
           response: await serializeResponse(response),
         });
       } catch (error) {
+        // Emscripten network errors (Firefox/Safari): outbound curl calls
+        // in WASM cannot reach external hosts. Notify the shell with a
+        // user-friendly warning instead of crashing the runtime.
+        if (isEmscriptenNetworkError(error)) {
+          const requestUrl = data.request?.url || "";
+          const pagePath = new URL(requestUrl, "http://localhost").pathname || "/";
+          postShell({
+            kind: "wasm-network-error",
+            detail: `Page "${pagePath}" failed — a network call could not complete in this browser's WebAssembly runtime.`,
+            path: pagePath,
+          });
+          await respondError(data.id, `Network call failed in WebAssembly runtime (errno 23). This is a known limitation on Firefox and Safari.`, 502);
+          return;
+        }
+
         if (!isFatalWasmError(error)) {
           // Non-fatal error: return 500 without runtime rotation.
           const detail = formatErrorDetail(error);

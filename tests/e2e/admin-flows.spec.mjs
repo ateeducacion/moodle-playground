@@ -14,12 +14,7 @@ import {
 
 test("creates a course and a user, then renders an admin system information page", async ({
   page,
-  browserName,
 }, testInfo) => {
-  test.fixme(
-    browserName === "firefox",
-    "SW bootstrap fails in Firefox — see KNOWN-ISSUES.md",
-  );
   const diagnostics = createDiagnosticsCollector(page);
   const suffix = uniqueSuffix(testInfo);
   const courseName = `Playwright Course ${suffix}`;

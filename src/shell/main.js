@@ -421,6 +421,13 @@ function bindShellChannel() {
           capturePhpInfoViaWorker("bootstrap-error");
         }
         break;
+      case "wasm-network-error":
+        appendLog(message.detail, true);
+        appendLog(
+          "This is a known limitation on Firefox and Safari. The page may not render fully.",
+          true,
+        );
+        break;
       case "phpinfo":
         setPhpInfoContent(message.html || "");
         appendLog(message.detail || "Captured PHP runtime diagnostics.");
