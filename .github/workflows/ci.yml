@@ -1,13 +1,24 @@
-name: Tests
+name: CI
 
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
+  lint-and-test:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -36,19 +47,192 @@ jobs:
           node --check src/remote/main.js
           node --check src/blueprint/index.js
 
-      - name: Run tests
+      - name: Run unit tests
         run: make test
 
       - name: Lint
         run: make lint
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+  # ── Build: worker + single Moodle branch, upload as artifact ──
+  build:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate build metadata
+        run: npm run build:version
+
+      - name: Restore snapshot cache
+        uses: actions/cache@v5
+        with:
+          path: .cache/snapshots
+          key: snapshots-${{ hashFiles('patches/**', 'scripts/generate-install-snapshot.sh', 'scripts/patch-moodle-source.sh', 'scripts/generate-component-cache.php') }}
+          restore-keys: |
+            snapshots-
 
       - name: Build worker bundle
         run: npm run build:worker
+
+      - name: Build Moodle bundle (single branch)
+        run: make bundle BRANCH=MOODLE_500_STABLE
+
+      - name: Assemble artifact
+        run: |
+          rm -rf dist-ci
+          mkdir -p dist-ci
+          rsync -a ./ ./dist-ci/ \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".venv/" \
+            --exclude ".cache/" \
+            --exclude "dist-ci/" \
+            --exclude "node_modules/" \
+            --exclude "site/"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build
+          path: dist-ci/
+          retention-days: 1
+
+  # ── E2E: Chromium ──
+  e2e-chromium:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-build
+          path: dist-ci
 
       - name: Run Playwright e2e tests (Chromium)
         run: npx playwright test --project=chromium
         env:
           CI: "true"
+          PLAYWRIGHT_WEB_ROOT: dist-ci
+          PLAYWRIGHT_EXTERNAL_SERVER: "0"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-chromium
+          path: test-results/
+          retention-days: 7
+
+  # ── E2E: Firefox ──
+  e2e-firefox:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Firefox
+        run: npx playwright install --with-deps firefox
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-build
+          path: dist-ci
+
+      - name: Run Playwright e2e tests (Firefox)
+        run: npx playwright test --project=firefox
+        env:
+          CI: "true"
+          PLAYWRIGHT_WEB_ROOT: dist-ci
+          PLAYWRIGHT_EXTERNAL_SERVER: "0"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-firefox
+          path: test-results/
+          retention-days: 7
+
+  # ── Deploy PR Preview to Netlify (runs parallel with e2e) ──
+  deploy-preview:
+    needs: build
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-build
+          path: dist-ci
+
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: ./dist-ci
+          production-deploy: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}"
+          alias: pr-${{ github.event.pull_request.number }}
+          enable-pull-request-comment: true
+          enable-commit-comment: false
+          overwrites-pull-request-comment: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  # ── Cleanup PR Preview on close ──
+  cleanup-preview:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Netlify deploy
+        run: |
+          npm i -g netlify-cli
+          DEPLOY_ID=$(netlify api listSiteDeploys \
+            --data '{"site_id":"'"$NETLIFY_SITE_ID"'"}' 2>/dev/null \
+            | jq -r '.[] | select(.deploy_ssl_url | test("pr-${{ github.event.pull_request.number }}--")) | .id' \
+            | head -n 1) || true
+          if [ -n "$DEPLOY_ID" ]; then
+            netlify api deleteDeploy --data '{"deploy_id":"'"$DEPLOY_ID"'"}' || true
+            echo "Deleted deploy $DEPLOY_ID"
+          else
+            echo "No deploy found for pr-${{ github.event.pull_request.number }}, skipping"
+          fi
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
