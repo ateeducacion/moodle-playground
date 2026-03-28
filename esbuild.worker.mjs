@@ -2,6 +2,7 @@
 
 import { build } from "esbuild";
 
+// Bundle the PHP worker (Web Worker — uses @php-wasm dependencies)
 await build({
   entryPoints: ["php-worker.js"],
   bundle: true,
@@ -51,3 +52,20 @@ await build({
 });
 
 console.log("Built dist/php-worker.bundle.js");
+
+// Bundle the Service Worker as an IIFE (classic script).
+// Firefox does not support ES module Service Workers (type: "module" + import
+// statements). Bundling inlines all imports so the SW works as a classic script
+// in all browsers.
+await build({
+  entryPoints: ["sw.js"],
+  bundle: true,
+  outdir: "dist",
+  entryNames: "sw.bundle",
+  format: "iife",
+  platform: "browser",
+  target: "es2022",
+  sourcemap: true,
+});
+
+console.log("Built dist/sw.bundle.js");

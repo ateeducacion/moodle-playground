@@ -14,7 +14,7 @@ export function buildVersionedServiceWorkerUrl(
 
 export async function registerVersionedServiceWorker(
   serviceWorkerUrl,
-  { scope = "./", type = "module", updateViaCache = "none" } = {},
+  { scope = "./", type = "classic", updateViaCache = "none" } = {},
 ) {
   const registration = await navigator.serviceWorker.register(
     buildVersionedServiceWorkerUrl(serviceWorkerUrl),
