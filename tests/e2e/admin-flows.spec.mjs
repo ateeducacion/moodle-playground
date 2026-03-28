@@ -9,13 +9,10 @@ import {
   openPlayground,
   tryFillFirstVisible,
   uniqueSuffix,
-  waitForShellReady,
+  waitForPlaygroundReady,
 } from "./helpers.mjs";
 
-// Skip: interacting with Moodle forms inside nested iframes requires deep
-// frame readiness checks (waitForPlaygroundReady) that are not yet reliable.
-// The test is kept as a reference for future Moodle UI interaction patterns.
-test.skip("creates a course and a user, then renders an admin system information page", async ({
+test("creates a course and a user, then renders an admin system information page", async ({
   page,
 }, testInfo) => {
   const diagnostics = createDiagnosticsCollector(page);
@@ -32,7 +29,7 @@ test.skip("creates a course and a user, then renders an admin system information
 
   try {
     await openPlayground(page);
-    await waitForShellReady(page);
+    await waitForPlaygroundReady(page);
 
     const moodle = getMoodleFrame(page);
 
