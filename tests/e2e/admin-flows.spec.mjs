@@ -9,7 +9,7 @@ import {
   openPlayground,
   tryFillFirstVisible,
   uniqueSuffix,
-  waitForPlaygroundReady,
+  waitForShellReady,
 } from "./helpers.mjs";
 
 test("creates a course and a user, then renders an admin system information page", async ({
@@ -29,7 +29,7 @@ test("creates a course and a user, then renders an admin system information page
 
   try {
     await openPlayground(page);
-    await waitForPlaygroundReady(page);
+    await waitForShellReady(page);
 
     const moodle = getMoodleFrame(page);
 
