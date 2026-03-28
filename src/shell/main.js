@@ -69,7 +69,7 @@ let currentPhpVersion = DEFAULT_PHP_VERSION;
 let currentMoodleBranch = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
-let currentPath = "/?redirect=0";
+let currentPath = "/";
 let channel;
 let serviceWorkerReady = null;
 let activeBlueprint;
@@ -363,8 +363,7 @@ async function importPayload(file) {
   activeBlueprint = blueprint;
   saveBlueprint(scopeId, activeBlueprint);
   pendingCleanBoot = true;
-  currentPath =
-    activeBlueprint.landingPage || config.landingPath || "/?redirect=0";
+  currentPath = activeBlueprint.landingPage || config.landingPath || "/";
   els.address.value = currentPath;
   updateBlueprintTextarea();
   saveState({ importedBlueprintAt: new Date().toISOString() });
@@ -587,7 +586,7 @@ async function main() {
 
   const previous = loadSessionState(scopeId);
   const preferredPath =
-    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+    activeBlueprint?.landingPage || config.landingPath || "/";
   const shouldBypassSavedLogin =
     config.autologin && previous?.path === "/login";
   const shouldBypassInternalPath = isInternalRuntimePath(previous?.path);
@@ -645,7 +644,7 @@ async function main() {
 }
 
 els.home.addEventListener("click", () => {
-  navigateWithinRuntime("/?redirect=0");
+  navigateWithinRuntime("/");
 });
 
 els.refresh.addEventListener("click", () => {
@@ -719,8 +718,7 @@ els.reset.addEventListener("click", async () => {
     });
     updateBlueprintTextarea();
   }
-  currentPath =
-    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+  currentPath = activeBlueprint?.landingPage || config.landingPath || "/";
   els.address.value = currentPath;
   pendingCleanBoot = true;
   remoteFrameBooted = false;
