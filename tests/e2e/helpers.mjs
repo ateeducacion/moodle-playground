@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 export const DEFAULT_LANDING_PATH = "/my/";
-export const readyTimeoutMs = 120_000;
+export const readyTimeoutMs = process.env.CI ? 150_000 : 120_000;
 
 export function createDiagnosticsCollector(page) {
   const consoleMessages = [];

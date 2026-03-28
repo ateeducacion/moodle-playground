@@ -138,7 +138,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox]
+        include:
+          - browser: chromium
+            workers: 2
+          - browser: firefox
+            workers: 1
     steps:
       - uses: actions/checkout@v6
 
@@ -165,6 +169,7 @@ jobs:
           CI: "true"
           PLAYWRIGHT_WEB_ROOT: dist-site
           PLAYWRIGHT_EXTERNAL_SERVER: "0"
+          PLAYWRIGHT_WORKERS: ${{ matrix.workers }}
 
       - name: Upload test results
         if: always()
