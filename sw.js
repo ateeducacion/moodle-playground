@@ -7,10 +7,9 @@ const clientContexts = new Map();
 // Use the imported build version so that when it changes, the SW file's
 // import tree changes → the browser detects a new SW → installs + activates
 // automatically on page reload. The URL param is a fallback for cache busting.
-// Defer self.location access — Firefox module SW may not expose it at evaluation time.
-const BUILD_VERSION = IMPORTED_BUILD_VERSION || (() => {
-  try { return new URL(self.location.href).searchParams.get("build"); } catch { return null; }
-})() || "dev";
+const BUILD_VERSION = IMPORTED_BUILD_VERSION
+  || new URL(self.location.href).searchParams.get("build")
+  || "dev";
 const STATIC_CACHE_PREFIX = "moodle-playground-static";
 const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
 
@@ -105,7 +104,7 @@ function shouldHandleStaticRequest(request, url) {
   }
 
   const strippedPathname = stripAppBasePath(url.pathname);
-  if (strippedPathname === "/sw.js" || strippedPathname === "/sw.bundle.js" || strippedPathname === "/dist/sw.bundle.js") {
+  if (["/sw.js", "/sw.bundle.js", "/dist/sw.bundle.js"].includes(strippedPathname)) {
     return false;
   }
 

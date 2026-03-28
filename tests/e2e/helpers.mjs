@@ -167,6 +167,40 @@ export async function waitForShellReady(page) {
  * 2. Remote: boot overlay hidden (= bootstrap complete, frame navigated)
  * 3. Moodle: content visible inside nested iframe (= PHP page rendered)
  */
+/**
+ * Poll the Moodle iframe until at least one of the given selectors is present.
+ * Tolerates frame-not-ready errors while the nested iframe is still loading.
+ */
+async function waitForMoodleContent(
+  moodleFrame,
+  selectors,
+  timeout = readyTimeoutMs,
+) {
+  await expect
+    .poll(
+      async () => {
+        for (const selector of selectors) {
+          try {
+            if (await moodleFrame.locator(selector).count()) return true;
+          } catch {
+            /* frame not ready yet */
+          }
+        }
+        return false;
+      },
+      { timeout },
+    )
+    .toBeTruthy();
+}
+
+const MOODLE_CONTENT_SELECTORS = [
+  "main",
+  "[role='main']",
+  "#page-content",
+  "input[name='username']",
+  "#username",
+];
+
 export async function waitForPlaygroundReady(page) {
   // Stage 1: Shell is ready (worker sent "ready" message)
   await waitForShellReady(page);
@@ -182,29 +216,7 @@ export async function waitForPlaygroundReady(page) {
   );
 
   // Stage 3: Moodle content rendered inside the nested iframe.
-  // Poll instead of direct expect — the frame may still be loading.
-  const moodleFrame = getMoodleFrame(page);
-  await expect
-    .poll(
-      async () => {
-        for (const selector of [
-          "main",
-          "[role='main']",
-          "#page-content",
-          "input[name='username']",
-          "#username",
-        ]) {
-          try {
-            if (await moodleFrame.locator(selector).count()) return true;
-          } catch {
-            /* frame not ready yet */
-          }
-        }
-        return false;
-      },
-      { timeout: readyTimeoutMs },
-    )
-    .toBeTruthy();
+  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
 export async function navigateWithinPlayground(page, path) {
@@ -217,28 +229,11 @@ export async function navigateWithinPlayground(page, path) {
   await waitForMoodlePath(page, path);
 
   // Wait for Moodle content to render after navigation
-  const moodleFrame = getMoodleFrame(page);
-  await expect
-    .poll(
-      async () => {
-        for (const selector of [
-          "main",
-          "[role='main']",
-          "#page-content",
-          "form",
-          "input[name='username']",
-        ]) {
-          try {
-            if (await moodleFrame.locator(selector).count()) return true;
-          } catch {
-            /* frame not ready yet */
-          }
-        }
-        return false;
-      },
-      { timeout: 30_000 },
-    )
-    .toBeTruthy();
+  await waitForMoodleContent(
+    getMoodleFrame(page),
+    [...MOODLE_CONTENT_SELECTORS, "form"],
+    30_000,
+  );
 }
 
 export async function waitForMoodlePath(page, expectedPath) {

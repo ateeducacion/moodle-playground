@@ -422,9 +422,8 @@ function bindShellChannel() {
         }
         break;
       case "wasm-network-error":
-        appendLog(message.detail, true);
         appendLog(
-          "This is a known limitation on Firefox and Safari. The page may not render fully.",
+          `${message.detail} — This is a known limitation on Firefox and Safari. The page may not render fully.`,
           true,
         );
         break;

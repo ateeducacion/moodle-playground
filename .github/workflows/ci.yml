@@ -131,10 +131,14 @@ jobs:
         with:
           path: dist-site
 
-  # ── E2E: Chromium ──
-  e2e-chromium:
+  # ── E2E: Chromium + Firefox ──
+  e2e:
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
     steps:
       - uses: actions/checkout@v6
 
@@ -146,8 +150,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Download site artifact
         uses: actions/download-artifact@v4
@@ -155,8 +159,8 @@ jobs:
           name: site-build
           path: dist-site
 
-      - name: Run Playwright e2e tests (Chromium)
-        run: npx playwright test --project=chromium
+      - name: Run Playwright e2e tests (${{ matrix.browser }})
+        run: npx playwright test --project=${{ matrix.browser }}
         env:
           CI: "true"
           PLAYWRIGHT_WEB_ROOT: dist-site
@@ -166,53 +170,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results-chromium
-          path: test-results/
-          retention-days: 7
-
-  # ── E2E: Firefox ──
-  e2e-firefox:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Playwright Firefox
-        run: npx playwright install --with-deps firefox
-
-      - name: Download site artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: site-build
-          path: dist-site
-
-      - name: Run Playwright e2e tests (Firefox)
-        run: npx playwright test --project=firefox
-        env:
-          CI: "true"
-          PLAYWRIGHT_WEB_ROOT: dist-site
-          PLAYWRIGHT_EXTERNAL_SERVER: "0"
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-results-firefox
+          name: e2e-results-${{ matrix.browser }}
           path: test-results/
           retention-days: 7
 
   # ── Deploy to GitHub Pages (push to main only) ──
   deploy-pages:
     if: github.event_name == 'push'
-    needs: [lint-and-test, build, e2e-chromium, e2e-firefox]
+    needs: [lint-and-test, build, e2e]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
