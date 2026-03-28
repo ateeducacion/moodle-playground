@@ -138,7 +138,7 @@ async function ensureRuntimeServiceWorker() {
   }
 
   await registerVersionedServiceWorker(
-    new URL("../../dist/sw.bundle.js", import.meta.url),
+    new URL("../../sw.bundle.js", import.meta.url),
     {
       scope: "./",
     },

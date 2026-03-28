@@ -113,7 +113,7 @@ function traceRuntimeSelection(scopeId, debug, profile, stage, detail) {
 
 async function registerRuntimeServiceWorker() {
   const registration = await registerVersionedServiceWorker(
-    new URL("../../dist/sw.bundle.js", import.meta.url),
+    new URL("../../sw.bundle.js", import.meta.url),
     {
       scope: "./",
     },

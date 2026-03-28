@@ -105,7 +105,7 @@ function shouldHandleStaticRequest(request, url) {
   }
 
   const strippedPathname = stripAppBasePath(url.pathname);
-  if (strippedPathname === "/sw.js" || strippedPathname === "/dist/sw.bundle.js") {
+  if (strippedPathname === "/sw.js" || strippedPathname === "/sw.bundle.js" || strippedPathname === "/dist/sw.bundle.js") {
     return false;
   }
 

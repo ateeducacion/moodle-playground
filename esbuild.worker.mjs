@@ -57,15 +57,21 @@ console.log("Built dist/php-worker.bundle.js");
 // Firefox does not support ES module Service Workers (type: "module" + import
 // statements). Bundling inlines all imports so the SW works as a classic script
 // in all browsers.
+//
+// IMPORTANT: The SW bundle MUST live at the project root (not in dist/).
+// A Service Worker's maximum allowed scope is its own directory path. If the
+// bundle were at /dist/sw.bundle.js, it could only control paths under /dist/,
+// but it needs to control "/" (the whole site). Firefox strictly enforces this
+// scope rule and throws "The operation is insecure" SecurityError when a SW
+// tries to register with a scope above its own directory.
 await build({
   entryPoints: ["sw.js"],
   bundle: true,
-  outdir: "dist",
-  entryNames: "sw.bundle",
+  outfile: "sw.bundle.js",
   format: "iife",
   platform: "browser",
   target: "es2022",
   sourcemap: true,
 });
 
-console.log("Built dist/sw.bundle.js");
+console.log("Built sw.bundle.js");
