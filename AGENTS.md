@@ -608,8 +608,13 @@ They verify the full playground flow: shell boot → WASM PHP runtime → Moodle
 | `moodle-boot.spec.mjs` | Runtime boot lifecycle, PHP Info capture |
 | `blueprint-courses.spec.mjs` | Blueprint execution: course creation, user creation, enrollment, module addition |
 
-Run with `make test-e2e` (requires `npm run test:e2e:install` for first-time Chromium setup).
-Configuration in `playwright.config.mjs`. The dev server auto-starts on port 8085.
+Run with `make test-e2e` (both browsers), `make test-e2e-chrome`, or `make test-e2e-firefox`.
+First-time setup: `npm run test:e2e:install`. Configuration in `playwright.config.mjs`.
+The dev server auto-starts on port 8085. Workers: 2 in CI, 3 locally.
+
+**Firefox compatibility:** Tests that require the Moodle runtime (SW + WASM bootstrap)
+work in Firefox thanks to the IIFE-bundled Service Worker. Shell-only tests (toolbar,
+panels, settings) work in all browsers without the runtime.
 
 ### Linting and formatting
 
@@ -636,14 +641,60 @@ node --check src/remote/main.js
 node --check src/blueprint/index.js
 ```
 
-### CI
+### CI/CD
 
-The `.github/workflows/ci.yml` workflow runs on push to `main` and on pull requests:
+Everything lives in a single `.github/workflows/ci.yml` workflow (no separate pages.yml
+or pr-preview.yml). It triggers on push to `main`, pull requests, and manual dispatch.
 
-1. Install dependencies
-2. Syntax check all runtime files
-3. `make test` (81 unit tests)
-4. `make lint` (Biome)
+```
+lint-and-test ───────────────────────────────────────┐
+build (5 branches + docs) ──┬── e2e-chromium ────────┤
+                            ├── e2e-firefox ──────────┤
+                            ├── deploy-preview (PR) ──┤
+                            └── deploy-pages (main) ──┘
+```
+
+**Jobs:**
+
+| Job | Trigger | What it does |
+|-----|---------|--------------|
+| `lint-and-test` | Always (except PR close) | Syntax check, `make test` (286+ unit tests), `make lint` |
+| `build` | Always (except PR close) | Build all 5 Moodle branches + docs, upload artifact |
+| `e2e-chromium` | After build | Playwright e2e tests in Chromium (2 workers) |
+| `e2e-firefox` | After build | Playwright e2e tests in Firefox (2 workers) |
+| `deploy-pages` | Push to main only | Deploy to GitHub Pages (gates on ALL other jobs) |
+| `deploy-preview` | PR only | Deploy to Netlify (parallel with e2e, fast preview URL) |
+| `cleanup-preview` | PR close only | Delete Netlify deploy |
+
+**Concurrency:** One run per branch, cancel-in-progress. A new push cancels stale runs.
+
+**Artifact sharing:** Build produces a single `site-build` artifact reused by both e2e
+jobs and both deploy jobs. Build once, test and deploy the same artifact.
+
+### Service Worker bundling (Firefox compatibility)
+
+The Service Worker (`sw.js`) uses ES module `import` statements, but **Firefox does not
+support ES module Service Workers** (Mozilla Bug 1360870). The SW is bundled with esbuild
+into `sw.bundle.js` (IIFE format, no imports) at the project root and registered as
+`type: "classic"`.
+
+**Important scope rule:** The SW bundle MUST live at the project root, not in `dist/`.
+A Service Worker's max scope is its own directory path — `/dist/sw.bundle.js` can only
+control `/dist/`, but the SW needs to control `/`. Firefox strictly enforces this and
+throws `SecurityError: "The operation is insecure"` if violated.
+
+- Source: `sw.js` (ES module with imports — for development/readability)
+- Bundle: `sw.bundle.js` (IIFE, no imports — served to browsers)
+- Built by: `npm run build:worker` (esbuild.worker.mjs)
+- Registered as: `type: "classic"` in `src/shared/service-worker-version.js`
+
+### Firefox WASM network limitations
+
+Firefox and Safari cannot make outbound HTTP calls from Emscripten WASM (errno 23 /
+EHOSTUNREACH). When Moodle PHP code tries to use `curl` or `file_get_contents()` on
+external URLs, the WASM runtime crashes. The crash recovery system detects this via
+`isEmscriptenNetworkError()` in `src/runtime/crash-recovery.js` and returns a user-friendly
+502 response instead of crashing the runtime.
 
 ### Manual validation areas
 

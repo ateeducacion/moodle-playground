@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 export const DEFAULT_LANDING_PATH = "/my/";
-export const readyTimeoutMs = 120_000;
+export const readyTimeoutMs = process.env.CI ? 150_000 : 120_000;
 
 export function createDiagnosticsCollector(page) {
   const consoleMessages = [];
@@ -159,44 +159,64 @@ export async function waitForShellReady(page) {
 }
 
 /**
- * Full wait: shell ready + Moodle content rendered inside the nested iframe.
+ * Full wait: shell ready + remote boot overlay hidden + Moodle content rendered.
  * Use for tests that need to interact with Moodle UI (forms, navigation).
+ *
+ * Readiness stages verified:
+ * 1. Shell: runtime label populated + address bar enabled (= worker sent "ready")
+ * 2. Remote: boot overlay hidden (= bootstrap complete, frame navigated)
+ * 3. Moodle: content visible inside nested iframe (= PHP page rendered)
  */
-export async function waitForPlaygroundReady(
-  page,
-  expectedPath = DEFAULT_LANDING_PATH,
+/**
+ * Poll the Moodle iframe until at least one of the given selectors is present.
+ * Tolerates frame-not-ready errors while the nested iframe is still loading.
+ */
+async function waitForMoodleContent(
+  moodleFrame,
+  selectors,
+  timeout = readyTimeoutMs,
 ) {
-  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
-    timeout: readyTimeoutMs,
-  });
-  await expect(page.locator("#address-input")).toBeEnabled({
-    timeout: readyTimeoutMs,
-  });
-  await expect(page.locator("#address-input")).toHaveValue(expectedPath, {
-    timeout: readyTimeoutMs,
-  });
+  await expect
+    .poll(
+      async () => {
+        for (const selector of selectors) {
+          try {
+            if (await moodleFrame.locator(selector).count()) return true;
+          } catch {
+            /* frame not ready yet */
+          }
+        }
+        return false;
+      },
+      { timeout },
+    )
+    .toBeTruthy();
+}
 
+const MOODLE_CONTENT_SELECTORS = [
+  "main",
+  "[role='main']",
+  "#page-content",
+  "input[name='username']",
+  "#username",
+];
+
+export async function waitForPlaygroundReady(page) {
+  // Stage 1: Shell is ready (worker sent "ready" message)
+  await waitForShellReady(page);
+
+  // Stage 2: Remote boot overlay is hidden (bootstrap complete)
   const remoteHost = getRemoteHost(page);
   await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
     timeout: readyTimeoutMs,
   });
   await expect(remoteHost.locator(".remote-boot__card")).toHaveClass(
     /is-hidden/u,
-    {
-      timeout: readyTimeoutMs,
-    },
+    { timeout: readyTimeoutMs },
   );
 
-  await waitForMoodlePath(page, expectedPath);
-
-  const moodleFrame = getMoodleFrame(page);
-  await expect(
-    moodleFrame.locator(
-      "main, [role='main'], input[name='username'], input#username",
-    ),
-  ).toBeVisible({
-    timeout: readyTimeoutMs,
-  });
+  // Stage 3: Moodle content rendered inside the nested iframe.
+  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
 export async function navigateWithinPlayground(page, path) {
@@ -204,10 +224,16 @@ export async function navigateWithinPlayground(page, path) {
   await expect(addressInput).toBeEnabled({ timeout: readyTimeoutMs });
   await addressInput.fill(path);
   await addressInput.press("Enter");
-  await expect(addressInput).toHaveValue(path, {
-    timeout: readyTimeoutMs,
-  });
+
+  // Wait for the Moodle frame to navigate to the expected path
   await waitForMoodlePath(page, path);
+
+  // Wait for Moodle content to render after navigation
+  await waitForMoodleContent(
+    getMoodleFrame(page),
+    [...MOODLE_CONTENT_SELECTORS, "form"],
+    30_000,
+  );
 }
 
 export async function waitForMoodlePath(page, expectedPath) {

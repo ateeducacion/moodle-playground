@@ -26,6 +26,16 @@
  */
 
 /**
+ * Detect Emscripten network errors (errno 23 = EHOSTUNREACH).
+ * Firefox and Safari cannot make outbound HTTP calls from WASM,
+ * causing crashes when PHP uses curl or file_get_contents on URLs.
+ */
+export function isEmscriptenNetworkError(error) {
+  if (!error) return false;
+  return error.errno === 23 || String(error.message || "").includes("errno 23");
+}
+
+/**
  * Determine whether an error represents a fatal, unrecoverable WASM crash.
  * A crashed runtime MUST be discarded — it cannot be safely reused.
  *
@@ -35,6 +45,12 @@
 export function isFatalWasmError(error) {
   if (!error) {
     return false;
+  }
+
+  // Emscripten network errors (EHOSTUNREACH) are fatal — the runtime
+  // cannot recover from a failed outbound curl call in Firefox/Safari.
+  if (isEmscriptenNetworkError(error)) {
+    return true;
   }
 
   // Check for actual WebAssembly.RuntimeError instances first

@@ -12,12 +12,17 @@ import {
   waitForShellReady,
 } from "./helpers.mjs";
 
-// Skip: interacting with Moodle forms inside nested iframes requires deep
-// frame readiness checks (waitForPlaygroundReady) that are not yet reliable.
-// The test is kept as a reference for future Moodle UI interaction patterns.
-test.skip("creates a course and a user, then renders an admin system information page", async ({
+// This test interacts with Moodle forms inside a 2-level iframe served by a
+// Service Worker. The frameLocator chain is unreliable in CI (resource
+// contention causes the nested iframe content check to timeout). Skip in CI;
+// run locally with: npx playwright test admin-flows
+test("creates a course and a user, then renders an admin system information page", async ({
   page,
 }, testInfo) => {
+  test.skip(
+    !!process.env.CI,
+    "Nested iframe interaction is unreliable in CI — run locally",
+  );
   const diagnostics = createDiagnosticsCollector(page);
   const suffix = uniqueSuffix(testInfo);
   const courseName = `Playwright Course ${suffix}`;

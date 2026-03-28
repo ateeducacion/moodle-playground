@@ -1,13 +1,27 @@
-name: Tests
+name: CI
 
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+    types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
+  lint-and-test:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -36,19 +50,192 @@ jobs:
           node --check src/remote/main.js
           node --check src/blueprint/index.js
 
-      - name: Run tests
+      - name: Run unit tests
         run: make test
 
       - name: Lint
         run: make lint
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+  # ── Build: all 5 Moodle branches + docs ──
+  build:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Build worker bundle
-        run: npm run build:worker
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'push'
 
-      - name: Run Playwright e2e tests (Chromium)
-        run: npx playwright test --project=chromium
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate build metadata
+        run: npm run build:version
+
+      - name: Restore snapshot cache
+        uses: actions/cache@v5
+        with:
+          path: .cache/snapshots
+          key: snapshots-${{ hashFiles('patches/**', 'scripts/generate-install-snapshot.sh', 'scripts/patch-moodle-source.sh', 'scripts/generate-component-cache.php') }}
+          restore-keys: |
+            snapshots-
+
+      - name: Prepare runtime assets (all branches)
+        run: make prepare-all JOBS=2
+
+      - name: Install docs dependencies
+        run: python -m pip install -r requirements-docs.txt
+
+      - name: Assemble site artifact
+        run: |
+          rm -rf dist-site
+          mkdir -p dist-site/docs
+          rsync -a ./ ./dist-site/ \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".venv/" \
+            --exclude ".cache/" \
+            --exclude "dist-site/" \
+            --exclude "docs/" \
+            --exclude "node_modules/" \
+            --exclude "site/" \
+            --exclude "tests/" \
+            --exclude "patches/"
+          mkdocs build --strict --site-dir dist-site/docs
+          touch dist-site/.nojekyll
+
+      - name: Upload site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-build
+          path: dist-site/
+          retention-days: 1
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist-site
+
+  # ── E2E: Chromium + Firefox ──
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            workers: 2
+          - browser: firefox
+            workers: 1
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Download site artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site-build
+          path: dist-site
+
+      - name: Run Playwright e2e tests (${{ matrix.browser }})
+        run: npx playwright test --project=${{ matrix.browser }}
         env:
           CI: "true"
+          PLAYWRIGHT_WEB_ROOT: dist-site
+          PLAYWRIGHT_EXTERNAL_SERVER: "0"
+          PLAYWRIGHT_WORKERS: ${{ matrix.workers }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.browser }}
+          path: test-results/
+          retention-days: 7
+
+  # ── Deploy to GitHub Pages (push to main only) ──
+  deploy-pages:
+    if: github.event_name == 'push'
+    needs: [lint-and-test, build, e2e]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  # ── Deploy PR Preview to Netlify ──
+  deploy-preview:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download site artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site-build
+          path: dist-site
+
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: ./dist-site
+          production-deploy: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}"
+          alias: pr-${{ github.event.pull_request.number }}
+          enable-pull-request-comment: true
+          enable-commit-comment: false
+          overwrites-pull-request-comment: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  # ── Cleanup PR Preview on close ──
+  cleanup-preview:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Netlify deploy
+        run: |
+          npm i -g netlify-cli
+          DEPLOY_ID=$(netlify api listSiteDeploys \
+            --data '{"site_id":"'"$NETLIFY_SITE_ID"'"}' 2>/dev/null \
+            | jq -r '.[] | select(.deploy_ssl_url | test("pr-${{ github.event.pull_request.number }}--")) | .id' \
+            | head -n 1) || true
+          if [ -n "$DEPLOY_ID" ]; then
+            netlify api deleteDeploy --data '{"deploy_id":"'"$DEPLOY_ID"'"}' || true
+            echo "Deleted deploy $DEPLOY_ID"
+          else
+            echo "No deploy found for pr-${{ github.event.pull_request.number }}, skipping"
+          fi
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

@@ -69,7 +69,7 @@ let currentPhpVersion = DEFAULT_PHP_VERSION;
 let currentMoodleBranch = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
-let currentPath = "/?redirect=0";
+let currentPath = "/";
 let channel;
 let serviceWorkerReady = null;
 let activeBlueprint;
@@ -138,7 +138,7 @@ async function ensureRuntimeServiceWorker() {
   }
 
   await registerVersionedServiceWorker(
-    new URL("../../sw.js", import.meta.url),
+    new URL("../../sw.bundle.js", import.meta.url),
     {
       scope: "./",
     },
@@ -363,8 +363,7 @@ async function importPayload(file) {
   activeBlueprint = blueprint;
   saveBlueprint(scopeId, activeBlueprint);
   pendingCleanBoot = true;
-  currentPath =
-    activeBlueprint.landingPage || config.landingPath || "/?redirect=0";
+  currentPath = activeBlueprint.landingPage || config.landingPath || "/";
   els.address.value = currentPath;
   updateBlueprintTextarea();
   saveState({ importedBlueprintAt: new Date().toISOString() });
@@ -420,6 +419,12 @@ function bindShellChannel() {
           setActivePanel("phpinfo");
           capturePhpInfoViaWorker("bootstrap-error");
         }
+        break;
+      case "wasm-network-error":
+        appendLog(
+          `${message.detail} — This is a known limitation on Firefox and Safari. The page may not render fully.`,
+          true,
+        );
         break;
       case "phpinfo":
         setPhpInfoContent(message.html || "");
@@ -581,7 +586,7 @@ async function main() {
 
   const previous = loadSessionState(scopeId);
   const preferredPath =
-    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+    activeBlueprint?.landingPage || config.landingPath || "/";
   const shouldBypassSavedLogin =
     config.autologin && previous?.path === "/login";
   const shouldBypassInternalPath = isInternalRuntimePath(previous?.path);
@@ -639,7 +644,7 @@ async function main() {
 }
 
 els.home.addEventListener("click", () => {
-  navigateWithinRuntime("/?redirect=0");
+  navigateWithinRuntime("/");
 });
 
 els.refresh.addEventListener("click", () => {
@@ -713,8 +718,7 @@ els.reset.addEventListener("click", async () => {
     });
     updateBlueprintTextarea();
   }
-  currentPath =
-    activeBlueprint?.landingPage || config.landingPath || "/?redirect=0";
+  currentPath = activeBlueprint?.landingPage || config.landingPath || "/";
   els.address.value = currentPath;
   pendingCleanBoot = true;
   remoteFrameBooted = false;
