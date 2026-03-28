@@ -12,9 +12,17 @@ import {
   waitForShellReady,
 } from "./helpers.mjs";
 
+// Firefox + Playwright cannot access elements inside nested iframes served by
+// a Service Worker (frameLocator chain fails). This test fills Moodle forms
+// inside a 2-level iframe, so it only works on Chromium.
 test("creates a course and a user, then renders an admin system information page", async ({
   page,
+  browserName,
 }, testInfo) => {
+  test.skip(
+    browserName === "firefox",
+    "Playwright cannot access nested SW-served iframes in Firefox",
+  );
   const diagnostics = createDiagnosticsCollector(page);
   const suffix = uniqueSuffix(testInfo);
   const courseName = `Playwright Course ${suffix}`;
