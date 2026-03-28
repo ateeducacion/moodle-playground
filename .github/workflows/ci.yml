@@ -54,8 +54,10 @@ jobs:
         run: make lint
 
   # ── Build: worker + single Moodle branch, upload as artifact ──
+  # Only needed for PRs — on push to main, pages.yml builds all 5 branches
+  # and runs its own browser-validation against the production artifact.
   build:
-    if: github.event.action != 'closed'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
