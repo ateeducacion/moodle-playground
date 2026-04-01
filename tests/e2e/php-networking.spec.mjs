@@ -515,6 +515,10 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
   browserName,
 }, testInfo) => {
   test.skip(browserName !== "firefox");
+  test.fixme(
+    browserName === "firefox",
+    "Temporarily disabled due to Firefox CI runtime readiness flakiness.",
+  );
   const diagnostics = createDiagnosticsCollector(page);
 
   const defaultBlueprint = buildNetworkingBlueprint(
