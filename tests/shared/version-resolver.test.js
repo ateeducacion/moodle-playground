@@ -129,10 +129,7 @@ describe("parseQueryParams", () => {
       "https://example.com/?phpCorsProxyUrl=http%3A%2F%2F127.0.0.1%3A9999%2F%3Furl%3D&debug=true",
     );
 
-    assert.strictEqual(
-      parsed.phpCorsProxyUrl,
-      "http://127.0.0.1:9999/?url=",
-    );
+    assert.strictEqual(parsed.phpCorsProxyUrl, "http://127.0.0.1:9999/?url=");
     assert.strictEqual(parsed.debug, "true");
   });
 });
