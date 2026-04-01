@@ -85,7 +85,9 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
         addressValue:
           addressInput instanceof HTMLInputElement ? addressInput.value : null,
         addressDisabled:
-          addressInput instanceof HTMLInputElement ? addressInput.disabled : null,
+          addressInput instanceof HTMLInputElement
+            ? addressInput.disabled
+            : null,
         runtimeLabel: document.querySelector("#current-runtime-label")
           ?.textContent,
         logPanel: document.querySelector("#log-panel")?.textContent || "",
@@ -102,7 +104,11 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
     });
   } catch {}
   try {
-    await writeFile(`${diagnosticsDir}/shell.html`, await page.content(), "utf8");
+    await writeFile(
+      `${diagnosticsDir}/shell.html`,
+      await page.content(),
+      "utf8",
+    );
   } catch {}
   await writeFile(
     `${diagnosticsDir}/shell-state.json`,
