@@ -1,0 +1,494 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import http from "node:http";
+import https from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test } from "@playwright/test";
+import {
+  captureDiagnostics,
+  createDiagnosticsCollector,
+  waitForPlaygroundReady,
+} from "./helpers.mjs";
+
+test.describe.configure({ timeout: 180_000 });
+test.use({ ignoreHTTPSErrors: true });
+
+let localHttpsServer;
+let localHttpsBaseUrl;
+let localHttpsTmpDir;
+let localCorsProxyServer;
+let localCorsProxyBaseUrl;
+let localCorsProxyHits = [];
+const EXELEARNING_RELEASES_ATOM_URL =
+  "https://github.com/exelearning/exelearning/releases.atom";
+const EXELEARNING_RELEASE_VERSION = "4.0.0-beta3";
+const EXELEARNING_RELEASE_ASSET_URL = `https://github.com/exelearning/exelearning/releases/download/v${EXELEARNING_RELEASE_VERSION}/exelearning-static-v${EXELEARNING_RELEASE_VERSION}.zip`;
+
+test.beforeAll(async () => {
+  localHttpsTmpDir = await mkdtemp(join(tmpdir(), "moodle-playground-https-"));
+  const keyPath = join(localHttpsTmpDir, "localhost.key");
+  const certPath = join(localHttpsTmpDir, "localhost.crt");
+
+  execFileSync("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-keyout",
+    keyPath,
+    "-out",
+    certPath,
+    "-days",
+    "1",
+    "-subj",
+    "/CN=localhost",
+    "-addext",
+    "subjectAltName=DNS:localhost,IP:127.0.0.1",
+  ]);
+
+  const [key, cert] = await Promise.all([
+    readFile(keyPath, "utf8"),
+    readFile(certPath, "utf8"),
+  ]);
+
+  localHttpsServer = https.createServer({ key, cert }, (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    if (url.pathname === "/plain") {
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end("local-https-ok");
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("not found");
+  });
+
+  await new Promise((resolve) => {
+    localHttpsServer.listen(0, "127.0.0.1", resolve);
+  });
+  const address = localHttpsServer.address();
+  localHttpsBaseUrl = `https://localhost:${address.port}`;
+
+  localCorsProxyServer = http.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Expose-Headers", "X-Playground-Cors-Proxy");
+    res.setHeader("X-Playground-Cors-Proxy", "true");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const target = url.searchParams.get("url");
+    localCorsProxyHits.push({
+      method: req.method,
+      target,
+    });
+
+    if (target === "https://remote-server.example/plain") {
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end("proxy-fallback-ok");
+      return;
+    }
+
+    res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(`unexpected target: ${target}`);
+  });
+
+  await new Promise((resolve) => {
+    localCorsProxyServer.listen(0, "127.0.0.1", resolve);
+  });
+  const proxyAddress = localCorsProxyServer.address();
+  localCorsProxyBaseUrl = `http://127.0.0.1:${proxyAddress.port}/?url=`;
+});
+
+test.afterAll(async () => {
+  await new Promise((resolve, reject) => {
+    if (!localHttpsServer) {
+      resolve();
+      return;
+    }
+    localHttpsServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  await new Promise((resolve, reject) => {
+    if (!localCorsProxyServer) {
+      resolve();
+      return;
+    }
+    localCorsProxyServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  if (localHttpsTmpDir) {
+    await rm(localHttpsTmpDir, { recursive: true, force: true });
+  }
+});
+
+function buildBlueprintParam(payload) {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+}
+
+test.beforeEach(() => {
+  localCorsProxyHits = [];
+});
+
+test("PHP direct HTTPS to a self-signed local server still fails before proxy fallback", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP Local HTTPS Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-local-https.php",
+        data: {
+          literal: `<?php require(__DIR__ . '/config.php'); $url = '${localHttpsBaseUrl}/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);`,
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-local-https.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toBe(`${localHttpsBaseUrl}/plain`);
+    expect(result.fgc_ok).toBe(false);
+    expect(result.fgc_error).toMatch(/Failed to open stream: operation failed/);
+    expect(result.fgc_body).toBeNull();
+    expect(result.curl_errno).toBe(35);
+    expect(result.curl_error).toMatch(/SSL_ERROR_SYSCALL|UnknownCa|ASN1/i);
+    expect(result.curl_http_code).toBe(0);
+    expect(result.curl_body).toBeNull();
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});
+
+test("PHP can fetch GitHub releases atom feed through the same-origin playground proxy", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP Networking Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-github.php",
+        data: {
+          literal:
+            "<?php require(__DIR__ . '/config.php'); $base = defined('MOODLE_PLAYGROUND_PROXY_URL') && MOODLE_PLAYGROUND_PROXY_URL !== '' ? MOODLE_PLAYGROUND_PROXY_URL : rtrim($CFG->wwwroot, '/') . '/__playground_proxy__'; $url = $base . '?repo=exelearning%2Fexelearning&atom=releases'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-github.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toContain(
+      "/__playground_proxy__?repo=exelearning%2Fexelearning&atom=releases",
+    );
+    expect(result.fgc_ok).toBe(true);
+    expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+    expect(result.curl_errno).toBe(0);
+    expect(result.curl_http_code).toBe(200);
+    expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});
+
+test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP Networking Proxy Fallback Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-fallback.php",
+        data: {
+          literal:
+            "<?php require(__DIR__ . '/config.php'); $url = 'http://remote-server.example/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);",
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(
+      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+    );
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-fallback.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toBe("http://remote-server.example/plain");
+    expect(result.fgc_ok).toBe(true);
+    expect(result.fgc_body).toBe("proxy-fallback-ok");
+    expect(result.curl_errno).toBe(0);
+    expect(result.curl_http_code).toBe(200);
+    expect(result.curl_body).toBe("proxy-fallback-ok");
+    expect(localCorsProxyHits).toEqual([
+      { method: "GET", target: "https://remote-server.example/plain" },
+      { method: "GET", target: "https://remote-server.example/plain" },
+    ]);
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});
+
+test("PHP direct HTTPS works for a CORS-open external URL", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP Networking Direct Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-external-https.php",
+        data: {
+          literal:
+            "<?php require(__DIR__ . '/config.php'); $url = 'https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-external-https.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toBe(
+      "https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md",
+    );
+    expect(result.fgc_ok).toBe(true);
+    expect(result.fgc_body_prefix).toMatch(
+      /WordPress Playground|PHP\.wasm|Playground/i,
+    );
+    expect(result.curl_errno).toBe(0);
+    expect(result.curl_error).toBe("");
+    expect(result.curl_http_code).toBe(200);
+    expect(result.curl_body_prefix).toMatch(
+      /WordPress Playground|PHP\.wasm|Playground/i,
+    );
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});
+
+test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP GitHub Feed Direct Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-github-feed-direct.php",
+        data: {
+          literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASES_ATOM_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
+    expect(result.fgc_ok).toBe(true);
+    expect(result.fgc_error).toBeNull();
+    expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+    expect(result.curl_errno).toBe(0);
+    expect(result.curl_error).toBe("");
+    expect(result.curl_http_code).toBe(200);
+    expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});
+
+test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", async ({
+  page,
+}, testInfo) => {
+  const diagnostics = createDiagnosticsCollector(page);
+  const bp = buildBlueprintParam({
+    landingPage: "/my/",
+    steps: [
+      {
+        step: "installMoodle",
+        options: {
+          adminUser: "admin",
+          adminPass: "password",
+          adminEmail: "admin@example.com",
+          siteName: "PHP GitHub Asset Direct Test",
+        },
+      },
+      { step: "login", username: "admin" },
+      {
+        step: "writeFile",
+        path: "/www/moodle/playground-net-github-asset-direct.php",
+        data: {
+          literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASE_ASSET_URL}'; $context = stream_context_create(['http' => ['header' => "Range: bytes=0-3\\r\\n"]]); $body = @file_get_contents($url, false, $context); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_RANGE => '0-3']); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_prefix_hex' => is_string($body) ? bin2hex(substr($body, 0, 4)) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_prefix_hex' => is_string($curlbody) ? bin2hex(substr($curlbody, 0, 4)) : null], JSON_PRETTY_PRINT);`,
+        },
+      },
+    ],
+  });
+
+  try {
+    await page.goto(`/?blueprint=${bp}`);
+    await waitForPlaygroundReady(page);
+
+    const responseText = await page.evaluate(async () => {
+      const response = await fetch(
+        "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
+      );
+      return await response.text();
+    });
+    const result = JSON.parse(responseText);
+
+    expect(result.moodle_playground).toBe(true);
+    expect(result.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
+    expect(result.fgc_ok).toBe(true);
+    expect(result.fgc_error).toBeNull();
+    expect(result.fgc_prefix_hex).toBe("504b0304");
+    expect(result.curl_errno).toBe(0);
+    expect(result.curl_error).toBe("");
+    expect([200, 206]).toContain(result.curl_http_code);
+    expect(result.curl_prefix_hex).toBe("504b0304");
+  } finally {
+    await captureDiagnostics(page, testInfo, diagnostics);
+  }
+});

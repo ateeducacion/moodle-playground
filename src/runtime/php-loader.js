@@ -3,7 +3,11 @@ import {
   PHP,
   setPhpIniEntries,
 } from "@php-wasm/universal";
-import { loadWebRuntime } from "@php-wasm/web";
+import {
+  certificateToPEM,
+  generateCertificate,
+  loadWebRuntime,
+} from "@php-wasm/web";
 import { DEFAULT_PHP_VERSION } from "../shared/version-resolver.js";
 import {
   CHDIR_FIX_PRELOAD_PATH,
@@ -15,6 +19,63 @@ import { wrapPhpInstance } from "./php-compat.js";
 
 const PERSIST_ROOT = "/persist";
 const TEMP_ROOT = "/tmp/moodle";
+const TCP_OVER_FETCH_CA_PATH = "/internal/shared/playground-ca.pem";
+
+let cachedTcpOverFetchCaPromise = null;
+
+function resolveCorsProxyUrl(options = {}) {
+  return options.corsProxyUrl ?? options.phpCorsProxyUrl ?? null;
+}
+
+function mergeDefinedOptions(base = {}, overrides = {}) {
+  const merged = { ...(base || {}) };
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+async function getTcpOverFetchOptions(corsProxyUrl) {
+  if (!cachedTcpOverFetchCaPromise) {
+    cachedTcpOverFetchCaPromise = generateCertificate({
+      subject: {
+        commonName: "Moodle Playground CA",
+        organizationName: "Moodle Playground",
+        countryName: "US",
+      },
+      basicConstraints: {
+        ca: true,
+      },
+    });
+  }
+
+  return {
+    CAroot: await cachedTcpOverFetchCaPromise,
+    ...(corsProxyUrl ? { corsProxyUrl } : {}),
+  };
+}
+
+function buildPhpIniEntries({ tcpOverFetchEnabled = false } = {}) {
+  const entries = createPhpIniEntries();
+  if (!tcpOverFetchEnabled) {
+    return entries;
+  }
+
+  return {
+    ...entries,
+    "openssl.cafile": TCP_OVER_FETCH_CA_PATH,
+    "curl.cainfo": TCP_OVER_FETCH_CA_PATH,
+  };
+}
+
+export const __testing = {
+  buildPhpIniEntries,
+  getTcpOverFetchOptions,
+  resolveCorsProxyUrl,
+  TCP_OVER_FETCH_CA_PATH,
+};
 
 /**
  * Create the primary PHP CGI runtime for serving Moodle requests.
@@ -25,9 +86,15 @@ const TEMP_ROOT = "/tmp/moodle";
  */
 export function createPhpRuntime(
   _runtime,
-  { appBaseUrl, phpVersion, webRoot } = {},
+  { appBaseUrl, phpVersion, webRoot, corsProxyUrl, phpCorsProxyUrl } = {},
 ) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
+  const resolvedCorsProxyUrl = resolveCorsProxyUrl(
+    mergeDefinedOptions(_runtime, {
+      corsProxyUrl,
+      phpCorsProxyUrl,
+    }),
+  );
   let wrapped = null;
 
   const deferred = {
@@ -35,7 +102,9 @@ export function createPhpRuntime(
      * Initialize the PHP runtime. Must be called before any other method.
      */
     async refresh() {
+      const tcpOverFetch = await getTcpOverFetchOptions(resolvedCorsProxyUrl);
       const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
+        ...(tcpOverFetch ? { tcpOverFetch } : {}),
         withIntl: true,
       });
       const php = new PHP(runtimeId);
@@ -63,9 +132,6 @@ export function createPhpRuntime(
         /* exists */
       }
 
-      // Apply Moodle php.ini settings to /internal/shared/php.ini
-      await setPhpIniEntries(php, createPhpIniEntries());
-
       // Write glob polyfill + chdir fix into WP Playground's preload dir
       try {
         FS.mkdirTree("/internal/shared/preload");
@@ -77,6 +143,19 @@ export function createPhpRuntime(
       } catch {
         /* exists */
       }
+      if (tcpOverFetch) {
+        php.writeFile(
+          TCP_OVER_FETCH_CA_PATH,
+          `${certificateToPEM(tcpOverFetch.CAroot.certificate)}\n`,
+        );
+      }
+
+      // Apply Moodle php.ini settings to /internal/shared/php.ini
+      await setPhpIniEntries(
+        php,
+        buildPhpIniEntries({ tcpOverFetchEnabled: true }),
+      );
+
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       const absoluteUrl = (appBaseUrl || "http://localhost:8080").replace(
@@ -137,18 +216,18 @@ export function createPhpRuntime(
  */
 export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
+  const resolvedCorsProxyUrl = resolveCorsProxyUrl(_runtime || {});
   let wrapped = null;
 
   const deferred = {
     async refresh() {
+      const tcpOverFetch = await getTcpOverFetchOptions(resolvedCorsProxyUrl);
       const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
+        ...(tcpOverFetch ? { tcpOverFetch } : {}),
         withIntl: true,
       });
       const php = new PHP(runtimeId);
       const FS2 = php[__private__dont__use].FS;
-
-      // Apply Moodle php.ini settings so phpinfo reflects correct values
-      await setPhpIniEntries(php, createPhpIniEntries());
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
       try {
@@ -156,6 +235,19 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
       } catch {
         /* exists */
       }
+      if (tcpOverFetch) {
+        php.writeFile(
+          TCP_OVER_FETCH_CA_PATH,
+          `${certificateToPEM(tcpOverFetch.CAroot.certificate)}\n`,
+        );
+      }
+
+      // Apply Moodle php.ini settings so phpinfo reflects correct values
+      await setPhpIniEntries(
+        php,
+        buildPhpIniEntries({ tcpOverFetchEnabled: true }),
+      );
+
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
 
       wrapped = wrapPhpInstance(php);

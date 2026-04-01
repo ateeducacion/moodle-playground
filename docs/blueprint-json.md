@@ -97,6 +97,49 @@ http://localhost:8080/?debug=true
 This applies to the current boot only and forces developer debug mode with
 `debugdisplay=1` and PHP `display_errors=1`.
 
+### Runtime Constants
+
+Moodle Playground defines `MOODLE_PLAYGROUND` in the generated `config.php` on
+every boot:
+
+```php
+if (defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND) {
+    // Runtime-specific behavior for Moodle Playground.
+}
+```
+
+This constant is intended as the public runtime marker for Moodle plugins that
+need to adapt behavior when running inside the browser/WASM environment.
+
+For same-origin proxy access from PHP, Moodle Playground also defines
+`MOODLE_PLAYGROUND_PROXY_URL` in `config.php`. Use it only when a plugin wants
+an explicit playground-only proxy contract instead of relying on direct
+outbound PHP networking with optional `phpCorsProxyUrl` fallback. If you do
+use it, prefer that constant over deriving a proxy path from `$CFG->wwwroot`,
+because the worker runtime is served from a scoped
+`/playground/<scope>/<runtime>/...` URL:
+
+```php
+if (defined('MOODLE_PLAYGROUND_PROXY_URL') && MOODLE_PLAYGROUND_PROXY_URL !== '') {
+    $url = MOODLE_PLAYGROUND_PROXY_URL . '?' . http_build_query([
+        'repo' => 'owner/repo',
+        'atom' => 'releases',
+    ]);
+}
+```
+
+When `playground.config.json` defines `phpCorsProxyUrl`, Moodle Playground uses
+that proxy as the browser-side fallback for outbound HTTP(S) requests made from
+PHP itself (`curl`, `file_get_contents()`, etc.) via the `@php-wasm/web`
+TCP-over-fetch transport. This is separate from `addonProxyUrl`, which is used
+for browser-side addon ZIP downloads and as the upstream target for the
+optional same-origin Service Worker proxy endpoint.
+
+`MOODLE_PLAYGROUND_PROXY_URL` remains the explicit same-origin PHP networking
+endpoint exposed by the runtime. In the current repo configuration, the tested
+direct GitHub feed and release asset URLs also work through PHP WASM networking,
+so this constant is optional rather than mandatory for those cases.
+
 ## Constants
 
 The `constants` object defines `{{KEY}}` placeholders that are substituted into
@@ -315,6 +358,10 @@ You can override the detected values if needed:
 | `url` | yes | GitHub archive ZIP URL |
 | `pluginType` | no | Auto-detected from URL. Override for non-standard repo names |
 | `pluginName` | no | Auto-detected from URL. Override for non-standard repo names |
+
+GitHub archive ZIPs are fetched through the configured addon proxy before
+extraction, which avoids common browser CORS issues and supports branch names
+that contain `/`.
 
 Supported plugin types: `mod`, `block`, `local`, `theme`, `auth`, `enrol`, `filter`,
 `format`, `report`, `tool`, `editor`, `atto`, `tiny`, `qtype`, `qbehaviour`,

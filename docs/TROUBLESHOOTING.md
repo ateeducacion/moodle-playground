@@ -196,6 +196,58 @@ Immediate actions:
 3. check shell log for the last bootstrap step reached
 4. retry with `?debug=true` to surface hidden PHP/bootstrap errors
 
+### Outbound HTTPS from PHP behaves differently depending on the target
+
+Likely cause:
+
+- `tcpOverFetch` is active, but not every HTTPS destination behaves the same
+- the configured `phpCorsProxyUrl` fallback does work for the non-TLS path;
+  `tests/e2e/php-networking.spec.mjs` covers an HTTP request that fails direct
+  and succeeds through the configured proxy
+- direct HTTPS now works for the real eXeLearning GitHub releases feed and the
+  real tested release ZIP asset (`v4.0.0-beta3`)
+- direct HTTPS now works for a CORS-open external URL such as
+  `raw.githubusercontent.com`
+- direct HTTPS to a self-signed local HTTPS server still fails before fallback;
+  the browser-side fetch performed by the runtime does not trust that local
+  certificate
+- the same-origin proxy path is still available if a plugin wants a stable,
+  explicit playground-only contract
+
+What the tests currently prove:
+
+- `tests/e2e/php-networking.spec.mjs`
+  - same-origin proxy path works
+  - configured `phpCorsProxyUrl` fallback works for HTTP requests
+  - direct HTTPS works for a CORS-open external URL
+  - direct HTTPS works for the eXeLearning GitHub feed
+  - direct HTTPS works for the eXeLearning GitHub release ZIP asset
+  - direct HTTPS to a self-signed local HTTPS server still fails
+- `tests/runtime/tcp-over-fetch-certificates.test.js`
+  - the generated CA parses as a CA in OpenSSL
+  - a runtime-style leaf signed by that CA verifies in OpenSSL
+  - the upstream ASN.1 encoder still mis-encodes explicit `keyUsage` and SAN IP
+    extensions (`IP Address:<invalid>`, unexpected key usage), so the runtime
+    must avoid those extensions until upstream is fixed
+
+What is supported:
+
+- direct PHP requests to trusted external HTTPS origins, including the tested
+  CORS-open `raw.githubusercontent.com` URL
+- direct PHP requests to the tested eXeLearning GitHub feed and release ZIP URLs
+- `phpCorsProxyUrl` as the browser-side fallback for PHP networking
+- `MOODLE_PLAYGROUND_PROXY_URL` as an explicit same-origin PHP networking
+  endpoint when a plugin prefers a stable playground-only proxy contract
+- the same-origin proxy endpoint is validated by
+  `tests/e2e/php-networking.spec.mjs`
+
+Files:
+
+- `src/runtime/php-loader.js`
+- `sw.js`
+- `src/runtime/config-template.js`
+- `tests/e2e/php-networking.spec.mjs`
+
 ### `PHP worker bridge timed out`
 
 Likely cause:
@@ -281,8 +333,13 @@ If failure happens:
 The `@php-wasm/web` PHP 8.3 runtime includes all required extensions built into the WASM binary:
 
 - `dom`, `iconv`, `intl`, `libxml`, `simplexml`, `xml`, `zip`, `mbstring`, `openssl`,
-  `sqlite3`, `pdo_sqlite`, `phar`, `curl`, `gd`, `fileinfo`, `sodium`, `xmlreader`, `xmlwriter`
+  `sqlite3`, `pdo_sqlite`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`
 
-Note: `curl` is available as an extension but actual network requests from WASM are constrained
-(uses fetch-based transport, not real sockets). Moodle features depending on outbound HTTP may
-still not work fully.
+Note: `sodium` is not available in this runtime; the repository relies on the OpenSSL fallback
+patches documented elsewhere. Also note that `curl` is available as an extension but actual
+network requests from WASM are constrained (uses fetch-based transport, not real sockets). When
+`playground.config.json` defines `phpCorsProxyUrl`, the runtime can use that proxy as the
+browser-side fallback for outbound PHP HTTP(S) traffic through `@php-wasm/web` TCP-over-fetch.
+This is separate from `addonProxyUrl`, which is used for browser-side ZIP/plugin downloads and
+for the explicit same-origin Service Worker proxy endpoint. If outbound requests still fail,
+verify the configured PHP CORS proxy supports general HTTP(S) proxying, not just ZIP downloads.

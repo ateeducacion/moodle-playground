@@ -158,6 +158,17 @@ export async function waitForShellReady(page) {
   });
 }
 
+async function waitForRemoteOverlayHidden(page, timeout = readyTimeoutMs) {
+  const remoteHost = getRemoteHost(page);
+  await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
+    timeout,
+  });
+  await expect(remoteHost.locator(".remote-boot__card")).toHaveClass(
+    /is-hidden/u,
+    { timeout },
+  );
+}
+
 /**
  * Full wait: shell ready + remote boot overlay hidden + Moodle content rendered.
  * Use for tests that need to interact with Moodle UI (forms, navigation).
@@ -206,20 +217,14 @@ export async function waitForPlaygroundReady(page) {
   await waitForShellReady(page);
 
   // Stage 2: Remote boot overlay is hidden (bootstrap complete)
-  const remoteHost = getRemoteHost(page);
-  await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
-    timeout: readyTimeoutMs,
-  });
-  await expect(remoteHost.locator(".remote-boot__card")).toHaveClass(
-    /is-hidden/u,
-    { timeout: readyTimeoutMs },
-  );
+  await waitForRemoteOverlayHidden(page);
 
   // Stage 3: Moodle content rendered inside the nested iframe.
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
 export async function navigateWithinPlayground(page, path) {
+  await waitForPlaygroundReady(page);
   const addressInput = page.locator("#address-input");
   await expect(addressInput).toBeEnabled({ timeout: readyTimeoutMs });
   await addressInput.fill(path);
@@ -227,6 +232,9 @@ export async function navigateWithinPlayground(page, path) {
 
   // Wait for the Moodle frame to navigate to the expected path
   await waitForMoodlePath(page, path);
+
+  // Wait for the remote overlay to disappear again after navigation.
+  await waitForRemoteOverlayHidden(page, 30_000);
 
   // Wait for Moodle content to render after navigation
   await waitForMoodleContent(
@@ -257,21 +265,7 @@ export async function waitForMoodlePath(page, expectedPath) {
         if (frameMatched) {
           return true;
         }
-
-        const remoteFrameSrc = await getRemoteHost(page)
-          .locator("#remote-frame")
-          .getAttribute("src");
-        if (!remoteFrameSrc) {
-          return false;
-        }
-
-        try {
-          return new URL(remoteFrameSrc, page.url()).pathname.endsWith(
-            expectedPathname,
-          );
-        } catch {
-          return false;
-        }
+        return false;
       },
       { timeout: readyTimeoutMs },
     )

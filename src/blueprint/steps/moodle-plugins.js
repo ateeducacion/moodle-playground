@@ -1,12 +1,12 @@
 /**
  * Plugin installation steps: installMoodlePlugin, installTheme.
  *
- * Downloads plugin files from a GitHub repository (via jsDelivr CDN to avoid
- * CORS restrictions on GitHub ZIP downloads), writes them to the correct
- * Moodle plugin directory, and runs the Moodle upgrade to register the plugin.
+ * Downloads plugin ZIPs, writes them to the correct Moodle plugin directory,
+ * and runs the Moodle upgrade to register the plugin.
  */
 
 const MOODLE_ROOT = "/www/moodle";
+const DEFAULT_ADDON_PROXY_URL = "https://github-proxy.exelearning.dev/";
 
 // Map Moodle plugin types to their directory under MOODLE_ROOT
 const PLUGIN_TYPE_DIRS = {
@@ -116,14 +116,14 @@ function resolvePluginDir(pluginType, pluginName) {
 }
 
 /**
- * Install plugin files to the target directory. Tries jsDelivr CDN first
- * (to avoid CORS issues with GitHub ZIP downloads), falls back to direct
- * ZIP download for non-GitHub URLs.
+ * Install plugin files to the target directory.
+ * GitHub archive ZIPs are fetched through a configurable proxy to avoid
+ * browser CORS issues and to support refs that contain `/`.
  */
 async function installPluginFiles(url, targetDir, context) {
   const githubInfo = parseGitHubUrl(url);
   if (githubInfo) {
-    await installViaJsDelivr(githubInfo, targetDir, context);
+    await installViaZipDownload(url, targetDir, context);
   } else {
     await installViaZipDownload(url, targetDir, context);
   }
@@ -174,98 +174,22 @@ function parseGitHubUrl(url) {
   }
 }
 
-/**
- * Install a plugin by listing files from jsDelivr's API and downloading
- * each file individually from the CDN. This avoids CORS issues with GitHub
- * ZIP downloads.
- */
-async function installViaJsDelivr(
-  { owner, repo, ref },
-  targetDir,
-  { php, publish },
-) {
-  const jsdelivrPkg = `gh/${owner}/${repo}@${ref}`;
-
+async function installViaZipDownload(zipUrl, targetDir, context) {
+  const { php, publish } = context;
+  const downloadUrl = resolvePluginZipDownloadUrl(zipUrl, context);
   if (publish) {
     publish(
-      `Listing plugin files from jsDelivr (${owner}/${repo}@${ref})`,
+      downloadUrl === zipUrl
+        ? `Downloading plugin ZIP from ${zipUrl}`
+        : `Downloading plugin ZIP from ${zipUrl} via addon proxy`,
       0.93,
     );
   }
 
-  // Get file listing from jsDelivr API
-  const listUrl = `https://data.jsdelivr.com/v1/packages/${jsdelivrPkg}?structure=flat`;
-  const listResponse = await fetch(listUrl);
-  if (!listResponse.ok) {
-    throw new Error(
-      `Failed to list plugin files from jsDelivr: ${listResponse.status} for ${listUrl}`,
-    );
-  }
-  const listing = await listResponse.json();
-  const files = listing.files || [];
-
-  if (files.length === 0) {
-    throw new Error(`No files found for ${jsdelivrPkg} on jsDelivr.`);
-  }
-
-  if (publish) {
-    publish(
-      `Downloading ${files.length} plugin files from jsDelivr CDN`,
-      0.935,
-    );
-  }
-
-  // Create the target directory directly in MEMFS
-  const rawPhp = php._php;
-  rawPhp.mkdirTree(targetDir);
-
-  // Download each file from CDN and write directly to MEMFS
-  const cdnBase = `https://cdn.jsdelivr.net/${jsdelivrPkg}`;
-  let downloaded = 0;
-
-  for (const file of files) {
-    const filePath = file.name; // e.g., "/block_participants.php"
-    const fullPath = `${targetDir}${filePath}`;
-
-    // Ensure parent directory exists
-    const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
-    if (parentDir && parentDir !== targetDir) {
-      rawPhp.mkdirTree(parentDir);
-    }
-
-    const fileUrl = `${cdnBase}${filePath}`;
-    const fileResponse = await fetch(fileUrl);
-    if (!fileResponse.ok) {
-      console.warn(
-        `[blueprint] Failed to download ${fileUrl}: ${fileResponse.status}`,
-      );
-      continue;
-    }
-
-    const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
-    rawPhp.writeFile(fullPath, fileBytes);
-    downloaded++;
-  }
-
-  if (publish) {
-    publish(
-      `Installed ${downloaded}/${files.length} files to ${targetDir}`,
-      0.94,
-    );
-  }
-}
-
-/**
- * Fallback: install a plugin by downloading a ZIP directly (for non-GitHub URLs).
- * This may fail due to CORS restrictions if the URL doesn't serve CORS headers.
- */
-async function installViaZipDownload(zipUrl, targetDir, { php, publish }) {
-  if (publish) publish(`Downloading plugin ZIP from ${zipUrl}`, 0.93);
-
-  const response = await fetch(zipUrl);
+  const response = await fetch(downloadUrl);
   if (!response.ok) {
     throw new Error(
-      `Failed to download plugin ZIP from ${zipUrl}: ${response.status}`,
+      `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
     );
   }
   const zipBytes = new Uint8Array(await response.arrayBuffer());
@@ -416,3 +340,49 @@ function findCommonPrefix(paths) {
   if (paths.every((p) => p.startsWith(candidate))) return candidate;
   return "";
 }
+
+function resolvePluginZipDownloadUrl(zipUrl, context = {}) {
+  const proxyBase = resolveAddonProxyUrl(context);
+  if (!proxyBase || !shouldProxyZipUrl(zipUrl)) {
+    return zipUrl;
+  }
+
+  try {
+    const proxied = new URL(proxyBase);
+    proxied.searchParams.set("url", zipUrl);
+    return proxied.toString();
+  } catch {
+    return zipUrl;
+  }
+}
+
+function resolveAddonProxyUrl(context = {}) {
+  const configured =
+    context.addonProxyUrl ||
+    context.config?.addonProxyUrl ||
+    DEFAULT_ADDON_PROXY_URL;
+  return typeof configured === "string" && configured.trim()
+    ? configured.trim()
+    : "";
+}
+
+function shouldProxyZipUrl(zipUrl) {
+  try {
+    const parsed = new URL(zipUrl);
+    return (
+      parsed.hostname === "github.com" ||
+      parsed.hostname === "codeload.github.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export const __testables = {
+  detectPluginTypeAndName,
+  findCommonPrefix,
+  parseGitHubUrl,
+  resolveAddonProxyUrl,
+  resolvePluginZipDownloadUrl,
+  shouldProxyZipUrl,
+};

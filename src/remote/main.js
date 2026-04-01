@@ -492,6 +492,7 @@ async function bootstrapRemote() {
   const resetNonce = url.searchParams.get("reload") || "";
   const phpVersion = url.searchParams.get("phpVersion") || null;
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
+  const phpCorsProxyUrl = url.searchParams.get("phpCorsProxyUrl") || null;
   const debug = url.searchParams.get("debug") || null;
   const profile = url.searchParams.get("profile") || null;
   activePath = requestedPath;
@@ -571,6 +572,9 @@ async function bootstrapRemote() {
     if (selection.moodleBranch) {
       workerUrl.searchParams.set("moodleBranch", selection.moodleBranch);
     }
+    if (phpCorsProxyUrl) {
+      workerUrl.searchParams.set("phpCorsProxyUrl", phpCorsProxyUrl);
+    }
     if (debug) {
       workerUrl.searchParams.set("debug", debug);
     }
@@ -640,6 +644,7 @@ async function bootstrapRemote() {
       runtimeId: selection.runtimeId,
       phpVersion: selection.phpVersion,
       moodleBranch: selection.moodleBranch,
+      phpCorsProxyUrl,
       debug,
       profile,
     },

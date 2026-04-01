@@ -41,6 +41,7 @@ describe("resolveRemoteUrl", () => {
       const url = resolveRemoteUrl("main", "php82-moodle45", "/admin", {
         phpVersion: "8.2",
         moodleBranch: "MOODLE_405_STABLE",
+        phpCorsProxyUrl: "http://127.0.0.1:9999/?url=",
         debug: "true",
         profile: "runtime",
       });
@@ -53,6 +54,10 @@ describe("resolveRemoteUrl", () => {
       assert.strictEqual(
         url.searchParams.get("moodleBranch"),
         "MOODLE_405_STABLE",
+      );
+      assert.strictEqual(
+        url.searchParams.get("phpCorsProxyUrl"),
+        "http://127.0.0.1:9999/?url=",
       );
       assert.strictEqual(url.searchParams.get("debug"), "true");
       assert.strictEqual(url.searchParams.get("profile"), "runtime");

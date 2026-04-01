@@ -50,6 +50,10 @@ when investigating bugs, understanding API surfaces, or looking for implementati
 - **Key difference**: WordPress Playground runs WordPress; we adapted the same PHP runtime
   to run Moodle and Omeka S. The `php-compat.js` layer in this repo bridges the WP
   Playground PHP API to our request/response model.
+  A particularly important upstream feature is `tcpOverFetch`: PHP thinks it is opening
+  raw TCP/TLS sockets, but `@php-wasm/web` actually translates that traffic into browser
+  `fetch()` calls. This only solves the PHP/WASM side of networking; browser-side CORS
+  constraints still exist and may require a proxy fallback.
 
 ### Omeka S Playground
 
@@ -197,6 +201,47 @@ The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
 **Note:** `sodium` is NOT available in the WASM binary despite what earlier documentation
 claimed. The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handles
 all encryption needs.
+
+### Outbound HTTPS From PHP
+
+This repo uses WordPress Playground's `tcpOverFetch` bridge in `src/runtime/php-loader.js`
+to enable outbound HTTP(S) requests from PHP (`curl`, `file_get_contents()`, URL fopen).
+
+The supported model is:
+
+1. PHP opens an HTTP or HTTPS connection.
+2. `@php-wasm/web` intercepts the socket traffic and translates it to browser `fetch()`.
+3. For HTTPS, the runtime generates a temporary CA and writes it to
+   `/internal/shared/playground-ca.pem`, then points `openssl.cafile` and `curl.cainfo`
+   at that file via `setPhpIniEntries()`.
+4. If `playground.config.json` defines `phpCorsProxyUrl`, the browser-side networking layer
+   can retry outbound PHP requests through that proxy when direct browser `fetch()` fails.
+5. The same-origin Service Worker endpoint `MOODLE_PLAYGROUND_PROXY_URL` remains available
+   for plugins that want an explicit stable same-origin proxy contract, but it is no longer
+   required for the tested eXeLearning GitHub feed and release asset URLs.
+
+Important constraints:
+
+- Direct HTTPS from PHP to trusted external origins can work once the worker bundle includes
+  the minimal PR #1926-style CA profile from WordPress Playground. The generated CA must avoid
+  explicit `keyUsage`, `nsCertType`, and SAN IP extensions because the upstream ASN.1 encoder
+  still mis-encodes them.
+- The supported paths are:
+  - `PHP -> browser fetch -> remote origin`
+  - `PHP -> browser fetch -> phpCorsProxyUrl -> remote origin`
+  - `PHP -> MOODLE_PLAYGROUND_PROXY_URL -> browser fetch -> remote origin`
+- In the current repo configuration, the tested eXeLearning GitHub feed and release ZIP asset
+  work through direct PHP URLs. The explicit same-origin proxy path remains available as an
+  optional plugin contract and debugging tool.
+- `MOODLE_PLAYGROUND_PROXY_URL` is a public runtime constant for Moodle plugins. Plugins
+  running in the playground may use it when they need a repo-controlled same-origin proxy
+  contract instead of relying on automatic fallback.
+- `addonProxyUrl` is used for browser-side ZIP downloads and as the upstream target for
+  the Service Worker proxy endpoint. `phpCorsProxyUrl` is the runtime PHP networking
+  fallback for `fetchWithCorsProxy`-style behavior; do not conflate the two.
+- After any change in `src/runtime/php-loader.js`, `php-worker.js`, or other worker imports,
+  run `npm run build:worker`. The browser runtime uses `dist/php-worker.bundle.js`, not the
+  source files directly.
 
 ### Responsibilities
 
@@ -412,6 +457,21 @@ These areas have repeatedly caused regressions during the SQLite migration:
   - All php.ini settings must be applied via `setPhpIniEntries()` from `@php-wasm/universal`
   - Settings are applied in `src/runtime/php-loader.js` during runtime creation
   - Blueprint timezone overrides are applied in `src/runtime/bootstrap.js` after provisioning
+- **Outbound PHP networking**
+  - `tcpOverFetch` must stay enabled in `src/runtime/php-loader.js`; disabling it removes
+    the generated CA and breaks all outbound HTTP(S) from PHP.
+  - `openssl.cafile` and `curl.cainfo` must point to `/internal/shared/playground-ca.pem`
+    whenever `tcpOverFetch` is active.
+  - `playground.config.json` should use `phpCorsProxyUrl` for PHP networking fallback and
+    `addonProxyUrl` for browser-side ZIP downloads; the old generic `proxyUrl` alias should
+    not be reintroduced.
+  - `MOODLE_PLAYGROUND_PROXY_URL` must stay scope-aware (`/playground/<scope>/<runtime>/...`);
+    plugins that choose the same-origin proxy path must not derive proxy URLs from
+    `$CFG->wwwroot` alone.
+  - The Service Worker endpoint `__playground_proxy__` must preserve the incoming query
+    string and forward it to the configured external proxy unchanged.
+  - The supported and tested paths for GitHub feeds/assets from PHP are now both:
+    direct HTTPS through `phpCorsProxyUrl` and the same-origin proxy endpoint.
 - `sw.js`
   - query strings must survive scoped redirects
   - HTML rewriting must keep Moodle links/forms inside the scoped runtime

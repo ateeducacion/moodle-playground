@@ -19,6 +19,8 @@ describe("createMoodleConfigPhp", () => {
     dbUser: "",
     prefix: "mdl_",
     wwwroot: "https://example.com/playground",
+    playgroundProxyUrl:
+      "https://example.com/playground/playground/main/php83-moodle50/__playground_proxy__",
   };
 
   it("generates valid PHP starting with <?php", () => {
@@ -71,6 +73,20 @@ describe("createMoodleConfigPhp", () => {
   it("sets CACHE_DISABLE_STORES to false", () => {
     const config = createMoodleConfigPhp(baseParams);
     assert.ok(config.includes("define('CACHE_DISABLE_STORES', false)"));
+  });
+
+  it("defines MOODLE_PLAYGROUND for runtime-aware plugins", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("define('MOODLE_PLAYGROUND', true)"));
+  });
+
+  it("defines MOODLE_PLAYGROUND_PROXY_URL for same-origin proxy access", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(
+      config.includes(
+        "define('MOODLE_PLAYGROUND_PROXY_URL', 'https://example.com/playground/playground/main/php83-moodle50/__playground_proxy__')",
+      ),
+    );
   });
 
   it("disables remote update checks in Playground", () => {

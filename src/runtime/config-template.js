@@ -23,6 +23,7 @@ export function createMoodleConfigPhp({
   dbUser,
   prefix,
   wwwroot,
+  playgroundProxyUrl = "",
   debugdisplay = 0,
 }) {
   const resolvedComponentCachePath =
@@ -129,6 +130,12 @@ if (!defined('NO_DEBUG_DISPLAY')) {
 }
 if (!defined('MOODLE_INTERNAL')) {
     define('MOODLE_INTERNAL', true);
+}
+if (!defined('MOODLE_PLAYGROUND')) {
+    define('MOODLE_PLAYGROUND', true);
+}
+if (!defined('MOODLE_PLAYGROUND_PROXY_URL')) {
+    define('MOODLE_PLAYGROUND_PROXY_URL', '${escapePhpSingleQuoted(playgroundProxyUrl)}');
 }
 if (!defined('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE')) {
     define('PLAYGROUND_ALLOW_OUTDATED_COMPONENT_CACHE', true);

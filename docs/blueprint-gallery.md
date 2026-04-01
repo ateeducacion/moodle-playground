@@ -108,8 +108,9 @@ module from its GitHub repository and creates a demo course.
 - Lands on the course view
 
 !!! note
-    Plugin installation requires downloading a ZIP from GitHub via jsDelivr
-    CDN. The first load may take a few extra seconds.
+    Plugin installation downloads the GitHub ZIP through the configured addon
+    proxy before extracting it into MEMFS. The first load may take a few extra
+    seconds.
 
 ---
 

@@ -362,6 +362,7 @@ export function parseQueryParams(urlOrSearchParams) {
     phpVersion: params.get("phpVersion") || null,
     moodle: params.get("moodle") || null,
     moodleBranch: params.get("moodleBranch") || null,
+    phpCorsProxyUrl: params.get("phpCorsProxyUrl") || null,
     debug: params.get("debug") || null,
     profile: params.get("profile") || null,
   };

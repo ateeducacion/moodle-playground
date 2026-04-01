@@ -79,6 +79,12 @@ function buildPublicBase(appBaseUrl) {
   return new URL("./", appBaseUrl).toString().replace(/\/$/u, "");
 }
 
+function buildPlaygroundProxyUrl(appBaseUrl, scopeId, runtimeId) {
+  const publicBase = buildPublicBase(appBaseUrl);
+  const scopedPath = `/playground/${encodeURIComponent(scopeId || "default")}/${encodeURIComponent(runtimeId || "php")}/__playground_proxy__`;
+  return `${publicBase}${scopedPath}`;
+}
+
 function buildDatabaseName(scopeId, runtimeId) {
   const scope = String(scopeId || "default").replace(/[^A-Za-z0-9_]/gu, "_");
   const runtime = String(runtimeId || "php").replace(/[^A-Za-z0-9_]/gu, "_");
@@ -2105,6 +2111,11 @@ export async function bootstrapMoodle({
     config.bundleVersion,
   );
   const wwwroot = buildPublicBase(appBaseUrl || origin);
+  const playgroundProxyUrl = buildPlaygroundProxyUrl(
+    appBaseUrl || origin,
+    scopeId,
+    resolvedRuntimeId,
+  );
   const dbName = buildDatabaseName(scopeId, resolvedRuntimeId);
   const dbFile = buildDatabaseFilePath(scopeId, resolvedRuntimeId);
   const installStatePath = buildInstallStatePath(scopeId, resolvedRuntimeId);
@@ -2127,6 +2138,7 @@ export async function bootstrapMoodle({
     ...dbConfig,
     prefix: "mdl_",
     wwwroot,
+    playgroundProxyUrl,
     debugdisplay: effectiveConfig.debugdisplay,
   });
 
@@ -2409,6 +2421,7 @@ export async function bootstrapMoodle({
       const result = await executeBlueprint(blueprint, {
         php,
         publish,
+        config,
         appBaseUrl,
         webRoot,
         scopeId,
