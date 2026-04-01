@@ -18,8 +18,19 @@ let localHttpsServer;
 let localHttpsBaseUrl;
 let localHttpsTmpDir;
 let localCorsProxyServer;
+let localAddonProxyBaseUrl;
 let localCorsProxyBaseUrl;
 let localCorsProxyHits = [];
+const EXELEARNING_RELEASES_FEED_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>eXeLearning Releases</title>
+  <entry>
+    <title>v4.0.0-beta3</title>
+  </entry>
+</feed>`;
+const EXELEARNING_RELEASE_ZIP_FIXTURE = Buffer.from([
+  0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00,
+]);
 const EXELEARNING_RELEASES_ATOM_URL =
   "https://github.com/exelearning/exelearning/releases.atom";
 const EXELEARNING_RELEASE_VERSION = "4.0.0-beta3";
@@ -100,7 +111,21 @@ test.beforeAll(async () => {
     localCorsProxyHits.push({
       method: req.method,
       target,
+      repo: url.searchParams.get("repo"),
+      atom: url.searchParams.get("atom"),
     });
+
+    if (
+      url.searchParams.get("repo") === "exelearning/exelearning" &&
+      url.searchParams.get("atom") === "releases"
+    ) {
+      res.writeHead(200, {
+        "Content-Type": "application/atom+xml; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(EXELEARNING_RELEASES_FEED_FIXTURE);
+      return;
+    }
 
     if (target === "https://remote-server.example/plain") {
       res.writeHead(200, {
@@ -108,6 +133,36 @@ test.beforeAll(async () => {
         "Cache-Control": "no-store",
       });
       res.end("proxy-fallback-ok");
+      return;
+    }
+
+    if (target === EXELEARNING_RELEASES_ATOM_URL) {
+      res.writeHead(200, {
+        "Content-Type": "application/atom+xml; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(EXELEARNING_RELEASES_FEED_FIXTURE);
+      return;
+    }
+
+    if (target === EXELEARNING_RELEASE_ASSET_URL) {
+      const range = req.headers.range || "";
+      const wantsPrefix = /bytes=0-3/u.test(range);
+      const body = wantsPrefix
+        ? EXELEARNING_RELEASE_ZIP_FIXTURE.subarray(0, 4)
+        : EXELEARNING_RELEASE_ZIP_FIXTURE;
+      res.writeHead(wantsPrefix ? 206 : 200, {
+        "Content-Type": "application/zip",
+        "Cache-Control": "no-store",
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(body.length),
+        ...(wantsPrefix
+          ? {
+              "Content-Range": `bytes 0-3/${EXELEARNING_RELEASE_ZIP_FIXTURE.length}`,
+            }
+          : {}),
+      });
+      res.end(body);
       return;
     }
 
@@ -119,6 +174,7 @@ test.beforeAll(async () => {
     localCorsProxyServer.listen(0, "127.0.0.1", resolve);
   });
   const proxyAddress = localCorsProxyServer.address();
+  localAddonProxyBaseUrl = `http://127.0.0.1:${proxyAddress.port}/`;
   localCorsProxyBaseUrl = `http://127.0.0.1:${proxyAddress.port}/?url=`;
 });
 
@@ -244,7 +300,9 @@ test("PHP can fetch GitHub releases atom feed through the same-origin playground
   });
 
   try {
-    await page.goto(`/?blueprint=${bp}`);
+    await page.goto(
+      `/?blueprint=${bp}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
+    );
     await waitForPlaygroundReady(page);
 
     const responseText = await page.evaluate(async () => {
@@ -319,7 +377,9 @@ test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
     expect(result.curl_errno).toBe(0);
     expect(result.curl_http_code).toBe(200);
     expect(result.curl_body).toBe("proxy-fallback-ok");
-    expect(localCorsProxyHits).toEqual([
+    expect(
+      localCorsProxyHits.map(({ method, target }) => ({ method, target })),
+    ).toEqual([
       { method: "GET", target: "https://remote-server.example/plain" },
       { method: "GET", target: "https://remote-server.example/plain" },
     ]);
@@ -415,7 +475,9 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
   });
 
   try {
-    await page.goto(`/?blueprint=${bp}`);
+    await page.goto(
+      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+    );
     await waitForPlaygroundReady(page);
 
     const responseText = await page.evaluate(async () => {
@@ -468,7 +530,9 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", asyn
   });
 
   try {
-    await page.goto(`/?blueprint=${bp}`);
+    await page.goto(
+      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+    );
     await waitForPlaygroundReady(page);
 
     const responseText = await page.evaluate(async () => {

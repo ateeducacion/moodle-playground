@@ -24,6 +24,7 @@ const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico
 const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|theme\/image\.php|theme\/font\.php)\//u;
 const INTERNAL_PROXY_PATH = "/__playground_proxy__";
 let playgroundConfigPromise;
+let addonProxyUrlOverride = null;
 
 function isScopedStaticAsset(requestPath) {
   return SCOPED_STATIC_RE.test(requestPath.split("?")[0]);
@@ -533,7 +534,7 @@ async function forwardToPhpWorker({ request, scopeId }) {
 
 async function handleInternalProxyRequest(request, sourceUrl) {
   const config = await loadServiceWorkerConfig();
-  const proxyBaseUrl = config.addonProxyUrl || "";
+  const proxyBaseUrl = addonProxyUrlOverride || config.addonProxyUrl || "";
   if (!proxyBaseUrl) {
     return buildErrorResponse("No addon proxy configured for the playground runtime.", 502);
   }
@@ -566,6 +567,11 @@ async function handleInternalProxyRequest(request, sourceUrl) {
 }
 
 self.addEventListener("message", (event) => {
+  if (event.data?.kind === "configure-service-worker") {
+    addonProxyUrlOverride = event.data.addonProxyUrl || null;
+    return;
+  }
+
   if (event.data?.kind === "clear-scoped-static-cache") {
     caches.delete(SCOPED_STATIC_CACHE).catch(() => {});
   }

@@ -235,6 +235,17 @@ async function waitForServiceWorkerControl() {
   }
 }
 
+function configureRuntimeServiceWorker({ addonProxyUrl }) {
+  if (!navigator.serviceWorker.controller) {
+    return;
+  }
+
+  navigator.serviceWorker.controller.postMessage({
+    kind: "configure-service-worker",
+    addonProxyUrl: addonProxyUrl || null,
+  });
+}
+
 function ensureRemoteServiceWorkerControl(scopeId, runtimeId) {
   if (navigator.serviceWorker.controller) {
     window.sessionStorage.removeItem(
@@ -492,6 +503,7 @@ async function bootstrapRemote() {
   const resetNonce = url.searchParams.get("reload") || "";
   const phpVersion = url.searchParams.get("phpVersion") || null;
   const moodleBranch = url.searchParams.get("moodleBranch") || null;
+  const addonProxyUrl = url.searchParams.get("addonProxyUrl") || null;
   const phpCorsProxyUrl = url.searchParams.get("phpCorsProxyUrl") || null;
   const debug = url.searchParams.get("debug") || null;
   const profile = url.searchParams.get("profile") || null;
@@ -557,6 +569,7 @@ async function bootstrapRemote() {
     return;
   }
   await waitForServiceWorkerControl();
+  configureRuntimeServiceWorker({ addonProxyUrl });
   setRemoteProgress("Service Worker ready and controlling this tab.");
 
   if (!phpWorker) {

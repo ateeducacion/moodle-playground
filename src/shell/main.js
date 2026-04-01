@@ -67,6 +67,7 @@ let config;
 let currentRuntimeId;
 let currentPhpVersion = DEFAULT_PHP_VERSION;
 let currentMoodleBranch = null;
+let currentAddonProxyUrl = null;
 let currentPhpCorsProxyUrl = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
@@ -168,6 +169,7 @@ async function updateFrame() {
   const url = resolveRemoteUrl(scopeId, currentRuntimeId, currentPath, {
     phpVersion: currentPhpVersion,
     moodleBranch: currentMoodleBranch,
+    addonProxyUrl: currentAddonProxyUrl,
     phpCorsProxyUrl: currentPhpCorsProxyUrl,
     debug: currentDebugParam,
     profile: currentProfileParam,
@@ -580,6 +582,7 @@ async function main() {
   });
   currentDebugParam = urlParams.debug;
   currentProfileParam = urlParams.profile;
+  currentAddonProxyUrl = urlParams.addonProxyUrl;
   currentPhpCorsProxyUrl = urlParams.phpCorsProxyUrl;
   applyRuntimeSelection(selection);
   traceRuntimeSelection(
