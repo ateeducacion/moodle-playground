@@ -51,6 +51,23 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   const diagnosticsDir = testInfo.outputPath("diagnostics");
   await mkdir(diagnosticsDir, { recursive: true });
 
+  if (!page || page.isClosed()) {
+    await writeFile(
+      `${diagnosticsDir}/page-closed.json`,
+      JSON.stringify(
+        {
+          workflowLabel: process.env.PLAYWRIGHT_WORKFLOW_LABEL || "local",
+          project: testInfo.project.name,
+          pageClosed: true,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    return;
+  }
+
   const frames = page.frames();
   const remoteFrame = frames.find((frame) =>
     frame.url().includes("/remote.html"),
@@ -58,28 +75,35 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   const moodleFrame = frames.find(
     (frame) => frame.parentFrame() === remoteFrame,
   );
-  const shellState = await page.evaluate(() => {
-    const addressInput = document.querySelector("#address-input");
-    return {
-      title: document.title,
-      href: window.location.href,
-      addressValue:
-        addressInput instanceof HTMLInputElement ? addressInput.value : null,
-      addressDisabled:
-        addressInput instanceof HTMLInputElement ? addressInput.disabled : null,
-      runtimeLabel: document.querySelector("#current-runtime-label")
-        ?.textContent,
-      logPanel: document.querySelector("#log-panel")?.textContent || "",
-      siteFrameSrc:
-        document.querySelector("#site-frame")?.getAttribute("src") || null,
-    };
-  });
+  let shellState = null;
+  try {
+    shellState = await page.evaluate(() => {
+      const addressInput = document.querySelector("#address-input");
+      return {
+        title: document.title,
+        href: window.location.href,
+        addressValue:
+          addressInput instanceof HTMLInputElement ? addressInput.value : null,
+        addressDisabled:
+          addressInput instanceof HTMLInputElement ? addressInput.disabled : null,
+        runtimeLabel: document.querySelector("#current-runtime-label")
+          ?.textContent,
+        logPanel: document.querySelector("#log-panel")?.textContent || "",
+        siteFrameSrc:
+          document.querySelector("#site-frame")?.getAttribute("src") || null,
+      };
+    });
+  } catch {}
 
-  await page.screenshot({
-    path: `${diagnosticsDir}/final-page.png`,
-    fullPage: true,
-  });
-  await writeFile(`${diagnosticsDir}/shell.html`, await page.content(), "utf8");
+  try {
+    await page.screenshot({
+      path: `${diagnosticsDir}/final-page.png`,
+      fullPage: true,
+    });
+  } catch {}
+  try {
+    await writeFile(`${diagnosticsDir}/shell.html`, await page.content(), "utf8");
+  } catch {}
   await writeFile(
     `${diagnosticsDir}/shell-state.json`,
     JSON.stringify(
@@ -114,19 +138,23 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   );
 
   if (remoteFrame) {
-    await writeFile(
-      `${diagnosticsDir}/remote-frame.html`,
-      await remoteFrame.content(),
-      "utf8",
-    );
+    try {
+      await writeFile(
+        `${diagnosticsDir}/remote-frame.html`,
+        await remoteFrame.content(),
+        "utf8",
+      );
+    } catch {}
   }
 
   if (moodleFrame) {
-    await writeFile(
-      `${diagnosticsDir}/moodle-frame.html`,
-      await moodleFrame.content(),
-      "utf8",
-    );
+    try {
+      await writeFile(
+        `${diagnosticsDir}/moodle-frame.html`,
+        await moodleFrame.content(),
+        "utf8",
+      );
+    } catch {}
   }
 }
 
