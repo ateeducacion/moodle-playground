@@ -291,17 +291,12 @@ const MOODLE_CONTENT_SELECTORS = [
 export async function waitForPlaygroundReady(page) {
   // Stage 1: Shell is ready (worker sent "ready" message)
   await waitForShellReady(page);
-
-  // Stage 2: Remote boot overlay is hidden (bootstrap complete)
-  await waitForRemoteOverlayHidden(page);
-
-  // Stage 3: Moodle content rendered inside the nested iframe.
+  // Stage 2: Moodle content rendered inside the nested iframe.
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
 export async function waitForRuntimeFrameReady(page) {
   await waitForRuntimeSelectionReady(page);
-  await waitForRemoteOverlayHidden(page);
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
