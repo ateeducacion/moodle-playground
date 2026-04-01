@@ -11,6 +11,13 @@ import {
 } from "@php-wasm/web";
 import { __testing } from "../../src/runtime/php-loader.js";
 
+const CA_DN_PATTERN =
+  /(?:Subject|Issuer): CN\s*=\s*Moodle Playground CA,\s*O\s*=\s*Moodle Playground,\s*C\s*=\s*US/u;
+const LOCALHOST_DN_PATTERN =
+  /Subject: CN\s*=\s*localhost,\s*O\s*=\s*localhost,\s*C\s*=\s*US/u;
+const TEST_LOCALHOST_DN_PATTERN =
+  /Subject: CN\s*=\s*localhost,\s*O\s*=\s*Moodle Playground Test,\s*C\s*=\s*US/u;
+
 async function withTempDir(run) {
   const dir = await mkdtemp(join(tmpdir(), "moodle-playground-cert-"));
   try {
@@ -34,10 +41,7 @@ describe("tcpOverFetch certificate generation", () => {
         { encoding: "utf8" },
       );
 
-      assert.match(
-        certText,
-        /Subject: CN=Moodle Playground CA, O=Moodle Playground, C=US/u,
-      );
+      assert.match(certText, CA_DN_PATTERN);
       assert.match(certText, /X509v3 Basic Constraints:.*CA:TRUE/su);
     });
   });
@@ -77,11 +81,8 @@ describe("tcpOverFetch certificate generation", () => {
       );
 
       assert.match(verifyOutput, /site\.crt: OK/u);
-      assert.match(
-        siteText,
-        /Issuer: CN=Moodle Playground CA, O=Moodle Playground, C=US/u,
-      );
-      assert.match(siteText, /Subject: CN=localhost, O=localhost, C=US/u);
+      assert.match(siteText, CA_DN_PATTERN);
+      assert.match(siteText, LOCALHOST_DN_PATTERN);
     });
   });
 
@@ -158,14 +159,8 @@ describe("tcpOverFetch certificate generation", () => {
         `${verifyError.stdout || ""}\n${verifyError.stderr || ""}`,
         /ASN1|header too long|unable to get local issuer certificate/u,
       );
-      assert.match(
-        siteText,
-        /Issuer: CN=Moodle Playground CA, O=Moodle Playground, C=US/u,
-      );
-      assert.match(
-        siteText,
-        /Subject: CN=localhost, O=Moodle Playground Test, C=US/u,
-      );
+      assert.match(siteText, CA_DN_PATTERN);
+      assert.match(siteText, TEST_LOCALHOST_DN_PATTERN);
       assert.match(
         siteText,
         /X509v3 Extended Key Usage:.*TLS Web Server Authentication/su,
