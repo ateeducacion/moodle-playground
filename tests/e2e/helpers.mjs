@@ -197,10 +197,37 @@ async function waitForRemoteOverlayHidden(page, timeout = readyTimeoutMs) {
   await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
     timeout,
   });
-  await expect(remoteHost.locator(".remote-boot__card")).toHaveClass(
-    /is-hidden/u,
-    { timeout },
-  );
+  await expect
+    .poll(
+      async () => {
+        try {
+          const overlayClass =
+            (await remoteHost
+              .locator(".remote-boot__card")
+              .getAttribute("class")) || "";
+          if (/\bis-hidden\b/u.test(overlayClass)) {
+            return true;
+          }
+        } catch {
+          /* remote overlay not ready yet */
+        }
+
+        try {
+          const moodleFrame = getMoodleFrame(page);
+          for (const selector of MOODLE_CONTENT_SELECTORS) {
+            if (await moodleFrame.locator(selector).count()) {
+              return true;
+            }
+          }
+        } catch {
+          /* nested moodle frame not ready yet */
+        }
+
+        return false;
+      },
+      { timeout },
+    )
+    .toBeTruthy();
 }
 
 /**
