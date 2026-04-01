@@ -9,6 +9,7 @@ import {
   captureDiagnostics,
   createDiagnosticsCollector,
   waitForPlaygroundReady,
+  waitForScopedHttpReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -228,7 +229,14 @@ function buildNetworkingBlueprint(siteName, files) {
         },
       },
       { step: "login", username: "admin" },
-      ...files.map(({ path, literal }) => ({
+      ...[
+        {
+          path: "/www/moodle/playground-ready.php",
+          literal:
+            "<?php require(__DIR__ . '/config.php'); header('Content-Type: application/json'); echo json_encode(['ready' => true, 'moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND], JSON_PRETTY_PRINT);",
+        },
+        ...files,
+      ].map(({ path, literal }) => ({
         step: "writeFile",
         path,
         data: { literal },
@@ -542,7 +550,10 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   try {
     await page.goto(`/?blueprint=${defaultBlueprint}`);
-    await waitForPlaygroundReady(page);
+    await waitForScopedHttpReady(
+      page,
+      "/playground/main/php83-moodle50/playground-ready.php",
+    );
 
     const localHttpsResult = await fetchPhpJson(
       page,
@@ -581,7 +592,10 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     await page.goto(
       `/?blueprint=${addonProxyBlueprint}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
     );
-    await waitForPlaygroundReady(page);
+    await waitForScopedHttpReady(
+      page,
+      "/playground/main/php83-moodle50/playground-ready.php",
+    );
 
     const sameOriginProxyResult = await fetchPhpJson(
       page,
@@ -600,7 +614,10 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     await page.goto(
       `/?blueprint=${phpCorsBlueprint}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
     );
-    await waitForPlaygroundReady(page);
+    await waitForScopedHttpReady(
+      page,
+      "/playground/main/php83-moodle50/playground-ready.php",
+    );
 
     const fallbackResult = await fetchPhpJson(
       page,

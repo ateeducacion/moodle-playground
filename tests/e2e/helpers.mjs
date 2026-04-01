@@ -284,6 +284,44 @@ export async function waitForPlaygroundReady(page) {
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
+export async function waitForScopedHttpReady(
+  page,
+  probePath,
+  timeout = readyTimeoutMs,
+) {
+  await waitForShellReady(page);
+
+  await expect
+    .poll(
+      async () => {
+        try {
+          return await page.evaluate(async (path) => {
+            try {
+              const response = await fetch(path, { cache: "no-store" });
+              if (!response.ok) {
+                return false;
+              }
+
+              const contentType = response.headers.get("content-type") || "";
+              if (!/application\/json|text\/json/iu.test(contentType)) {
+                return false;
+              }
+
+              await response.json();
+              return true;
+            } catch {
+              return false;
+            }
+          }, probePath);
+        } catch {
+          return false;
+        }
+      },
+      { timeout },
+    )
+    .toBeTruthy();
+}
+
 export async function navigateWithinPlayground(page, path) {
   await waitForPlaygroundReady(page);
   const addressInput = page.locator("#address-input");
