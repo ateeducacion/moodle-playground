@@ -29,60 +29,11 @@ ephemeral — all state is lost when the browser tab closes or the page is reloa
 
 ## Related Projects and Upstream References
 
-This project builds on top of two key upstream projects. Agents should consult them
-when investigating bugs, understanding API surfaces, or looking for implementation patterns:
+This project builds on WordPress Playground (`@php-wasm/*`) for the PHP WASM runtime and
+Omeka S Playground for the shell/remote/sw/worker architecture pattern. Before inventing a
+solution, check if either upstream already solved the same problem.
 
-### WordPress Playground (`@php-wasm/*`)
-
-- **Repository**: https://github.com/WordPress/wordpress-playground
-- **What it provides**: The PHP WebAssembly runtime (`@php-wasm/web`, `@php-wasm/universal`)
-  that powers the PHP execution layer. This includes the WASM-compiled PHP 8.3 binary,
-  the `PHP` class API (`php.run()`, `php.writeFile()`, `php.readFileAsBuffer()`,
-  `php.mkdir()`, `php.isDir()`, `setPhpIniEntries()`, etc.), and the web worker
-  infrastructure for running PHP in the browser.
-- **When to look there**:
-  - Understanding PHP instance lifecycle, request execution, and `PHPRequestHandler`
-  - Debugging WASM-level crashes, memory limits, or file descriptor exhaustion
-  - Checking available PHP extensions in the WASM build
-  - Understanding `php.ini` handling (hardcoded path `/internal/shared/php.ini`)
-  - Investigating Emscripten MEMFS behavior and filesystem APIs
-  - Looking for known issues with the PHP WASM runtime (e.g., [#1137](https://github.com/WordPress/wordpress-playground/issues/1137))
-- **Key difference**: WordPress Playground runs WordPress; we adapted the same PHP runtime
-  to run Moodle and Omeka S. The `php-compat.js` layer in this repo bridges the WP
-  Playground PHP API to our request/response model.
-  A particularly important upstream feature is `tcpOverFetch`: PHP thinks it is opening
-  raw TCP/TLS sockets, but `@php-wasm/web` actually translates that traffic into browser
-  `fetch()` calls. This only solves the PHP/WASM side of networking; browser-side CORS
-  constraints still exist and may require a proxy fallback.
-
-### Omeka S Playground
-
-- **Repository**: https://github.com/ateeducacion/omeka-s-playground
-- **What it is**: The first playground we built using this architecture. Moodle Playground
-  follows the same product shape and many of the same patterns. Omeka S Playground was the
-  proving ground where the shell/remote/sw/worker architecture was designed.
-- **When to look there**:
-  - Understanding the original design intent behind the shell → remote → sw → worker flow
-  - Comparing how a simpler PHP application (Omeka S) handles the same challenges
-    (service worker routing, subpath deployment, ZIP extraction, config generation)
-  - Finding patterns that were proven in Omeka S before being adapted for Moodle
-  - Debugging service worker or iframe communication issues — the pattern originated there
-- **Key differences from Moodle Playground**:
-  - Omeka S uses MySQL via PGlite; Moodle uses SQLite (deprecated PDO driver)
-  - Omeka S has a simpler install flow; Moodle requires a pre-built install snapshot
-  - Moodle Playground adds blueprints, crash recovery, and plugin installation support
-  - Moodle's codebase is significantly larger, requiring more aggressive caching and
-    memory management strategies
-
-### How to use these references
-
-1. **Before inventing a solution**, check if WordPress Playground or Omeka S Playground
-   already solved the same problem — especially for WASM runtime issues, service worker
-   routing, and PHP-in-browser quirks.
-2. **When debugging `@php-wasm/*` APIs**, read the WordPress Playground source code for
-   the authoritative behavior — our `php-compat.js` is a thin adapter, not a replacement.
-3. **When adding new architecture**, check if Omeka S Playground established a pattern
-   first. Consistency across playgrounds reduces maintenance burden.
+For full details: @.agents/references/upstream-projects.md
 
 ## Specialist Agent Skills
 
@@ -93,12 +44,19 @@ known pitfalls, and conventions that are not repeated elsewhere in this document
 
 | Skill | Directory | When to use |
 |-------|-----------|-------------|
-| **Moodle Internals** | `@.agents/skills/moodle-internals/SKILL.md` | Moodle APIs, plugin system, database schema, install/upgrade lifecycle, config settings, course structure, user management, enrollment, MUC caching, SQLite compatibility |
-| **WP Playground & php-wasm** | `@.agents/skills/wp-playground-php-wasm/SKILL.md` | `@php-wasm/web` and `@php-wasm/universal` APIs, PHP instance lifecycle, `php.run()` execution model, filesystem operations, `setPhpIniEntries()`, request/response conversion, `php-compat.js` adapter |
-| **WASM & Browser Runtime** | `@.agents/skills/wasm-browser-runtime/SKILL.md` | WASM crashes and memory limits, Emscripten MEMFS, service worker routing and caching, Web Worker communication, crash recovery, GitHub Pages subpath deployment, browser storage constraints |
+| **Moodle Internals** | `@.agents/skills/moodle-internals/SKILL.md` | Moodle APIs, plugin system, database schema, install/upgrade lifecycle, config settings, course structure, user management, enrollment, MUC caching, SQLite compatibility, patch layout, bootstrap fragile areas |
+| **WP Playground & php-wasm** | `@.agents/skills/wp-playground-php-wasm/SKILL.md` | `@php-wasm/web` and `@php-wasm/universal` APIs, PHP instance lifecycle, `php.run()` execution model, filesystem operations, `setPhpIniEntries()`, request/response conversion, `php-compat.js` adapter, outbound PHP networking, php.ini configuration |
+| **WASM & Browser Runtime** | `@.agents/skills/wasm-browser-runtime/SKILL.md` | WASM crashes and memory limits, Emscripten MEMFS, service worker routing and caching, Web Worker communication, crash recovery, GitHub Pages subpath deployment, browser storage constraints, Firefox SW bundling |
 | **Blueprint Provisioning** | `@.agents/skills/blueprint-provisioning/SKILL.md` | Blueprint JSON format, step handlers, executor engine, resource resolution, PHP code generation, plugin/theme installation, constant substitution, adding new step types |
 | **Unit Testing** | `@.agents/skills/unit-testing/SKILL.md` | Writing and reviewing unit tests with `node:test`, mocking `php.run()` and MEMFS, testing PHP code generators, service worker helpers, runtime utilities, test organization conventions |
 | **E2E Testing (Playwright)** | `@.agents/skills/e2e-playwright/SKILL.md` | Browser-based end-to-end tests with Playwright, WASM boot waiting strategies, iframe navigation, blueprint execution verification, shell UI interaction, debugging flaky tests |
+
+### Additional references
+
+| Reference | Location | Content |
+|-----------|----------|---------|
+| **Testing & CI/CD** | `@.agents/references/testing-and-ci.md` | Test suite inventories, CI/CD pipeline, Biome linting, Firefox compatibility, manual validation |
+| **Upstream Projects** | `@.agents/references/upstream-projects.md` | WordPress Playground and Omeka S Playground details, when to consult each |
 
 ### Skill activation guidelines
 
@@ -185,63 +143,30 @@ index.html
 ### PHP Runtime
 
 The PHP runtime is provided by WordPress Playground's `@php-wasm/web` and `@php-wasm/universal`
-packages. These replace the previous `seanmorris/php-wasm` vendored dependencies.
-
-Key files:
+packages. Key files:
 
 - `src/runtime/php-loader.js` — Creates PHP instances via `loadWebRuntime()` and `new PHP()`
-- `src/runtime/php-compat.js` — Compatibility wrapper that maps the WP Playground API to the
-  interface expected by bootstrap.js and php-worker.js (request/response conversion,
+- `src/runtime/php-compat.js` — Compatibility wrapper (request/response conversion,
   analyzePath emulation, Emscripten module access)
 
-The PHP 8.3 WASM binary from `@php-wasm/web` includes all extensions built-in:
+The PHP 8.3 WASM binary includes all extensions built-in:
 `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`, `mbstring`, `openssl`, `intl`,
 `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
 
-**Note:** `sodium` is NOT available in the WASM binary despite what earlier documentation
-claimed. The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handles
-all encryption needs.
+**Note:** `sodium` is NOT available in the WASM binary. The OpenSSL fallback patch in
+`patches/shared/lib/classes/encryption.php` handles all encryption needs.
 
 ### Outbound HTTPS From PHP
 
-This repo uses WordPress Playground's `tcpOverFetch` bridge in `src/runtime/php-loader.js`
-to enable outbound HTTP(S) requests from PHP (`curl`, `file_get_contents()`, URL fopen).
+Uses WordPress Playground's `tcpOverFetch` bridge. For full details see the
+WP Playground & php-wasm skill. Key constraints unique to this repo:
 
-The supported model is:
-
-1. PHP opens an HTTP or HTTPS connection.
-2. `@php-wasm/web` intercepts the socket traffic and translates it to browser `fetch()`.
-3. For HTTPS, the runtime generates a temporary CA and writes it to
-   `/internal/shared/playground-ca.pem`, then points `openssl.cafile` and `curl.cainfo`
-   at that file via `setPhpIniEntries()`.
-4. If `playground.config.json` defines `phpCorsProxyUrl`, the browser-side networking layer
-   can retry outbound PHP requests through that proxy when direct browser `fetch()` fails.
-5. The same-origin Service Worker endpoint `MOODLE_PLAYGROUND_PROXY_URL` remains available
-   for plugins that want an explicit stable same-origin proxy contract, but it is no longer
-   required for the tested eXeLearning GitHub feed and release asset URLs.
-
-Important constraints:
-
-- Direct HTTPS from PHP to trusted external origins can work once the worker bundle includes
-  the minimal PR #1926-style CA profile from WordPress Playground. The generated CA must avoid
-  explicit `keyUsage`, `nsCertType`, and SAN IP extensions because the upstream ASN.1 encoder
-  still mis-encodes them.
-- The supported paths are:
-  - `PHP -> browser fetch -> remote origin`
-  - `PHP -> browser fetch -> phpCorsProxyUrl -> remote origin`
-  - `PHP -> MOODLE_PLAYGROUND_PROXY_URL -> browser fetch -> remote origin`
-- In the current repo configuration, the tested eXeLearning GitHub feed and release ZIP asset
-  work through direct PHP URLs. The explicit same-origin proxy path remains available as an
-  optional plugin contract and debugging tool.
-- `MOODLE_PLAYGROUND_PROXY_URL` is a public runtime constant for Moodle plugins. Plugins
-  running in the playground may use it when they need a repo-controlled same-origin proxy
-  contract instead of relying on automatic fallback.
-- `addonProxyUrl` is used for browser-side ZIP downloads and as the upstream target for
-  the Service Worker proxy endpoint. `phpCorsProxyUrl` is the runtime PHP networking
-  fallback for `fetchWithCorsProxy`-style behavior; do not conflate the two.
+- The generated CA must avoid explicit `keyUsage`, `nsCertType`, and SAN IP extensions
+  (upstream ASN.1 encoder mis-encodes them — PR #1926-style CA profile).
+- `addonProxyUrl` is for browser-side ZIP downloads. `phpCorsProxyUrl` is for runtime PHP
+  networking fallback. Do not conflate the two.
 - After any change in `src/runtime/php-loader.js`, `php-worker.js`, or other worker imports,
-  run `npm run build:worker`. The browser runtime uses `dist/php-worker.bundle.js`, not the
-  source files directly.
+  run `npm run build:worker`.
 
 ### Responsibilities
 
@@ -282,85 +207,35 @@ Current layout:
 - Config and install markers: `/persist/config` (MEMFS)
 - Temp files and sessions: `/tmp/moodle` (MEMFS)
 
-The `syncFs` parameter in `php-compat.js` is set to `null` — no filesystem sync callback
-is registered. The `resetOpfsStorage()` function in `remote.html` exists only for cleanup
-of legacy data from earlier versions that did use OPFS.
-
 **Why not `:memory:` SQLite?** Each `php.run()` call resets PHP state and closes all PDO
 connections. A `:memory:` database would be empty on the next request. The MEMFS file
-approach is functionally equivalent to in-memory (the file exists only in the JS heap)
-but persists across PHP script executions within the same worker session.
+persists across PHP script executions within the same worker session.
 
 Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
 Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
 
 ## Crash Recovery (PHP Runtime Restart)
 
-The PHP WASM runtime can crash mid-session due to resource exhaustion (file descriptor
-limits, memory access out of bounds, `unreachable` traps). This is a known limitation of
-running PHP inside WebAssembly — WordPress Playground documents the same class of errors.
-See: https://github.com/WordPress/wordpress-playground/issues/1137
+The PHP WASM runtime can crash mid-session due to resource exhaustion. For full recovery
+flow details, see the WASM & Browser Runtime skill. Key files:
 
-When a fatal WASM error is detected (`src/runtime/crash-recovery.js`), the worker:
-
-1. **Snapshots state** from the dying runtime (MEMFS is in JS heap, readable even with
-   corrupted WASM linear memory):
-   - SQLite database file (`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`)
-   - Plugin files installed during this session (tracked via `trackPluginDir()`)
-   - User-uploaded files (`/persist/moodledata/filedir/`)
-2. **Destroys** the old PHP instance and creates a fresh one
-3. **Bootstraps** Moodle from scratch (ZIP extraction → install snapshot → config)
-4. **Restores** the saved DB, plugin files, and filedir onto the fresh runtime
-5. **Re-registers plugins** with Moodle's component cache and runs `upgrade_noncore()`
-6. **Re-creates** the admin session (the DB restore invalidates the bootstrap session)
-7. **Replays** the original request if it was idempotent (GET/HEAD)
-
-Anti-loop guards prevent infinite restart cycles:
-- Maximum 20 reactive restarts per session (`MAX_REACTIVE_RESTARTS`)
-- No restart if fewer than 10 requests were processed (`MIN_REQUESTS_BEFORE_RESTART`)
-- Non-idempotent requests (POST) are never replayed
-
-Key files:
 - `src/runtime/crash-recovery.js` — `isFatalWasmError()`, `createSnapshotManager()`
 - `php-worker.js` — `resetRuntime()`, `reRegisterPluginsAfterRestore()`
 
-## Patch Layout
-
-Build-time Moodle patches use a layered layout:
-
-- `patches/shared/` — canonical shared patch root
-- `patches/moodle/` — legacy fallback if `patches/shared/` is absent
-- `patches/<branch>/` — optional branch-specific overrides
-
-Shared patches are branch-agnostic and target `lib/...` paths. `scripts/patch-moodle-source.sh`
-detects the Moodle source layout and adds the `public/` prefix automatically for 5.1+ trees.
-
-Branch-specific patches are copied literally relative to the Moodle source root:
-
-- use `patches/MOODLE_500_STABLE/lib/...` for legacy-root branches
-- use `patches/main/public/lib/...` for `public/` branches
-
-Do not put branch overrides under `patches/<branch>/moodle/...`; the script does not treat
-`moodle/` specially and would copy that path literally into the source tree.
+Anti-loop guards: max 20 restarts/session, min 10 requests before restart, no POST replay.
 
 ## SQLite Prototype Invariants
-
-This repo is no longer using the old active PGlite database path for the main runtime.
 
 Current database assumptions:
 
 - Moodle runs against the deprecated SQLite PDO driver
 - The SQLite database file lives in MEMFS (pure memory, no durable storage)
 - The DB file path is `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
-- The Moodle core lives under `/www/moodle` (writable MEMFS, extracted from ZIP at boot)
 - `config.php` is generated at boot and points at the MEMFS database file
 - SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
   `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
-- A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) is generated at
-  build time by `scripts/generate-install-snapshot.sh`. At runtime, `bootstrap.js` fetches
-  this snapshot and writes it directly into MEMFS, then updates `wwwroot` in `mdl_config`
-  to match the current deployment URL. This eliminates the 3-8s CLI install phase. If the
-  snapshot is unavailable, the full CLI install runs as a fallback.
+- A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) eliminates the
+  3-8s CLI install phase. If unavailable, the full CLI install runs as a fallback.
 
 When touching the migration/runtime path, preserve these invariants:
 
@@ -375,18 +250,11 @@ When touching the migration/runtime path, preserve these invariants:
 
 Important files for this prototype:
 
-- `src/runtime/config-template.js`
-- `lib/config-template.js`
-- `src/runtime/bootstrap.js`
-- `src/runtime/php-loader.js`
-- `src/runtime/php-compat.js`
+- `src/runtime/config-template.js`, `lib/config-template.js`
+- `src/runtime/bootstrap.js`, `src/runtime/php-loader.js`, `src/runtime/php-compat.js`
 - `src/runtime/crash-recovery.js`
-- `sw.js`
-- `src/remote/main.js`
-- `php-worker.js`
-- `lib/moodle-loader.js`
-- `scripts/patch-moodle-source.sh`
-- `scripts/generate-install-snapshot.sh`
+- `sw.js`, `src/remote/main.js`, `php-worker.js`, `lib/moodle-loader.js`
+- `scripts/patch-moodle-source.sh`, `scripts/generate-install-snapshot.sh`
 - `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
 - `patches/shared/lib/ddl/sqlite_sql_generator.php`
 - `patches/shared/lib/classes/encryption.php`
@@ -400,8 +268,6 @@ Prototype-specific defaults currently matter during first boot:
   (0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER) and `runtime.debugdisplay` (0 or 1),
   or via the Settings dialog in the playground UI
 - For browser/runtime debugging, prefer opening the app with `?debug=true` first.
-  This forces `DEBUG_DEVELOPER`, `debugdisplay=1`, and PHP `display_errors=1`
-  for the booted runtime without editing the blueprint.
 - `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
 - JS, template, and language string caches are enabled for navigation performance
 - PHP `display_errors` is off by default; configurable via `runtime.debugdisplay` in blueprint
@@ -429,97 +295,12 @@ Moodle, like Omeka, may emit HTML-escaped URLs. If navigation works on first loa
 The URL base path must be consistent across the entire stack:
 
 1. `esbuild.worker.mjs` injects `__APP_ROOT__` = `new URL("../", import.meta.url).href`
-2. `php-worker.js` passes it as `appRootUrl` → `bootstrapMoodle({ appBaseUrl })` and
-   `createPhpRuntime(runtime, { appBaseUrl })`
+2. `php-worker.js` passes it as `appRootUrl` → `bootstrapMoodle({ appBaseUrl })`
 3. `bootstrap.js`: `buildPublicBase(appBaseUrl)` → `$CFG->wwwroot` in `config.php`
 4. `php-loader.js`: `absoluteUrl = appBaseUrl` → passed to `wrapPhpInstance()`
-5. `php-compat.js`: extracts `urlBasePath` from `absoluteUrl.pathname` → prepended to
-   `SCRIPT_NAME`, `PHP_SELF`, `REQUEST_URI` in `$_SERVER`
+5. `php-compat.js`: extracts `urlBasePath` → prepended to `SCRIPT_NAME`, `PHP_SELF`, `REQUEST_URI`
 
 If any link in this chain is broken, redirects on subpath deployments will loop.
-
-## Extensions
-
-The `@php-wasm/web` PHP 8.3 runtime includes all required PHP extensions built into the
-WASM binary. No separate shared library loading or vendor directories are needed.
-
-Available extensions include: `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`,
-`mbstring`, `openssl`, `intl`, `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`,
-`fileinfo`, `sodium`, `xmlreader`, `xmlwriter`.
-
-## Fragile Areas
-
-These areas have repeatedly caused regressions during the SQLite migration:
-
-- **php.ini configuration**
-  - WP Playground hardcodes `/internal/shared/php.ini` via `PHP_INI_PATH` in `@php-wasm/universal`
-  - Writing a separate php.ini file (e.g., `/www/php.ini`) has NO effect — PHP never reads it
-  - All php.ini settings must be applied via `setPhpIniEntries()` from `@php-wasm/universal`
-  - Settings are applied in `src/runtime/php-loader.js` during runtime creation
-  - Blueprint timezone overrides are applied in `src/runtime/bootstrap.js` after provisioning
-- **Outbound PHP networking**
-  - `tcpOverFetch` must stay enabled in `src/runtime/php-loader.js`; disabling it removes
-    the generated CA and breaks all outbound HTTP(S) from PHP.
-  - `openssl.cafile` and `curl.cainfo` must point to `/internal/shared/playground-ca.pem`
-    whenever `tcpOverFetch` is active.
-  - `playground.config.json` should use `phpCorsProxyUrl` for PHP networking fallback and
-    `addonProxyUrl` for browser-side ZIP downloads; the old generic `proxyUrl` alias should
-    not be reintroduced.
-  - `MOODLE_PLAYGROUND_PROXY_URL` must stay scope-aware (`/playground/<scope>/<runtime>/...`);
-    plugins that choose the same-origin proxy path must not derive proxy URLs from
-    `$CFG->wwwroot` alone.
-  - The Service Worker endpoint `__playground_proxy__` must preserve the incoming query
-    string and forward it to the configured external proxy unchanged.
-  - The supported and tested paths for GitHub feeds/assets from PHP are now both:
-    direct HTTPS through `phpCorsProxyUrl` and the same-origin proxy endpoint.
-- `sw.js`
-  - query strings must survive scoped redirects
-  - HTML rewriting must keep Moodle links/forms inside the scoped runtime
-- `src/runtime/php-compat.js`
-  - CGI environment variables such as `HTTP_USER_AGENT`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` are critical
-  - The Request-to-PHPRequest conversion must preserve headers, method, and body
-  - The PHPResponse-to-Response conversion must preserve status codes and headers
-  - **PATH_INFO handling**: URLs like `/theme/styles.php/boost/123/all` contain PATH_INFO
-    after the `.php` segment. `resolveScriptPath()` splits these into the actual script path
-    and the PATH_INFO component. Without this, `isPhpScript()` fails (the URL doesn't end
-    in `.php`) and those requests return 404, breaking CSS/JS delivery.
-  - **URL base path in `$_SERVER`**: `SCRIPT_NAME`, `PHP_SELF`, and `REQUEST_URI` must include
-    the URL base path (e.g., `/moodle-playground` on GitHub Pages). Moodle's
-    `setup_get_remote_url()` in `lib/setuplib.php` constructs `$FULLME`/`$FULLSCRIPT` by
-    extracting **only the scheme+host** from `$CFG->wwwroot` and combining it with
-    `$_SERVER['SCRIPT_NAME']`. If SCRIPT_NAME lacks the base path, all redirect URLs lose
-    the subpath, causing infinite redirect loops on subpath deployments.
-- `src/remote/main.js`
-  - historically, the nested iframe could stall with a valid URL/title but an empty body
-    (this is now resolved; the watchdog recovery code remains as a safety net)
-- `lib/moodle-loader.js`
-  - handles ZIP bundle download, caching, and extraction
-- `src/runtime/bootstrap.js`
-  - many install-time compatibility shims live here and are easy to break accidentally
-  - **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets
-    loaded during install (e.g., via the hardcoded list in the adminlib.php patch), any
-    setting that has a dynamic default (computed from `$CFG->wwwroot` or similar) won't have
-    a stored value. `any_new_admin_settings()` returns true, and `admin/index.php` redirects
-    to `upgradesettings.php`. Fix: add the missing setting with a safe static default to the
-    `$postinstalldefaults` array. Known examples: `noreplyaddress`, `supportemail`.
-  - **Runtime patches vs `patches/` directory**: Patches applied via the `patches/` directory
-    (copied at bundle build time) should NOT also be applied at runtime via `patchFile()` in
-    `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
-    runtime `patchFile()` for files that need modification at boot
-    (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
-
-- `src/runtime/crash-recovery.js`
-  - `collectFiles()` uses `rawPhp.isDir()` and `rawPhp.readFileAsBuffer()` to snapshot
-    plugin directories and filedir — these are `@php-wasm/universal` APIs on the raw
-    PHP instance (`php._php`), not the compat wrapper
-  - The snapshot `restore()` runs **after** full bootstrap completes — the fresh runtime
-    has a clean install DB which is then overwritten by the crash snapshot
-  - `reRegisterPluginsAfterRestore()` must refresh the `alternative_component_cache` for
-    each restored plugin before `moodle_needs_upgrading()` will detect them
-  - The filedir restore preserves user-uploaded content (SCORM packages, activity files)
-    that Moodle references via `mdl_files` rows in the restored DB
-
-If a change touches any of these files, prefer validating in a real browser, not only with syntax checks.
 
 ## Moodle URL Construction Internals
 
@@ -547,52 +328,13 @@ On GitHub Pages (`https://host/moodle-playground`), the base path is `/moodle-pl
 ## Blueprints
 
 Blueprints are step-based JSON files that describe the desired state of a playground
-instance. The format is inspired by WordPress Playground Blueprints with Moodle-native
-naming and semantics.
-
-Core modules live in `src/blueprint/`:
-
-- `index.js` — public re-exports
-- `parser.js` — parse JSON / base64 / data-URL / object inputs
-- `schema.js` — hand-written validator (~120 lines, no library)
-- `constants.js` — `{{KEY}}` substitution in string values
-- `resources.js` — `ResourceRegistry` for url/base64/bundled/vfs/literal resources
-- `resolver.js` — blueprint source resolution (`?blueprint=`, `?blueprint-url=`, sessionStorage, default)
-- `storage.js` — sessionStorage save/load/clear
-- `executor.js` — sequential step runner with progress
-
-Step handlers in `src/blueprint/steps/`:
-
-- `filesystem.js` — mkdir, rmdir, writeFile, writeFiles, copyFile, moveFile, unzip
-- `request.js` — request, runPhpCode, runPhpScript
-- `moodle-install.js` — installMoodle (declarative marker), setAdminAccount, login
-- `moodle-config.js` — setConfig, setConfigs, setLandingPage
-- `moodle-users.js` — createUser, createUsers
-- `moodle-categories.js` — createCategory, createCategories
-- `moodle-courses.js` — createCourse, createCourses, createSection, createSections
-- `moodle-enrol.js` — enrolUser, enrolUsers
-- `moodle-modules.js` — addModule (label, folder, assign, etc.)
-- `moodle-plugins.js` — installMoodlePlugin, installTheme (downloads ZIP, extracts, runs upgrade)
-
-PHP code generators in `src/blueprint/php/helpers.js`.
-
-Assets:
-
-- `assets/blueprints/default.blueprint.json` — default step-based blueprint
-- `assets/blueprints/blueprint-schema.json` — JSON Schema for IDE autocompletion
-- `assets/blueprints/examples/` — example blueprints
-
-Tests:
-
-- `tests/blueprint/*.test.js` — run with `npm run test:blueprint`
+instance. For full format, step types, PHP code generation, and resource system details,
+see the Blueprint Provisioning skill.
 
 Key design decisions:
-
 - `installMoodle` is a declarative marker — the actual install runs in `bootstrap.js`
 - Provisioning steps use `php.run()` with `CLI_SCRIPT` mode (except `login` which uses HTTP)
-- Plural steps (e.g., `createUsers`) execute all entities in a single PHP script
-- No external dependencies for validation; `fflate` (existing dep) used for unzip
-- Blueprint step execution runs between config normalization (0.918) and auto-login (0.95) in `bootstrap.js`
+- Blueprint step execution runs between config normalization (0.918) and auto-login (0.95)
 
 When changing blueprint semantics, update the schema, step handlers, docs, and tests.
 
@@ -607,164 +349,8 @@ make lint      # Run Biome linter on src/, tests/, scripts/
 make format    # Auto-fix lint and formatting issues
 ```
 
-These are also available as npm scripts:
-
-```bash
-npm test                  # All unit tests
-npm run test:blueprint    # Blueprint tests only
-npm run test:e2e          # Playwright e2e tests
-npm run test:e2e:install  # Install Chromium for Playwright (first time)
-```
-
-### Test suites
-
-Tests live in `tests/` and run with Node.js built-in `node:test` (no framework).
-
-#### Blueprint (`tests/blueprint/`)
-
-| File | What it tests |
-|------|---------------|
-| `parser.test.js` | JSON, base64, data-URL, object parsing |
-| `schema.test.js` | Blueprint validation (steps, resources, constants, landingPage) |
-| `constants.test.js` | `{{KEY}}` substitution in strings, objects, arrays |
-| `resources.test.js` | ResourceRegistry: literal, base64, data-url, @name references |
-| `executor.test.js` | Step execution order, failure handling, progress, constants |
-| `resolver.test.js` | Blueprint source resolution (inline, base64, data-URL) |
-| `steps.test.js` | Step registry: all 30 steps registered, handler dispatch |
-| `install-config.test.js` | `buildInstallConfig()` merging from installMoodle step and top-level fields |
-| `php-helpers.test.js` | PHP code generation: CLI header, escaping, Moodle API calls, batch operations |
-
-#### Version resolver (`tests/shared/`)
-
-| File | What it tests |
-|------|---------------|
-| `version-resolver.test.js` | Branch metadata, PHP/Moodle compatibility matrix, version resolution, runtimeId parsing/building, query param parsing, manifest URL building, data integrity |
-| `protocol.test.js` | BroadcastChannel naming, snapshot version constant |
-| `paths.test.js` | `joinBasePath()` path concatenation and deduplication |
-| `storage.test.js` | `buildScopeKey()` storage key construction |
-
-#### Runtime (`tests/runtime/`)
-
-| File | What it tests |
-|------|---------------|
-| `config-template.test.js` | `config.php` generation (dbtype, wwwroot, escaping, CACHE_DISABLE_ALL, autoloader), php.ini entries (timezone, limits, session paths) |
-| `php-compat.test.js` | `resolveScriptPath()` (PATH_INFO splitting, directory→index.php), `isPhpScript()`, `getMimeType()` for all supported extensions |
-| `manifest.test.js` | `buildManifestState()` extraction, fallback manifest URL building |
-
-#### Service Worker (`tests/sw/`)
-
-| File | What it tests |
-|------|---------------|
-| `sw-helpers.test.js` | HTML entity decoding (`&amp;`, `&#x2F;`, `&colon;`, Moodle URLs), scoped runtime path extraction (scope/runtime/path parsing, subpath deployments) |
-
-#### End-to-End (`tests/e2e/`)
-
-E2E tests use [Playwright](https://playwright.dev/) and run against a real browser (Chromium).
-They verify the full playground flow: shell boot → WASM PHP runtime → Moodle loading → blueprint execution.
-
-| File | What it tests |
-|------|---------------|
-| `shell.spec.mjs` | Shell UI: boot, side panel tabs, logs, blueprint display, settings popover, `?blueprint=` param |
-| `moodle-boot.spec.mjs` | Runtime boot lifecycle, PHP Info capture |
-| `blueprint-courses.spec.mjs` | Blueprint execution: course creation, user creation, enrollment, module addition |
-
-Run with `make test-e2e` (both browsers), `make test-e2e-chrome`, or `make test-e2e-firefox`.
-First-time setup: `npm run test:e2e:install`. Configuration in `playwright.config.mjs`.
-The dev server auto-starts on port 8085. Workers: 2 in CI, 3 locally.
-
-**Firefox compatibility:** Tests that require the Moodle runtime (SW + WASM bootstrap)
-work in Firefox thanks to the IIFE-bundled Service Worker. Shell-only tests (toolbar,
-panels, settings) work in all browsers without the runtime.
-
-### Linting and formatting
-
-The project uses [Biome](https://biomejs.dev/) for linting and formatting. Configuration is in `biome.json`.
-
-- **Scope**: `src/**`, `tests/**`, `scripts/**`
-- **Formatter**: 2-space indent, auto organize imports
-- **Linter**: Recommended rules, with `noDescendingSpecificity` and `noDuplicateProperties` disabled
-
-`make lint` runs in CI on every push to `main` and on pull requests.
-
-### Syntax checks
-
-```bash
-node --check sw.js
-node --check php-worker.js
-node --check lib/moodle-loader.js
-node --check src/runtime/bootstrap.js
-node --check src/runtime/php-loader.js
-node --check src/runtime/php-compat.js
-node --check src/runtime/crash-recovery.js
-node --check src/shell/main.js
-node --check src/remote/main.js
-node --check src/blueprint/index.js
-```
-
-### CI/CD
-
-Everything lives in a single `.github/workflows/ci.yml` workflow (no separate pages.yml
-or pr-preview.yml). It triggers on push to `main`, pull requests, and manual dispatch.
-
-```
-lint-and-test ───────────────────────────────────────┐
-build (5 branches + docs) ──┬── e2e-chromium ────────┤
-                            ├── e2e-firefox ──────────┤
-                            ├── deploy-preview (PR) ──┤
-                            └── deploy-pages (main) ──┘
-```
-
-**Jobs:**
-
-| Job | Trigger | What it does |
-|-----|---------|--------------|
-| `lint-and-test` | Always (except PR close) | Syntax check, `make test` (286+ unit tests), `make lint` |
-| `build` | Always (except PR close) | Build all 5 Moodle branches + docs, upload artifact |
-| `e2e-chromium` | After build | Playwright e2e tests in Chromium (2 workers) |
-| `e2e-firefox` | After build | Playwright e2e tests in Firefox (2 workers) |
-| `deploy-pages` | Push to main only | Deploy to GitHub Pages (gates on ALL other jobs) |
-| `deploy-preview` | PR only | Deploy to Netlify (parallel with e2e, fast preview URL) |
-| `cleanup-preview` | PR close only | Delete Netlify deploy |
-
-**Concurrency:** One run per branch, cancel-in-progress. A new push cancels stale runs.
-
-**Artifact sharing:** Build produces a single `site-build` artifact reused by both e2e
-jobs and both deploy jobs. Build once, test and deploy the same artifact.
-
-### Service Worker bundling (Firefox compatibility)
-
-The Service Worker (`sw.js`) uses ES module `import` statements, but **Firefox does not
-support ES module Service Workers** (Mozilla Bug 1360870). The SW is bundled with esbuild
-into `sw.bundle.js` (IIFE format, no imports) at the project root and registered as
-`type: "classic"`.
-
-**Important scope rule:** The SW bundle MUST live at the project root, not in `dist/`.
-A Service Worker's max scope is its own directory path — `/dist/sw.bundle.js` can only
-control `/dist/`, but the SW needs to control `/`. Firefox strictly enforces this and
-throws `SecurityError: "The operation is insecure"` if violated.
-
-- Source: `sw.js` (ES module with imports — for development/readability)
-- Bundle: `sw.bundle.js` (IIFE, no imports — served to browsers)
-- Built by: `npm run build:worker` (esbuild.worker.mjs)
-- Registered as: `type: "classic"` in `src/shared/service-worker-version.js`
-
-### Firefox WASM network limitations
-
-Firefox and Safari cannot make outbound HTTP calls from Emscripten WASM (errno 23 /
-EHOSTUNREACH). When Moodle PHP code tries to use `curl` or `file_get_contents()` on
-external URLs, the WASM runtime crashes. The crash recovery system detects this via
-`isEmscriptenNetworkError()` in `src/runtime/crash-recovery.js` and returns a user-friendly
-502 response instead of crashing the runtime.
-
-### Manual validation areas
-
-- First boot install path (every page load is a fresh install)
-- Navigation inside Moodle (caching should make second page loads faster)
-- GitHub Pages subpath behavior
-- Service worker updates after redeploy
-- Cache file creation in `/persist/moodledata/cache` (verify Moodle cache system initializes)
-
-If a change touches routing or HTML rewriting, prefer checking real browser behavior, not only syntax.
+For full test suite inventories, CI/CD pipeline, and browser compatibility details:
+@.agents/references/testing-and-ci.md
 
 ## Architecture Decision Records (ADRs)
 

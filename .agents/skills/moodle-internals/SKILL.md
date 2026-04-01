@@ -130,6 +130,47 @@ script adds the `public/` prefix automatically for 5.1+ branches.
 - Transactions are serialized (single-writer) — fine for single-user WASM
 - `LIKE` is case-insensitive by default in SQLite (unlike MySQL/PostgreSQL)
 
+## Patch Layout
+
+Build-time Moodle patches use a layered layout:
+
+- `patches/shared/` — canonical shared patch root
+- `patches/moodle/` — legacy fallback if `patches/shared/` is absent
+- `patches/<branch>/` — optional branch-specific overrides
+
+Shared patches are branch-agnostic and target `lib/...` paths. `scripts/patch-moodle-source.sh`
+detects the Moodle source layout and adds the `public/` prefix automatically for 5.1+ trees.
+
+Branch-specific patches are copied literally relative to the Moodle source root:
+- use `patches/MOODLE_500_STABLE/lib/...` for legacy-root branches
+- use `patches/main/public/lib/...` for `public/` branches
+
+Do not put branch overrides under `patches/<branch>/moodle/...`; the script does not treat
+`moodle/` specially and would copy that path literally into the source tree.
+
+## Fragile Areas (from AGENTS.md)
+
+### bootstrap.js
+- Many install-time compatibility shims live here and are easy to break accidentally
+- **Post-install defaults** (`$postinstalldefaults` array): When a new settings file gets
+  loaded during install (e.g., via the hardcoded list in the adminlib.php patch), any
+  setting that has a dynamic default (computed from `$CFG->wwwroot` or similar) won't have
+  a stored value. `any_new_admin_settings()` returns true, and `admin/index.php` redirects
+  to `upgradesettings.php`. Fix: add the missing setting with a safe static default to the
+  `$postinstalldefaults` array. Known examples: `noreplyaddress`, `supportemail`.
+- **Runtime patches vs `patches/` directory**: Patches applied via the `patches/` directory
+  (copied at bundle build time) should NOT also be applied at runtime via `patchFile()` in
+  `patchRuntimePhpSources()`. Duplicate patches fail silently but add noise. Only use
+  runtime `patchFile()` for files that need modification at boot
+  (e.g., `cache/classes/config.php`, `lib/classes/component.php`, `lib/adminlib.php`).
+
+### remote/main.js
+- Historically, the nested iframe could stall with a valid URL/title but an empty body
+  (this is now resolved; the watchdog recovery code remains as a safety net)
+
+### moodle-loader.js
+- Handles ZIP bundle download, caching, and extraction
+
 ## Checklist for Moodle-touching changes
 
 - [ ] Does the SQL work on SQLite? (no MySQL-only syntax)

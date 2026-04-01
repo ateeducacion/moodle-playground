@@ -3,6 +3,7 @@ import {
   captureDiagnostics,
   createDiagnosticsCollector,
   openPlayground,
+  waitForPlaygroundReady,
   waitForShellReady,
 } from "./helpers.mjs";
 
@@ -31,7 +32,7 @@ test("PHP Info tab captures runtime diagnostics", async ({
   const diagnostics = createDiagnosticsCollector(page);
   try {
     await openPlayground(page);
-    await waitForShellReady(page);
+    await waitForPlaygroundReady(page);
 
     await page.locator("#panel-toggle-button").click();
     await page.locator("#phpinfo-tab").click();

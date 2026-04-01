@@ -8,8 +8,9 @@ import { expect, test } from "@playwright/test";
 import {
   captureDiagnostics,
   createDiagnosticsCollector,
+  findMoodleFrame,
   waitForPlaygroundReady,
-  waitForScopedHttpReady,
+  waitForRuntimeFrameReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -246,11 +247,22 @@ function buildNetworkingBlueprint(siteName, files) {
 }
 
 async function fetchPhpJson(page, path) {
-  const responseText = await page.evaluate(async (scriptPath) => {
-    const response = await fetch(scriptPath);
-    return await response.text();
-  }, path);
-  return JSON.parse(responseText);
+  const fetchText = async (target, scriptPath) =>
+    await target.evaluate(async (resolvedPath) => {
+      const response = await fetch(resolvedPath, { cache: "no-store" });
+      return await response.text();
+    }, scriptPath);
+
+  try {
+    return JSON.parse(await fetchText(page, path));
+  } catch (error) {
+    const moodleFrame = findMoodleFrame(page);
+    if (!moodleFrame) {
+      throw error;
+    }
+
+    return JSON.parse(await fetchText(moodleFrame, path));
+  }
 }
 
 test.beforeEach(() => {
@@ -550,10 +562,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   try {
     await page.goto(`/?blueprint=${defaultBlueprint}`);
-    await waitForScopedHttpReady(
-      page,
-      "/playground/main/php83-moodle50/playground-ready.php",
-    );
+    await waitForRuntimeFrameReady(page);
 
     const localHttpsResult = await fetchPhpJson(
       page,
@@ -592,10 +601,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     await page.goto(
       `/?blueprint=${addonProxyBlueprint}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
     );
-    await waitForScopedHttpReady(
-      page,
-      "/playground/main/php83-moodle50/playground-ready.php",
-    );
+    await waitForRuntimeFrameReady(page);
 
     const sameOriginProxyResult = await fetchPhpJson(
       page,
@@ -614,10 +620,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     await page.goto(
       `/?blueprint=${phpCorsBlueprint}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
     );
-    await waitForScopedHttpReady(
-      page,
-      "/playground/main/php83-moodle50/playground-ready.php",
-    );
+    await waitForRuntimeFrameReady(page);
 
     const fallbackResult = await fetchPhpJson(
       page,

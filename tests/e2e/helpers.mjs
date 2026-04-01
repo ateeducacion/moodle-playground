@@ -172,6 +172,15 @@ export function getMoodleFrame(page) {
   return getRemoteHost(page).frameLocator("#remote-frame");
 }
 
+export function findMoodleFrame(page) {
+  return (
+    page
+      .frames()
+      .find((frame) => frame.parentFrame()?.url().includes("/remote.html")) ||
+    null
+  );
+}
+
 export async function openPlayground(page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator('body[data-app="shell"]')).toBeVisible({
@@ -189,6 +198,12 @@ export async function waitForShellReady(page) {
   });
   await expect(page.locator("#address-input")).toBeEnabled({
     timeout: readyTimeoutMs,
+  });
+}
+
+async function waitForRuntimeSelectionReady(page, timeout = readyTimeoutMs) {
+  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
+    timeout,
   });
 }
 
@@ -284,35 +299,65 @@ export async function waitForPlaygroundReady(page) {
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
+export async function waitForRuntimeFrameReady(page) {
+  await waitForRuntimeSelectionReady(page);
+  await waitForRemoteOverlayHidden(page);
+  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
+}
+
 export async function waitForScopedHttpReady(
   page,
   probePath,
   timeout = readyTimeoutMs,
 ) {
-  await waitForShellReady(page);
+  await waitForRuntimeSelectionReady(page, timeout);
 
   await expect
     .poll(
       async () => {
         try {
-          return await page.evaluate(async (path) => {
+          const canFetchJson = async (target, path) => {
             try {
-              const response = await fetch(path, { cache: "no-store" });
+              const response = await target.evaluate(async (fetchPath) => {
+                const response = await fetch(fetchPath, { cache: "no-store" });
+                const contentType = response.headers.get("content-type") || "";
+                if (!response.ok) {
+                  return { ok: false, contentType, body: null };
+                }
+
+                return {
+                  ok: true,
+                  contentType,
+                  body: await response.text(),
+                };
+              }, path);
+
               if (!response.ok) {
                 return false;
               }
 
-              const contentType = response.headers.get("content-type") || "";
+              const contentType = response.contentType || "";
               if (!/application\/json|text\/json/iu.test(contentType)) {
                 return false;
               }
 
-              await response.json();
+              JSON.parse(response.body || "");
               return true;
             } catch {
               return false;
             }
-          }, probePath);
+          };
+
+          if (await canFetchJson(page, probePath)) {
+            return true;
+          }
+
+          const moodleFrame = findMoodleFrame(page);
+          if (!moodleFrame) {
+            return false;
+          }
+
+          return await canFetchJson(moodleFrame, probePath);
         } catch {
           return false;
         }
