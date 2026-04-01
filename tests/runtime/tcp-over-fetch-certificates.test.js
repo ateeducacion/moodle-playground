@@ -171,7 +171,7 @@ describe("tcpOverFetch certificate generation", () => {
       );
       assert.match(
         siteText,
-        /X509v3 Subject Alternative Name:.*IP Address:<invalid>/su,
+        /X509v3 Subject Alternative Name:.*IP Address:<invalid(?: length=\d+)?>/su,
       );
       assert.strictEqual(modulusHash.trim(), keyModulusHash.trim());
     });
