@@ -271,7 +271,7 @@ async function resolveScopedPhpPath(page, scriptPath) {
   const runtimeId = remoteUrl.searchParams.get("runtime");
   if (!scopeId || !runtimeId) {
     throw new Error(
-      `Unable to resolve scoped runtime from remote frame URL: ${remoteUrl}`,
+      `Unable to resolve scoped runtime from remote frame URL: ${remoteUrl.href}`,
     );
   }
 
