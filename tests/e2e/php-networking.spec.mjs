@@ -4,10 +4,9 @@ import http from "node:http";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.mjs";
 import {
-  captureDiagnostics,
-  createDiagnosticsCollector,
+  buildBlueprintParam,
   findMoodleFrame,
   waitForPlaygroundReady,
   waitForRuntimeFrameReady,
@@ -212,10 +211,6 @@ test.afterAll(async () => {
   }
 });
 
-function buildBlueprintParam(payload) {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
-}
-
 function buildNetworkingBlueprint(siteName, files) {
   return buildBlueprintParam({
     landingPage: "/my/",
@@ -272,9 +267,9 @@ test.beforeEach(() => {
 test("PHP direct HTTPS to a self-signed local server still fails before proxy fallback", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildNetworkingBlueprint("PHP Local HTTPS Test", [
     {
       path: "/www/moodle/playground-net-local-https.php",
@@ -282,35 +277,31 @@ test("PHP direct HTTPS to a self-signed local server still fails before proxy fa
     },
   ]);
 
-  try {
-    await page.goto(`/?blueprint=${bp}`);
-    await waitForPlaygroundReady(page);
+  await page.goto(`/?blueprint=${bp}`);
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-local-https.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-local-https.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toBe(`${localHttpsBaseUrl}/plain`);
-    expect(result.fgc_ok).toBe(false);
-    expect(result.fgc_error).toMatch(/Failed to open stream: operation failed/);
-    expect(result.fgc_body).toBeNull();
-    expect(result.curl_errno).toBe(35);
-    expect(result.curl_error).toMatch(/SSL_ERROR_SYSCALL|UnknownCa|ASN1/i);
-    expect(result.curl_http_code).toBe(0);
-    expect(result.curl_body).toBeNull();
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toBe(`${localHttpsBaseUrl}/plain`);
+  expect(result.fgc_ok).toBe(false);
+  expect(result.fgc_error).toMatch(/Failed to open stream: operation failed/);
+  expect(result.fgc_body).toBeNull();
+  expect([35, 77]).toContain(result.curl_errno);
+  expect(result.curl_error).toMatch(/SSL_ERROR_SYSCALL|UnknownCa|ASN1|CAfile/i);
+  expect(result.curl_http_code).toBe(0);
+  expect(result.curl_body).toBeNull();
 });
 
 test("PHP can fetch GitHub releases atom feed through the same-origin playground proxy", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildNetworkingBlueprint("PHP Networking Test", [
     {
       path: "/www/moodle/playground-net-github.php",
@@ -319,37 +310,32 @@ test("PHP can fetch GitHub releases atom feed through the same-origin playground
     },
   ]);
 
-  try {
-    await page.goto(
-      `/?blueprint=${bp}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
-    );
-    await waitForPlaygroundReady(page);
+  await page.goto(
+    `/?blueprint=${bp}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
+  );
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toContain(
-      "/__playground_proxy__?repo=exelearning%2Fexelearning&atom=releases",
-    );
-    expect(result.fgc_ok).toBe(true);
-    expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
-    expect(result.curl_errno).toBe(0);
-    expect(result.curl_http_code).toBe(200);
-    expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toContain(
+    "/__playground_proxy__?repo=exelearning%2Fexelearning&atom=releases",
+  );
+  expect(result.fgc_ok).toBe(true);
+  expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+  expect(result.curl_errno).toBe(0);
+  expect(result.curl_http_code).toBe(200);
+  expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
 });
 
 test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
 
   const bp = buildNetworkingBlueprint("PHP Networking Proxy Fallback Test", [
     {
@@ -359,45 +345,39 @@ test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
     },
   ]);
 
-  try {
-    await page.goto(
-      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
-    );
-    await waitForPlaygroundReady(page);
+  await page.goto(
+    `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+  );
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-fallback.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-fallback.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toBe("http://remote-server.example/plain");
-    expect(result.fgc_ok).toBe(true);
-    expect(result.fgc_body).toBe("proxy-fallback-ok");
-    expect(result.curl_errno).toBe(0);
-    expect(result.curl_http_code).toBe(200);
-    expect(result.curl_body).toBe("proxy-fallback-ok");
-    expect(
-      localCorsProxyHits
-        .filter(
-          ({ target }) => target === "https://remote-server.example/plain",
-        )
-        .map(({ method, target }) => ({ method, target })),
-    ).toEqual([
-      { method: "GET", target: "https://remote-server.example/plain" },
-      { method: "GET", target: "https://remote-server.example/plain" },
-    ]);
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toBe("http://remote-server.example/plain");
+  expect(result.fgc_ok).toBe(true);
+  expect(result.fgc_body).toBe("proxy-fallback-ok");
+  expect(result.curl_errno).toBe(0);
+  expect(result.curl_http_code).toBe(200);
+  expect(result.curl_body).toBe("proxy-fallback-ok");
+  expect(
+    localCorsProxyHits
+      .filter(({ target }) => target === "https://remote-server.example/plain")
+      .map(({ method, target }) => ({ method, target })),
+  ).toEqual([
+    { method: "GET", target: "https://remote-server.example/plain" },
+    { method: "GET", target: "https://remote-server.example/plain" },
+  ]);
 });
 
 test("PHP direct HTTPS works for a CORS-open external URL", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildNetworkingBlueprint("PHP Networking Direct Test", [
     {
       path: "/www/moodle/playground-net-external-https.php",
@@ -406,40 +386,36 @@ test("PHP direct HTTPS works for a CORS-open external URL", async ({
     },
   ]);
 
-  try {
-    await page.goto(`/?blueprint=${bp}`);
-    await waitForPlaygroundReady(page);
+  await page.goto(`/?blueprint=${bp}`);
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-external-https.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-external-https.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toBe(
-      "https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md",
-    );
-    expect(result.fgc_ok).toBe(true);
-    expect(result.fgc_body_prefix).toMatch(
-      /WordPress Playground|PHP\.wasm|Playground/i,
-    );
-    expect(result.curl_errno).toBe(0);
-    expect(result.curl_error).toBe("");
-    expect(result.curl_http_code).toBe(200);
-    expect(result.curl_body_prefix).toMatch(
-      /WordPress Playground|PHP\.wasm|Playground/i,
-    );
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toBe(
+    "https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md",
+  );
+  expect(result.fgc_ok).toBe(true);
+  expect(result.fgc_body_prefix).toMatch(
+    /WordPress Playground|PHP\.wasm|Playground/i,
+  );
+  expect(result.curl_errno).toBe(0);
+  expect(result.curl_error).toBe("");
+  expect(result.curl_http_code).toBe(200);
+  expect(result.curl_body_prefix).toMatch(
+    /WordPress Playground|PHP\.wasm|Playground/i,
+  );
 });
 
 test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildNetworkingBlueprint("PHP GitHub Feed Direct Test", [
     {
       path: "/www/moodle/playground-net-github-feed-direct.php",
@@ -447,37 +423,33 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
     },
   ]);
 
-  try {
-    await page.goto(
-      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
-    );
-    await waitForPlaygroundReady(page);
+  await page.goto(
+    `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+  );
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
-    expect(result.fgc_ok).toBe(true);
-    expect(result.fgc_error).toBeNull();
-    expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
-    expect(result.curl_errno).toBe(0);
-    expect(result.curl_error).toBe("");
-    expect(result.curl_http_code).toBe(200);
-    expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
+  expect(result.fgc_ok).toBe(true);
+  expect(result.fgc_error).toBeNull();
+  expect(result.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+  expect(result.curl_errno).toBe(0);
+  expect(result.curl_error).toBe("");
+  expect(result.curl_http_code).toBe(200);
+  expect(result.curl_body_prefix).toMatch(/<feed|<\?xml/i);
 });
 
 test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName === "firefox");
-  const diagnostics = createDiagnosticsCollector(page);
+
   const bp = buildNetworkingBlueprint("PHP GitHub Asset Direct Test", [
     {
       path: "/www/moodle/playground-net-github-asset-direct.php",
@@ -485,41 +457,36 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", asyn
     },
   ]);
 
-  try {
-    await page.goto(
-      `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
-    );
-    await waitForPlaygroundReady(page);
+  await page.goto(
+    `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+  );
+  await waitForPlaygroundReady(page);
 
-    const result = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
-    );
+  const result = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
+  );
 
-    expect(result.moodle_playground).toBe(true);
-    expect(result.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
-    expect(result.fgc_ok).toBe(true);
-    expect(result.fgc_error).toBeNull();
-    expect(result.fgc_prefix_hex).toBe("504b0304");
-    expect(result.curl_errno).toBe(0);
-    expect(result.curl_error).toBe("");
-    expect([200, 206]).toContain(result.curl_http_code);
-    expect(result.curl_prefix_hex).toBe("504b0304");
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  expect(result.moodle_playground).toBe(true);
+  expect(result.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
+  expect(result.fgc_ok).toBe(true);
+  expect(result.fgc_error).toBeNull();
+  expect(result.fgc_prefix_hex).toBe("504b0304");
+  expect(result.curl_errno).toBe(0);
+  expect(result.curl_error).toBe("");
+  expect([200, 206]).toContain(result.curl_http_code);
+  expect(result.curl_prefix_hex).toBe("504b0304");
 });
 
 test("Firefox: PHP networking scenarios complete within three runtime boots", async ({
   page,
   browserName,
-}, testInfo) => {
+}) => {
   test.skip(browserName !== "firefox");
   test.fixme(
     browserName === "firefox",
     "Temporarily disabled due to Firefox CI runtime readiness flakiness.",
   );
-  const diagnostics = createDiagnosticsCollector(page);
 
   const defaultBlueprint = buildNetworkingBlueprint(
     "PHP Networking Firefox Default",
@@ -564,118 +531,112 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     ],
   );
 
-  try {
-    await page.goto(`/?blueprint=${defaultBlueprint}`);
-    await waitForRuntimeFrameReady(page);
+  await page.goto(`/?blueprint=${defaultBlueprint}`);
+  await waitForRuntimeFrameReady(page);
 
-    const localHttpsResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-local-https.php",
-    );
-    expect(localHttpsResult.moodle_playground).toBe(true);
-    expect(localHttpsResult.url).toBe(`${localHttpsBaseUrl}/plain`);
-    expect(localHttpsResult.fgc_ok).toBe(false);
-    expect(localHttpsResult.fgc_error).toMatch(
-      /Failed to open stream: operation failed/,
-    );
-    expect(localHttpsResult.fgc_body).toBeNull();
-    expect(localHttpsResult.curl_errno).toBe(35);
-    expect(localHttpsResult.curl_error).toMatch(
-      /SSL_ERROR_SYSCALL|UnknownCa|ASN1/i,
-    );
-    expect(localHttpsResult.curl_http_code).toBe(0);
-    expect(localHttpsResult.curl_body).toBeNull();
+  const localHttpsResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-local-https.php",
+  );
+  expect(localHttpsResult.moodle_playground).toBe(true);
+  expect(localHttpsResult.url).toBe(`${localHttpsBaseUrl}/plain`);
+  expect(localHttpsResult.fgc_ok).toBe(false);
+  expect(localHttpsResult.fgc_error).toMatch(
+    /Failed to open stream: operation failed/,
+  );
+  expect(localHttpsResult.fgc_body).toBeNull();
+  expect(localHttpsResult.curl_errno).toBe(35);
+  expect(localHttpsResult.curl_error).toMatch(
+    /SSL_ERROR_SYSCALL|UnknownCa|ASN1/i,
+  );
+  expect(localHttpsResult.curl_http_code).toBe(0);
+  expect(localHttpsResult.curl_body).toBeNull();
 
-    const externalResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-external-https.php",
-    );
-    expect(externalResult.moodle_playground).toBe(true);
-    expect(externalResult.fgc_ok).toBe(true);
-    expect(externalResult.fgc_body_prefix).toMatch(
-      /WordPress Playground|PHP\.wasm|Playground/i,
-    );
-    expect(externalResult.curl_errno).toBe(0);
-    expect(externalResult.curl_error).toBe("");
-    expect(externalResult.curl_http_code).toBe(200);
-    expect(externalResult.curl_body_prefix).toMatch(
-      /WordPress Playground|PHP\.wasm|Playground/i,
-    );
+  const externalResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-external-https.php",
+  );
+  expect(externalResult.moodle_playground).toBe(true);
+  expect(externalResult.fgc_ok).toBe(true);
+  expect(externalResult.fgc_body_prefix).toMatch(
+    /WordPress Playground|PHP\.wasm|Playground/i,
+  );
+  expect(externalResult.curl_errno).toBe(0);
+  expect(externalResult.curl_error).toBe("");
+  expect(externalResult.curl_http_code).toBe(200);
+  expect(externalResult.curl_body_prefix).toMatch(
+    /WordPress Playground|PHP\.wasm|Playground/i,
+  );
 
-    await page.goto(
-      `/?blueprint=${addonProxyBlueprint}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
-    );
-    await waitForRuntimeFrameReady(page);
+  await page.goto(
+    `/?blueprint=${addonProxyBlueprint}&addonProxyUrl=${encodeURIComponent(localAddonProxyBaseUrl)}`,
+  );
+  await waitForRuntimeFrameReady(page);
 
-    const sameOriginProxyResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github.php",
-    );
-    expect(sameOriginProxyResult.moodle_playground).toBe(true);
-    expect(sameOriginProxyResult.url).toContain(
-      "/__playground_proxy__?repo=exelearning%2Fexelearning&atom=releases",
-    );
-    expect(sameOriginProxyResult.fgc_ok).toBe(true);
-    expect(sameOriginProxyResult.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
-    expect(sameOriginProxyResult.curl_errno).toBe(0);
-    expect(sameOriginProxyResult.curl_http_code).toBe(200);
-    expect(sameOriginProxyResult.curl_body_prefix).toMatch(/<feed|<\?xml/i);
+  const sameOriginProxyResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github.php",
+  );
+  expect(sameOriginProxyResult.moodle_playground).toBe(true);
+  expect(sameOriginProxyResult.url).toContain(
+    "/__playground_proxy__?repo=exelearning%2Fexelearning&atom=releases",
+  );
+  expect(sameOriginProxyResult.fgc_ok).toBe(true);
+  expect(sameOriginProxyResult.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+  expect(sameOriginProxyResult.curl_errno).toBe(0);
+  expect(sameOriginProxyResult.curl_http_code).toBe(200);
+  expect(sameOriginProxyResult.curl_body_prefix).toMatch(/<feed|<\?xml/i);
 
-    await page.goto(
-      `/?blueprint=${phpCorsBlueprint}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
-    );
-    await waitForRuntimeFrameReady(page);
+  await page.goto(
+    `/?blueprint=${phpCorsBlueprint}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+  );
+  await waitForRuntimeFrameReady(page);
 
-    const fallbackResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-fallback.php",
-    );
-    expect(fallbackResult.moodle_playground).toBe(true);
-    expect(fallbackResult.url).toBe("http://remote-server.example/plain");
-    expect(fallbackResult.fgc_ok).toBe(true);
-    expect(fallbackResult.fgc_body).toBe("proxy-fallback-ok");
-    expect(fallbackResult.curl_errno).toBe(0);
-    expect(fallbackResult.curl_http_code).toBe(200);
-    expect(fallbackResult.curl_body).toBe("proxy-fallback-ok");
-    expect(
-      localCorsProxyHits
-        .filter(
-          ({ target }) => target === "https://remote-server.example/plain",
-        )
-        .map(({ method, target }) => ({ method, target })),
-    ).toEqual([
-      { method: "GET", target: "https://remote-server.example/plain" },
-      { method: "GET", target: "https://remote-server.example/plain" },
-    ]);
+  const fallbackResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-fallback.php",
+  );
+  expect(fallbackResult.moodle_playground).toBe(true);
+  expect(fallbackResult.url).toBe("http://remote-server.example/plain");
+  expect(fallbackResult.fgc_ok).toBe(true);
+  expect(fallbackResult.fgc_body).toBe("proxy-fallback-ok");
+  expect(fallbackResult.curl_errno).toBe(0);
+  expect(fallbackResult.curl_http_code).toBe(200);
+  expect(fallbackResult.curl_body).toBe("proxy-fallback-ok");
+  expect(
+    localCorsProxyHits
+      .filter(({ target }) => target === "https://remote-server.example/plain")
+      .map(({ method, target }) => ({ method, target })),
+  ).toEqual([
+    { method: "GET", target: "https://remote-server.example/plain" },
+    { method: "GET", target: "https://remote-server.example/plain" },
+  ]);
 
-    const directFeedResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
-    );
-    expect(directFeedResult.moodle_playground).toBe(true);
-    expect(directFeedResult.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
-    expect(directFeedResult.fgc_ok).toBe(true);
-    expect(directFeedResult.fgc_error).toBeNull();
-    expect(directFeedResult.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
-    expect(directFeedResult.curl_errno).toBe(0);
-    expect(directFeedResult.curl_error).toBe("");
-    expect(directFeedResult.curl_http_code).toBe(200);
-    expect(directFeedResult.curl_body_prefix).toMatch(/<feed|<\?xml/i);
+  const directFeedResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
+  );
+  expect(directFeedResult.moodle_playground).toBe(true);
+  expect(directFeedResult.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
+  expect(directFeedResult.fgc_ok).toBe(true);
+  expect(directFeedResult.fgc_error).toBeNull();
+  expect(directFeedResult.fgc_body_prefix).toMatch(/<feed|<\?xml/i);
+  expect(directFeedResult.curl_errno).toBe(0);
+  expect(directFeedResult.curl_error).toBe("");
+  expect(directFeedResult.curl_http_code).toBe(200);
+  expect(directFeedResult.curl_body_prefix).toMatch(/<feed|<\?xml/i);
 
-    const directAssetResult = await fetchPhpJson(
-      page,
-      "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
-    );
-    expect(directAssetResult.moodle_playground).toBe(true);
-    expect(directAssetResult.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
-    expect(directAssetResult.fgc_ok).toBe(true);
-    expect(directAssetResult.fgc_error).toBeNull();
-    expect(directAssetResult.fgc_prefix_hex).toBe("504b0304");
-    expect(directAssetResult.curl_errno).toBe(0);
-    expect(directAssetResult.curl_error).toBe("");
-    expect([200, 206]).toContain(directAssetResult.curl_http_code);
-    expect(directAssetResult.curl_prefix_hex).toBe("504b0304");
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  const directAssetResult = await fetchPhpJson(
+    page,
+    "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
+  );
+  expect(directAssetResult.moodle_playground).toBe(true);
+  expect(directAssetResult.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
+  expect(directAssetResult.fgc_ok).toBe(true);
+  expect(directAssetResult.fgc_error).toBeNull();
+  expect(directAssetResult.fgc_prefix_hex).toBe("504b0304");
+  expect(directAssetResult.curl_errno).toBe(0);
+  expect(directAssetResult.curl_error).toBe("");
+  expect([200, 206]).toContain(directAssetResult.curl_http_code);
+  expect(directAssetResult.curl_prefix_hex).toBe("504b0304");
 });

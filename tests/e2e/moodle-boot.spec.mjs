@@ -1,10 +1,4 @@
-import { expect, test } from "@playwright/test";
-import {
-  captureDiagnostics,
-  createDiagnosticsCollector,
-  openPlayground,
-  waitForShellReady,
-} from "./helpers.mjs";
+import { expect, test } from "./fixtures.mjs";
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -12,41 +6,31 @@ test.describe.configure({ timeout: 180_000 });
 // Moodle runtime boot tests
 // ---------------------------------------------------------------------------
 
-test("Moodle dashboard loads after boot", async ({ page }, testInfo) => {
-  const diagnostics = createDiagnosticsCollector(page);
-  try {
-    await openPlayground(page);
-    await waitForShellReady(page);
+test("Moodle dashboard loads after boot", async ({ page, playground }) => {
+  await playground.open();
 
-    const address = await page.locator("#address-input").inputValue();
-    expect(address).toMatch(/^\//);
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  const address = await page.locator("#address-input").inputValue();
+  expect(address).toMatch(/^\//);
 });
 
 test("PHP Info tab captures runtime diagnostics", async ({
   page,
+  playground,
   browserName,
-}, testInfo) => {
+}) => {
   test.fixme(
     browserName === "firefox",
     "Temporarily disabled due to Firefox CI runtime readiness flakiness.",
   );
-  const diagnostics = createDiagnosticsCollector(page);
-  try {
-    await openPlayground(page);
-    await waitForShellReady(page);
 
-    await page.locator("#panel-toggle-button").click();
-    await page.locator("#phpinfo-tab").click();
-    await page.locator("#refresh-phpinfo-button").click();
+  await playground.open();
 
-    const phpinfoFrame = page.locator("#phpinfo-frame");
-    await expect(phpinfoFrame).toHaveAttribute("srcdoc", /PHP Version/, {
-      timeout: 30_000,
-    });
-  } finally {
-    await captureDiagnostics(page, testInfo, diagnostics);
-  }
+  await page.locator("#panel-toggle-button").click();
+  await page.locator("#phpinfo-tab").click();
+  await page.locator("#refresh-phpinfo-button").click();
+
+  const phpinfoFrame = page.locator("#phpinfo-frame");
+  await expect(phpinfoFrame).toHaveAttribute("srcdoc", /PHP Version/, {
+    timeout: 30_000,
+  });
 });

@@ -1,6 +1,6 @@
 import { parseBlueprint } from "./parser.js";
 import { validateBlueprint } from "./schema.js";
-import { loadBlueprint, saveBlueprint } from "./storage.js";
+import { saveBlueprint } from "./storage.js";
 
 /**
  * Resolve the active blueprint from multiple sources in priority order.
@@ -69,12 +69,9 @@ export async function resolveBlueprint({
     }
   }
 
-  // 3. sessionStorage
-  const stored = loadBlueprint(scopeId);
-  if (stored) {
-    console.log("[blueprint] Resolved from sessionStorage.");
-    return stored;
-  }
+  // 3. sessionStorage blueprints are not reloaded on bare URL navigations —
+  //    the ephemeral runtime should boot clean. Blueprints from ?blueprint=
+  //    params are returned above before reaching this point.
 
   // 4. defaultBlueprintUrl
   if (defaultBlueprintUrl) {

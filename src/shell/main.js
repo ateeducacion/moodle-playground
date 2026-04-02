@@ -2,7 +2,6 @@ import {
   clearBlueprint,
   parseBlueprint,
   resolveBlueprint,
-  saveBlueprint,
   validateBlueprint,
 } from "../blueprint/index.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
@@ -364,14 +363,14 @@ async function importPayload(file) {
     );
   }
 
-  activeBlueprint = blueprint;
-  saveBlueprint(scopeId, activeBlueprint);
-  pendingCleanBoot = true;
-  currentPath = activeBlueprint.landingPage || config.landingPath || "/";
-  els.address.value = currentPath;
-  updateBlueprintTextarea();
-  saveState({ importedBlueprintAt: new Date().toISOString() });
-  await updateFrame();
+  // Encode the blueprint into the URL and trigger a full page reload,
+  // the same way version changes work. This ensures a clean WASM runtime
+  // with no stale state from the previous session.
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
+  const url = new URL(window.location.href);
+  url.searchParams.set("blueprint", encoded);
+  url.searchParams.delete("blueprint-url");
+  window.location.href = url.toString();
 }
 
 function bindShellChannel() {

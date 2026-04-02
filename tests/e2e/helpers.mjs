@@ -471,3 +471,7 @@ export async function clickFirstVisible(locatorFactories) {
 export function uniqueSuffix(testInfo) {
   return `${testInfo.project.name}-${Date.now()}`;
 }
+
+export function buildBlueprintParam(payload) {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+}
