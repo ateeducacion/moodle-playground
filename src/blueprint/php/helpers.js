@@ -54,11 +54,12 @@ function addModuleExec(fileSpecs = []) {
     // Attach uploaded files to the module via Moodle file storage.
     $ctx = context_module::instance($cmid);
     $fs = get_file_storage();
+    $component = 'mod_' . $moduleInfo->modulename;
     foreach ([${entries}] as $fSpec) {
         if (!file_exists($fSpec['tmppath'])) continue;
         $fileinfo = [
             'contextid' => $ctx->id,
-            'component' => 'mod_' . $moduleInfo->modulename,
+            'component' => $component,
             'filearea'  => $fSpec['filearea'],
             'itemid'    => $fSpec['itemid'],
             'filepath'  => $fSpec['filepath'],
@@ -70,6 +71,58 @@ function addModuleExec(fileSpecs = []) {
         ];
         $fs->create_file_from_pathname($fileinfo, $fSpec['tmppath']);
         @unlink($fSpec['tmppath']);
+
+        // If the file is in the 'package' filearea, extract it to 'content'
+        // and detect the main entry file. This replicates the post-save
+        // processing that modules like exeweb, resource, and scorm perform
+        // when a package ZIP is uploaded through the Moodle form UI.
+        if ($fSpec['filearea'] === 'package') {
+            $storedFile = $fs->get_file(
+                $ctx->id, $component, 'package',
+                $fSpec['itemid'], $fSpec['filepath'], $fSpec['filename']
+            );
+            if ($storedFile) {
+                $packer = get_file_packer('application/zip');
+                $fs->delete_area_files($ctx->id, $component, 'content');
+                $contentsList = $storedFile->extract_to_storage(
+                    $packer, $ctx->id, $component, 'content', $fSpec['itemid'], '/'
+                );
+                if ($contentsList) {
+                    // Find index.html as main entry file (common convention).
+                    $entryNames = ['index.html', 'index.htm'];
+                    $entryPath = '/';
+                    $firstKey = key($contentsList);
+                    if ($firstKey && mb_substr($firstKey, -1) === '/') {
+                        $entryPath = '/' . $firstKey;
+                    }
+                    foreach ($entryNames as $eName) {
+                        $mainFile = $fs->get_file(
+                            $ctx->id, $component, 'content',
+                            $fSpec['itemid'], $entryPath, $eName
+                        );
+                        if ($mainFile) {
+                            file_set_sortorder(
+                                $ctx->id, $component, 'content', $fSpec['itemid'],
+                                $mainFile->get_filepath(), $mainFile->get_filename(), 1
+                            );
+                            // Update entrypath/entryname if the module supports them.
+                            try {
+                                $cols = $DB->get_columns($moduleInfo->modulename);
+                                if (isset($cols['entrypath'])) {
+                                    $DB->set_field($moduleInfo->modulename, 'entrypath',
+                                        $mainFile->get_filepath(), ['id' => $instanceid]);
+                                }
+                                if (isset($cols['entryname'])) {
+                                    $DB->set_field($moduleInfo->modulename, 'entryname',
+                                        $mainFile->get_filename(), ['id' => $instanceid]);
+                                }
+                            } catch (\\Throwable $ignore) {}
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }`;
   }
 
@@ -97,7 +150,7 @@ try {
     // Copy module-specific fields (e.g. assign grade, submissiondrafts)
     // that type-specific generators set on $moduleInfo.
     $skip = ['modulename','name','intro','introformat','course','section',
-             'visible','cmidnumber','groupmode','groupingid','files','display'];
+             'visible','cmidnumber','groupmode','groupingid','files'];
     foreach (get_object_vars($moduleInfo) as $k => $v) {
         if (!isset($instance->$k) && !in_array($k, $skip)) {
             $instance->$k = $v;
@@ -165,6 +218,7 @@ $created[] = user_create_user($u${i}, true, false);`;
   return `${CLI_HEADER}
 require_once($CFG->dirroot . '/user/lib.php');
 global $CFG;
+$CFG->passwordpolicy = false;
 $created = [];
 ${blocks.join("\n")}
 echo json_encode(['ok' => true, 'created' => $created]);
@@ -308,9 +362,27 @@ export function phpAddModule(mod, fileSpecs = []) {
   const name = escapePhp(mod.name || mod.module);
   const intro = escapePhp(mod.intro || "");
 
-  // When files are present, always use the generic handler (it supports
-  // custom fields AND file attachment in one pass).
-  if (fileSpecs.length > 0) {
+  // Extract module-specific custom fields (e.g. exeorigin, revision)
+  // that should be set on the module instance record.
+  const standardKeys = new Set([
+    "step",
+    "module",
+    "course",
+    "section",
+    "name",
+    "intro",
+    "files",
+  ]);
+  const customFields = {};
+  for (const [k, v] of Object.entries(mod)) {
+    if (!standardKeys.has(k) && v !== undefined && v !== null) {
+      customFields[k] = v;
+    }
+  }
+
+  // When files or custom fields are present, always use the generic handler
+  // (it supports custom fields AND file attachment in one pass).
+  if (fileSpecs.length > 0 || Object.keys(customFields).length > 0) {
     return phpAddGenericModule(
       mod.module,
       course,
@@ -318,6 +390,7 @@ export function phpAddModule(mod, fileSpecs = []) {
       name,
       intro,
       fileSpecs,
+      customFields,
     );
   }
 
@@ -411,7 +484,17 @@ function phpAddGenericModule(
   name,
   intro,
   fileSpecs = [],
+  customFields = {},
 ) {
+  const customLines = Object.entries(customFields)
+    .map(([k, v]) => {
+      if (typeof v === "number" || typeof v === "boolean") {
+        return `$moduleInfo->${escapePhp(k)} = ${typeof v === "boolean" ? (v ? 1 : 0) : v};`;
+      }
+      return `$moduleInfo->${escapePhp(k)} = '${escapePhp(String(v))}';`;
+    })
+    .join("\n");
+
   return `${CLI_HEADER}
 ${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
@@ -426,6 +509,7 @@ $moduleInfo->visible = 1;
 $moduleInfo->cmidnumber = '';
 $moduleInfo->groupmode = 0;
 $moduleInfo->groupingid = 0;
+${customLines}
 ${addModuleExec(fileSpecs)}
 `;
 }

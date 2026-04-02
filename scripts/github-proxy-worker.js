@@ -455,7 +455,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept",
+    "Access-Control-Allow-Headers": "*",
     "Access-Control-Expose-Headers":
       "Content-Disposition, Content-Type, Content-Length, X-Playground-Cors-Proxy",
     "Access-Control-Max-Age": "86400",

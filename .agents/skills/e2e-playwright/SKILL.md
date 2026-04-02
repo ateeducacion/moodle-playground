@@ -176,9 +176,7 @@ async function waitForNavigation(page, pathPattern) {
 The standard pattern for testing blueprint execution:
 
 ```javascript
-function buildBlueprintParam(payload) {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
-}
+import { buildBlueprintParam } from "./helpers.mjs";
 
 test("blueprint does X", async ({ page }) => {
   const bp = buildBlueprintParam({

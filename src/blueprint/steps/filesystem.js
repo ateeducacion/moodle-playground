@@ -1,6 +1,7 @@
 /**
  * Filesystem step handlers: mkdir, rmdir, writeFile, writeFiles, copyFile, moveFile, unzip.
  */
+import { readZipEntries } from "../../../lib/moodle-loader.js";
 import { escapePhp } from "../php/helpers.js";
 
 export function registerFilesystemSteps(register) {
@@ -114,21 +115,15 @@ async function handleUnzip(step, { php, resources }) {
     throw new Error("unzip: 'data' is required.");
   }
   const zipBytes = await resources.resolve(step.data);
+  const entries = await readZipEntries(zipBytes);
 
-  // Use fflate for decompression
-  const { unzipSync } = await import("fflate");
-  const entries = unzipSync(zipBytes);
-
-  for (const [entryPath, entryData] of Object.entries(entries)) {
-    if (entryPath.endsWith("/")) continue; // skip directories
-    const fullPath = `${destination}/${entryPath}`;
-
-    // Ensure parent directory exists
+  const rawPhp = php._php;
+  for (const { path, data } of entries) {
+    const fullPath = `${destination}/${path}`;
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir) {
-      await php.run(`<?php @mkdir('${escapePhp(parentDir)}', 0777, true);`);
+      rawPhp.mkdirTree(parentDir);
     }
-
-    await php.writeFile(fullPath, entryData);
+    rawPhp.writeFile(fullPath, data);
   }
 }

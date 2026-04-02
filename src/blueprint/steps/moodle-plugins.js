@@ -5,6 +5,8 @@
  * and runs the Moodle upgrade to register the plugin.
  */
 
+import { readZipEntries } from "../../../lib/moodle-loader.js";
+
 const MOODLE_ROOT = "/www/moodle";
 const DEFAULT_ADDON_PROXY_URL = "https://github-proxy.exelearning.dev/";
 
@@ -80,7 +82,7 @@ async function handleInstallMoodlePlugin(step, context) {
     );
   }
 
-  const targetDir = resolvePluginDir(pluginType, pluginName);
+  const targetDir = resolvePluginDir(pluginType, pluginName, context.webRoot);
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade(pluginType, pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
@@ -99,20 +101,21 @@ async function handleInstallTheme(step, context) {
     );
   }
 
-  const targetDir = resolvePluginDir("theme", pluginName);
+  const targetDir = resolvePluginDir("theme", pluginName, context.webRoot);
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade("theme", pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
 }
 
-function resolvePluginDir(pluginType, pluginName) {
+function resolvePluginDir(pluginType, pluginName, webRoot) {
   const typeDir = PLUGIN_TYPE_DIRS[pluginType];
   if (!typeDir) {
     throw new Error(
       `Unknown plugin type '${pluginType}'. Known types: ${Object.keys(PLUGIN_TYPE_DIRS).join(", ")}`,
     );
   }
-  return `${MOODLE_ROOT}/${typeDir}/${pluginName}`;
+  const base = webRoot || MOODLE_ROOT;
+  return `${base}/${typeDir}/${pluginName}`;
 }
 
 /**
@@ -186,7 +189,14 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
     );
   }
 
-  const response = await fetch(downloadUrl);
+  // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
+  // errors on browser reloads (cache revalidation race with the proxy).
+  let response = await fetch(downloadUrl, { cache: "no-store" });
+  if (!response.ok && (response.status === 502 || response.status === 503)) {
+    if (publish) publish("Plugin download failed, retrying…", 0.93);
+    await new Promise((r) => setTimeout(r, 1000));
+    response = await fetch(downloadUrl, { cache: "no-store" });
+  }
   if (!response.ok) {
     throw new Error(
       `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
@@ -196,20 +206,17 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
 
   if (publish) publish(`Extracting plugin to ${targetDir}`, 0.935);
 
-  const { unzipSync } = await import("fflate");
-  const entries = unzipSync(zipBytes);
+  const rawEntries = await readZipEntries(zipBytes);
 
   // GitHub ZIPs have a top-level directory. Find and strip common prefix.
-  const paths = Object.keys(entries).filter((p) => !p.endsWith("/"));
+  const paths = rawEntries.map((e) => e.path);
   const commonPrefix = findCommonPrefix(paths);
 
   const rawPhp = php._php;
   rawPhp.mkdirTree(targetDir);
 
   let fileCount = 0;
-  for (const [entryPath, entryData] of Object.entries(entries)) {
-    if (entryPath.endsWith("/")) continue;
-
+  for (const { path: entryPath, data: entryData } of rawEntries) {
     const relativePath = commonPrefix
       ? entryPath.substring(commonPrefix.length)
       : entryPath;
@@ -235,16 +242,17 @@ async function runMoodleUpgrade(
   pluginType,
   pluginName,
   targetDir,
-  { php, publish },
+  { php, publish, webRoot },
 ) {
   if (publish) publish("Running Moodle upgrade to register plugin.", 0.945);
 
   const component = `${pluginType}_${pluginName}`;
   const safeDir = targetDir.replaceAll("'", "\\'");
 
+  const base = webRoot || MOODLE_ROOT;
   const code = `<?php
 define('CLI_SCRIPT', true);
-require('${MOODLE_ROOT}/config.php');
+require('${base}/config.php');
 require_once($CFG->libdir . '/upgradelib.php');
 require_once($CFG->libdir . '/clilib.php');
 require_once($CFG->libdir . '/adminlib.php');
