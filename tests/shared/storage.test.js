@@ -83,4 +83,54 @@ describe("getOrCreateScopeId", () => {
       });
     }
   });
+
+  it("falls back to a monotonic per-tab scope when randomUUID is unavailable", () => {
+    const originalWindow = globalThis.window;
+    const originalCrypto = globalThis.crypto;
+    const originalPerformance = globalThis.performance;
+
+    try {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: undefined,
+      });
+      Object.defineProperty(globalThis, "performance", {
+        configurable: true,
+        value: {
+          now: () => 42,
+        },
+      });
+
+      globalThis.window = {
+        location: { href: "https://example.com/" },
+        sessionStorage: {
+          store: new Map(),
+          getItem(key) {
+            return this.store.get(key) ?? null;
+          },
+          setItem(key, value) {
+            this.store.set(key, value);
+          },
+        },
+      };
+
+      const scopeId = getOrCreateScopeId();
+      assert.match(scopeId, /^tab-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$/u);
+      assert.strictEqual(
+        globalThis.window.sessionStorage.getItem("moodle-playground:active"),
+        scopeId,
+      );
+      assert.strictEqual(getOrCreateScopeId(), scopeId);
+    } finally {
+      globalThis.window = originalWindow;
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: originalCrypto,
+      });
+      Object.defineProperty(globalThis, "performance", {
+        configurable: true,
+        value: originalPerformance,
+      });
+    }
+  });
 });

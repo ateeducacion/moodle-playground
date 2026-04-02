@@ -1,4 +1,5 @@
 const SCOPE_PREFIX = "moodle-playground:";
+let scopeCounter = 0;
 
 export function buildScopeKey(scopeId, suffix) {
   return `${SCOPE_PREFIX}${scopeId}:${suffix}`;
@@ -10,7 +11,18 @@ function createScopeId() {
     return `tab-${randomId}`;
   }
 
-  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const randomWords =
+    globalThis.crypto?.getRandomValues?.(new Uint32Array(2)) || null;
+  if (randomWords) {
+    return `tab-${Array.from(randomWords, (value) => value.toString(16).padStart(8, "0")).join("")}`;
+  }
+
+  scopeCounter += 1;
+  const timestamp = Date.now().toString(36);
+  const monotonic = Math.floor(globalThis.performance?.now?.() || 0).toString(
+    36,
+  );
+  return `tab-${timestamp}-${monotonic}-${scopeCounter.toString(36)}`;
 }
 
 export function getOrCreateScopeId() {
