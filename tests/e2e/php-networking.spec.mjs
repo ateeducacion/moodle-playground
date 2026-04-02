@@ -10,6 +10,7 @@ import {
   findMoodleFrame,
   waitForPlaygroundReady,
   waitForRuntimeFrameReady,
+  waitForScopedHttpReady,
 } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 180_000 });
@@ -36,6 +37,11 @@ const EXELEARNING_RELEASES_ATOM_URL =
   "https://github.com/exelearning/exelearning/releases.atom";
 const EXELEARNING_RELEASE_VERSION = "4.0.0-beta3";
 const EXELEARNING_RELEASE_ASSET_URL = `https://github.com/exelearning/exelearning/releases/download/v${EXELEARNING_RELEASE_VERSION}/exelearning-static-v${EXELEARNING_RELEASE_VERSION}.zip`;
+const WORDPRESS_PLAYGROUND_README_URL =
+  "https://raw.githubusercontent.test/WordPress/wordpress-playground/README.md";
+const WORDPRESS_PLAYGROUND_README_FIXTURE = `# WordPress Playground
+
+Run WordPress and PHP.wasm directly in the browser.`;
 
 test.beforeAll(async () => {
   localHttpsTmpDir = await mkdtemp(join(tmpdir(), "moodle-playground-https-"));
@@ -146,6 +152,15 @@ test.beforeAll(async () => {
       return;
     }
 
+    if (target === WORDPRESS_PLAYGROUND_README_URL) {
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(WORDPRESS_PLAYGROUND_README_FIXTURE);
+      return;
+    }
+
     if (target === EXELEARNING_RELEASE_ASSET_URL) {
       const range = req.headers.range || "";
       const wantsPrefix = /bytes=0-3/u.test(range);
@@ -241,7 +256,33 @@ function buildNetworkingBlueprint(siteName, files) {
   });
 }
 
+async function resolveScopedPhpPath(page, scriptPath) {
+  if (scriptPath.startsWith("/playground/")) {
+    return scriptPath;
+  }
+
+  const remoteSrc = await page.locator("#site-frame").getAttribute("src");
+  if (!remoteSrc) {
+    throw new Error("Unable to determine the active playground scope.");
+  }
+
+  const remoteUrl = new URL(remoteSrc, page.url());
+  const scopeId = remoteUrl.searchParams.get("scope");
+  const runtimeId = remoteUrl.searchParams.get("runtime");
+  if (!scopeId || !runtimeId) {
+    throw new Error(
+      `Unable to resolve scoped runtime from remote frame URL: ${remoteUrl}`,
+    );
+  }
+
+  return `/playground/${encodeURIComponent(scopeId)}/${encodeURIComponent(runtimeId)}${scriptPath.startsWith("/") ? scriptPath : `/${scriptPath}`}`;
+}
+
 async function fetchPhpJson(page, path) {
+  const scopedPath = await resolveScopedPhpPath(page, path);
+  const readyPath = await resolveScopedPhpPath(page, "/playground-ready.php");
+  await waitForScopedHttpReady(page, readyPath);
+
   const fetchText = async (target, scriptPath) =>
     await target.evaluate(async (resolvedPath) => {
       const response = await fetch(resolvedPath, { cache: "no-store" });
@@ -249,14 +290,14 @@ async function fetchPhpJson(page, path) {
     }, scriptPath);
 
   try {
-    return JSON.parse(await fetchText(page, path));
+    return JSON.parse(await fetchText(page, scopedPath));
   } catch (error) {
     const moodleFrame = findMoodleFrame(page);
     if (!moodleFrame) {
       throw error;
     }
 
-    return JSON.parse(await fetchText(moodleFrame, path));
+    return JSON.parse(await fetchText(moodleFrame, scopedPath));
   }
 }
 
@@ -280,10 +321,7 @@ test("PHP direct HTTPS to a self-signed local server still fails before proxy fa
   await page.goto(`/?blueprint=${bp}`);
   await waitForPlaygroundReady(page);
 
-  const result = await fetchPhpJson(
-    page,
-    "/playground/main/php83-moodle50/playground-net-local-https.php",
-  );
+  const result = await fetchPhpJson(page, "/playground-net-local-https.php");
 
   expect(result.moodle_playground).toBe(true);
   expect(result.url).toBe(`${localHttpsBaseUrl}/plain`);
@@ -315,10 +353,7 @@ test("PHP can fetch GitHub releases atom feed through the same-origin playground
   );
   await waitForPlaygroundReady(page);
 
-  const result = await fetchPhpJson(
-    page,
-    "/playground/main/php83-moodle50/playground-net-github.php",
-  );
+  const result = await fetchPhpJson(page, "/playground-net-github.php");
 
   expect(result.moodle_playground).toBe(true);
   expect(result.url).toContain(
@@ -350,10 +385,7 @@ test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
   );
   await waitForPlaygroundReady(page);
 
-  const result = await fetchPhpJson(
-    page,
-    "/playground/main/php83-moodle50/playground-net-fallback.php",
-  );
+  const result = await fetchPhpJson(page, "/playground-net-fallback.php");
 
   expect(result.moodle_playground).toBe(true);
   expect(result.url).toBe("http://remote-server.example/plain");
@@ -381,23 +413,19 @@ test("PHP direct HTTPS works for a CORS-open external URL", async ({
   const bp = buildNetworkingBlueprint("PHP Networking Direct Test", [
     {
       path: "/www/moodle/playground-net-external-https.php",
-      literal:
-        "<?php require(__DIR__ . '/config.php'); $url = 'https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
+      literal: `<?php require(__DIR__ . '/config.php'); $url = '${WORDPRESS_PLAYGROUND_README_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
     },
   ]);
 
-  await page.goto(`/?blueprint=${bp}`);
+  await page.goto(
+    `/?blueprint=${bp}&phpCorsProxyUrl=${encodeURIComponent(localCorsProxyBaseUrl)}`,
+  );
   await waitForPlaygroundReady(page);
 
-  const result = await fetchPhpJson(
-    page,
-    "/playground/main/php83-moodle50/playground-net-external-https.php",
-  );
+  const result = await fetchPhpJson(page, "/playground-net-external-https.php");
 
   expect(result.moodle_playground).toBe(true);
-  expect(result.url).toBe(
-    "https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md",
-  );
+  expect(result.url).toBe(WORDPRESS_PLAYGROUND_README_URL);
   expect(result.fgc_ok).toBe(true);
   expect(result.fgc_body_prefix).toMatch(
     /WordPress Playground|PHP\.wasm|Playground/i,
@@ -430,7 +458,7 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
 
   const result = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
+    "/playground-net-github-feed-direct.php",
   );
 
   expect(result.moodle_playground).toBe(true);
@@ -464,7 +492,7 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", asyn
 
   const result = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
+    "/playground-net-github-asset-direct.php",
   );
 
   expect(result.moodle_playground).toBe(true);
@@ -497,8 +525,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
       },
       {
         path: "/www/moodle/playground-net-external-https.php",
-        literal:
-          "<?php require(__DIR__ . '/config.php'); $url = 'https://raw.githubusercontent.com/WordPress/wordpress-playground/5e5ba3e0f5b984ceadd5cbe6e661828c14621d25/README.md'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
+        literal: `<?php require(__DIR__ . '/config.php'); $url = '${WORDPRESS_PLAYGROUND_README_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
       },
     ],
   );
@@ -536,7 +563,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const localHttpsResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-local-https.php",
+    "/playground-net-local-https.php",
   );
   expect(localHttpsResult.moodle_playground).toBe(true);
   expect(localHttpsResult.url).toBe(`${localHttpsBaseUrl}/plain`);
@@ -554,7 +581,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const externalResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-external-https.php",
+    "/playground-net-external-https.php",
   );
   expect(externalResult.moodle_playground).toBe(true);
   expect(externalResult.fgc_ok).toBe(true);
@@ -575,7 +602,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const sameOriginProxyResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-github.php",
+    "/playground-net-github.php",
   );
   expect(sameOriginProxyResult.moodle_playground).toBe(true);
   expect(sameOriginProxyResult.url).toContain(
@@ -594,7 +621,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const fallbackResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-fallback.php",
+    "/playground-net-fallback.php",
   );
   expect(fallbackResult.moodle_playground).toBe(true);
   expect(fallbackResult.url).toBe("http://remote-server.example/plain");
@@ -614,7 +641,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const directFeedResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-github-feed-direct.php",
+    "/playground-net-github-feed-direct.php",
   );
   expect(directFeedResult.moodle_playground).toBe(true);
   expect(directFeedResult.url).toBe(EXELEARNING_RELEASES_ATOM_URL);
@@ -628,7 +655,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
 
   const directAssetResult = await fetchPhpJson(
     page,
-    "/playground/main/php83-moodle50/playground-net-github-asset-direct.php",
+    "/playground-net-github-asset-direct.php",
   );
   expect(directAssetResult.moodle_playground).toBe(true);
   expect(directAssetResult.url).toBe(EXELEARNING_RELEASE_ASSET_URL);
