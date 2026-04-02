@@ -311,7 +311,14 @@ export function phpAddModule(mod, fileSpecs = []) {
   // When files are present, always use the generic handler (it supports
   // custom fields AND file attachment in one pass).
   if (fileSpecs.length > 0) {
-    return phpAddGenericModule(mod.module, course, section, name, intro, fileSpecs);
+    return phpAddGenericModule(
+      mod.module,
+      course,
+      section,
+      name,
+      intro,
+      fileSpecs,
+    );
   }
 
   switch (mod.module) {
@@ -397,7 +404,14 @@ ${ADD_MODULE_EXEC}
 `;
 }
 
-function phpAddGenericModule(moduleName, course, section, name, intro, fileSpecs = []) {
+function phpAddGenericModule(
+  moduleName,
+  course,
+  section,
+  name,
+  intro,
+  fileSpecs = [],
+) {
   return `${CLI_HEADER}
 ${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);

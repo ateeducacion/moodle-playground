@@ -16,9 +16,7 @@ async function handleAddModule(step, { php, publish, resources }) {
     for (let i = 0; i < step.files.length; i++) {
       const file = step.files[i];
       if (!file.filename) {
-        throw new Error(
-          `addModule files[${i}]: 'filename' is required.`,
-        );
+        throw new Error(`addModule files[${i}]: 'filename' is required.`);
       }
       if (!file.data) {
         throw new Error(
