@@ -51,6 +51,23 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   const diagnosticsDir = testInfo.outputPath("diagnostics");
   await mkdir(diagnosticsDir, { recursive: true });
 
+  if (!page || page.isClosed()) {
+    await writeFile(
+      `${diagnosticsDir}/page-closed.json`,
+      JSON.stringify(
+        {
+          workflowLabel: process.env.PLAYWRIGHT_WORKFLOW_LABEL || "local",
+          project: testInfo.project.name,
+          pageClosed: true,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    return;
+  }
+
   const frames = page.frames();
   const remoteFrame = frames.find((frame) =>
     frame.url().includes("/remote.html"),
@@ -58,28 +75,41 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   const moodleFrame = frames.find(
     (frame) => frame.parentFrame() === remoteFrame,
   );
-  const shellState = await page.evaluate(() => {
-    const addressInput = document.querySelector("#address-input");
-    return {
-      title: document.title,
-      href: window.location.href,
-      addressValue:
-        addressInput instanceof HTMLInputElement ? addressInput.value : null,
-      addressDisabled:
-        addressInput instanceof HTMLInputElement ? addressInput.disabled : null,
-      runtimeLabel: document.querySelector("#current-runtime-label")
-        ?.textContent,
-      logPanel: document.querySelector("#log-panel")?.textContent || "",
-      siteFrameSrc:
-        document.querySelector("#site-frame")?.getAttribute("src") || null,
-    };
-  });
+  let shellState = null;
+  try {
+    shellState = await page.evaluate(() => {
+      const addressInput = document.querySelector("#address-input");
+      return {
+        title: document.title,
+        href: window.location.href,
+        addressValue:
+          addressInput instanceof HTMLInputElement ? addressInput.value : null,
+        addressDisabled:
+          addressInput instanceof HTMLInputElement
+            ? addressInput.disabled
+            : null,
+        runtimeLabel: document.querySelector("#current-runtime-label")
+          ?.textContent,
+        logPanel: document.querySelector("#log-panel")?.textContent || "",
+        siteFrameSrc:
+          document.querySelector("#site-frame")?.getAttribute("src") || null,
+      };
+    });
+  } catch {}
 
-  await page.screenshot({
-    path: `${diagnosticsDir}/final-page.png`,
-    fullPage: true,
-  });
-  await writeFile(`${diagnosticsDir}/shell.html`, await page.content(), "utf8");
+  try {
+    await page.screenshot({
+      path: `${diagnosticsDir}/final-page.png`,
+      fullPage: true,
+    });
+  } catch {}
+  try {
+    await writeFile(
+      `${diagnosticsDir}/shell.html`,
+      await page.content(),
+      "utf8",
+    );
+  } catch {}
   await writeFile(
     `${diagnosticsDir}/shell-state.json`,
     JSON.stringify(
@@ -114,19 +144,23 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   );
 
   if (remoteFrame) {
-    await writeFile(
-      `${diagnosticsDir}/remote-frame.html`,
-      await remoteFrame.content(),
-      "utf8",
-    );
+    try {
+      await writeFile(
+        `${diagnosticsDir}/remote-frame.html`,
+        await remoteFrame.content(),
+        "utf8",
+      );
+    } catch {}
   }
 
   if (moodleFrame) {
-    await writeFile(
-      `${diagnosticsDir}/moodle-frame.html`,
-      await moodleFrame.content(),
-      "utf8",
-    );
+    try {
+      await writeFile(
+        `${diagnosticsDir}/moodle-frame.html`,
+        await moodleFrame.content(),
+        "utf8",
+      );
+    } catch {}
   }
 }
 
@@ -136,6 +170,15 @@ export function getRemoteHost(page) {
 
 export function getMoodleFrame(page) {
   return getRemoteHost(page).frameLocator("#remote-frame");
+}
+
+export function findMoodleFrame(page) {
+  return (
+    page
+      .frames()
+      .find((frame) => frame.parentFrame()?.url().includes("/remote.html")) ||
+    null
+  );
 }
 
 export async function openPlayground(page) {
@@ -156,6 +199,50 @@ export async function waitForShellReady(page) {
   await expect(page.locator("#address-input")).toBeEnabled({
     timeout: readyTimeoutMs,
   });
+}
+
+async function waitForRuntimeSelectionReady(page, timeout = readyTimeoutMs) {
+  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
+    timeout,
+  });
+}
+
+async function waitForRemoteOverlayHidden(page, timeout = readyTimeoutMs) {
+  const remoteHost = getRemoteHost(page);
+  await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
+    timeout,
+  });
+  await expect
+    .poll(
+      async () => {
+        try {
+          const overlayClass =
+            (await remoteHost
+              .locator(".remote-boot__card")
+              .getAttribute("class")) || "";
+          if (/\bis-hidden\b/u.test(overlayClass)) {
+            return true;
+          }
+        } catch {
+          /* remote overlay not ready yet */
+        }
+
+        try {
+          const moodleFrame = getMoodleFrame(page);
+          for (const selector of MOODLE_CONTENT_SELECTORS) {
+            if (await moodleFrame.locator(selector).count()) {
+              return true;
+            }
+          }
+        } catch {
+          /* nested moodle frame not ready yet */
+        }
+
+        return false;
+      },
+      { timeout },
+    )
+    .toBeTruthy();
 }
 
 /**
@@ -204,22 +291,79 @@ const MOODLE_CONTENT_SELECTORS = [
 export async function waitForPlaygroundReady(page) {
   // Stage 1: Shell is ready (worker sent "ready" message)
   await waitForShellReady(page);
-
-  // Stage 2: Remote boot overlay is hidden (bootstrap complete)
-  const remoteHost = getRemoteHost(page);
-  await expect(remoteHost.locator('body[data-app="remote"]')).toBeVisible({
-    timeout: readyTimeoutMs,
-  });
-  await expect(remoteHost.locator(".remote-boot__card")).toHaveClass(
-    /is-hidden/u,
-    { timeout: readyTimeoutMs },
-  );
-
-  // Stage 3: Moodle content rendered inside the nested iframe.
+  // Stage 2: Moodle content rendered inside the nested iframe.
   await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
 }
 
+export async function waitForRuntimeFrameReady(page) {
+  await waitForRuntimeSelectionReady(page);
+  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
+}
+
+export async function waitForScopedHttpReady(
+  page,
+  probePath,
+  timeout = readyTimeoutMs,
+) {
+  await waitForRuntimeSelectionReady(page, timeout);
+
+  await expect
+    .poll(
+      async () => {
+        try {
+          const canFetchJson = async (target, path) => {
+            try {
+              const response = await target.evaluate(async (fetchPath) => {
+                const response = await fetch(fetchPath, { cache: "no-store" });
+                const contentType = response.headers.get("content-type") || "";
+                if (!response.ok) {
+                  return { ok: false, contentType, body: null };
+                }
+
+                return {
+                  ok: true,
+                  contentType,
+                  body: await response.text(),
+                };
+              }, path);
+
+              if (!response.ok) {
+                return false;
+              }
+
+              const contentType = response.contentType || "";
+              if (!/application\/json|text\/json/iu.test(contentType)) {
+                return false;
+              }
+
+              JSON.parse(response.body || "");
+              return true;
+            } catch {
+              return false;
+            }
+          };
+
+          if (await canFetchJson(page, probePath)) {
+            return true;
+          }
+
+          const moodleFrame = findMoodleFrame(page);
+          if (!moodleFrame) {
+            return false;
+          }
+
+          return await canFetchJson(moodleFrame, probePath);
+        } catch {
+          return false;
+        }
+      },
+      { timeout },
+    )
+    .toBeTruthy();
+}
+
 export async function navigateWithinPlayground(page, path) {
+  await waitForPlaygroundReady(page);
   const addressInput = page.locator("#address-input");
   await expect(addressInput).toBeEnabled({ timeout: readyTimeoutMs });
   await addressInput.fill(path);
@@ -227,6 +371,9 @@ export async function navigateWithinPlayground(page, path) {
 
   // Wait for the Moodle frame to navigate to the expected path
   await waitForMoodlePath(page, path);
+
+  // Wait for the remote overlay to disappear again after navigation.
+  await waitForRemoteOverlayHidden(page, 30_000);
 
   // Wait for Moodle content to render after navigation
   await waitForMoodleContent(
@@ -257,21 +404,7 @@ export async function waitForMoodlePath(page, expectedPath) {
         if (frameMatched) {
           return true;
         }
-
-        const remoteFrameSrc = await getRemoteHost(page)
-          .locator("#remote-frame")
-          .getAttribute("src");
-        if (!remoteFrameSrc) {
-          return false;
-        }
-
-        try {
-          return new URL(remoteFrameSrc, page.url()).pathname.endsWith(
-            expectedPathname,
-          );
-        } catch {
-          return false;
-        }
+        return false;
       },
       { timeout: readyTimeoutMs },
     )

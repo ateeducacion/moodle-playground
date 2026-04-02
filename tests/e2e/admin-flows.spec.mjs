@@ -9,7 +9,7 @@ import {
   openPlayground,
   tryFillFirstVisible,
   uniqueSuffix,
-  waitForShellReady,
+  waitForPlaygroundReady,
 } from "./helpers.mjs";
 
 // This test interacts with Moodle forms inside a 2-level iframe served by a
@@ -37,7 +37,7 @@ test("creates a course and a user, then renders an admin system information page
 
   try {
     await openPlayground(page);
-    await waitForShellReady(page);
+    await waitForPlaygroundReady(page);
 
     const moodle = getMoodleFrame(page);
 

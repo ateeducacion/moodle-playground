@@ -22,6 +22,9 @@ const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico
 // The revision acts as a natural cache key — when content changes, the URL changes.
 // Excludes pluginfile.php and draftfile.php (user content, not cacheable).
 const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|theme\/image\.php|theme\/font\.php)\//u;
+const INTERNAL_PROXY_PATH = "/__playground_proxy__";
+let playgroundConfigPromise;
+let addonProxyUrlOverride = null;
 
 function isScopedStaticAsset(requestPath) {
   return SCOPED_STATIC_RE.test(requestPath.split("?")[0]);
@@ -29,6 +32,30 @@ function isScopedStaticAsset(requestPath) {
 
 function isCacheablePhpAsset(requestPath) {
   return CACHEABLE_PHP_ASSET_RE.test(requestPath);
+}
+
+function isInternalProxyPath(pathname) {
+  return pathname.split("?")[0] === INTERNAL_PROXY_PATH;
+}
+
+function getPlaygroundConfigUrl() {
+  return new URL("playground.config.json", self.registration.scope);
+}
+
+async function loadServiceWorkerConfig() {
+  if (!playgroundConfigPromise) {
+    playgroundConfigPromise = fetch(getPlaygroundConfigUrl(), {
+      cache: "no-store",
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Unable to load playground config: ${response.status}`);
+      }
+
+      return response.json();
+    });
+  }
+
+  return playgroundConfigPromise;
 }
 
 const STATIC_PREFIXES = [
@@ -505,7 +532,46 @@ async function forwardToPhpWorker({ request, scopeId }) {
   });
 }
 
+async function handleInternalProxyRequest(request, sourceUrl) {
+  const config = await loadServiceWorkerConfig();
+  const proxyBaseUrl = addonProxyUrlOverride || config.addonProxyUrl || "";
+  if (!proxyBaseUrl) {
+    return buildErrorResponse("No addon proxy configured for the playground runtime.", 502);
+  }
+
+  const upstreamUrl = new URL(proxyBaseUrl);
+  upstreamUrl.search = sourceUrl.search;
+
+  const init = {
+    method: request.method,
+    headers: new Headers(request.headers),
+    redirect: "follow",
+  };
+
+  init.headers.delete("host");
+
+  if (!["GET", "HEAD"].includes(request.method)) {
+    init.body = await request.clone().arrayBuffer();
+  }
+
+  const upstreamResponse = await fetch(upstreamUrl.toString(), init);
+  const headers = new Headers(upstreamResponse.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("content-length");
+
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    statusText: upstreamResponse.statusText,
+    headers,
+  });
+}
+
 self.addEventListener("message", (event) => {
+  if (event.data?.kind === "configure-service-worker") {
+    addonProxyUrlOverride = event.data.addonProxyUrl || null;
+    return;
+  }
+
   if (event.data?.kind === "clear-scoped-static-cache") {
     caches.delete(SCOPED_STATIC_CACHE).catch(() => {});
   }
@@ -599,6 +665,10 @@ self.addEventListener("fetch", (event) => {
 
       const forwardedUrl = new URL(requestPath, `${url.origin}/`);
       const pathOnly = requestPath.split("?")[0];
+
+      if (isInternalProxyPath(pathOnly)) {
+        return handleInternalProxyRequest(event.request, forwardedUrl);
+      }
 
       // Serve cached scoped static assets without hitting the PHP worker queue.
       // This avoids serializing CSS/JS/image requests through the BroadcastChannel

@@ -235,6 +235,34 @@ Bootstrap reports progress through phases:
 2. **Monitor JS heap**: MEMFS file contents + WASM memory should stay under ~2 GB
 3. **Restart as recovery**: When memory is exhausted, the only option is a fresh runtime
 
+## Fragile Areas (from AGENTS.md)
+
+### sw.js
+- Query strings must survive scoped redirects
+- HTML rewriting must keep Moodle links/forms inside the scoped runtime
+
+### crash-recovery.js
+- `collectFiles()` uses `rawPhp.isDir()` and `rawPhp.readFileAsBuffer()` to snapshot
+  plugin directories and filedir — these are `@php-wasm/universal` APIs on the raw
+  PHP instance (`php._php`), not the compat wrapper
+- The snapshot `restore()` runs **after** full bootstrap completes — the fresh runtime
+  has a clean install DB which is then overwritten by the crash snapshot
+- `reRegisterPluginsAfterRestore()` must refresh the `alternative_component_cache` for
+  each restored plugin before `moodle_needs_upgrading()` will detect them
+- The filedir restore preserves user-uploaded content (SCORM packages, activity files)
+  that Moodle references via `mdl_files` rows in the restored DB
+
+### Service Worker bundling (Firefox)
+- Firefox does not support ES module Service Workers (Mozilla Bug 1360870)
+- SW is bundled into `sw.bundle.js` (IIFE) at project root, registered as `type: "classic"`
+- **The SW bundle MUST live at the project root, not in `dist/`** — a SW's max scope is
+  its directory path; Firefox throws `SecurityError` if violated
+- Source: `sw.js` → Bundle: `sw.bundle.js` → Built by: `npm run build:worker`
+
+### Firefox WASM network limitations
+- Firefox and Safari cannot make outbound HTTP calls from Emscripten WASM (errno 23 / EHOSTUNREACH)
+- The crash recovery system detects this via `isEmscriptenNetworkError()` and returns 502
+
 ## Checklist for runtime-touching changes
 
 - [ ] Could this increase peak memory usage during bootstrap?

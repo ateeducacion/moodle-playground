@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getStepHandler } from "../../src/blueprint/steps/index.js";
+import { __testables } from "../../src/blueprint/steps/moodle-plugins.js";
+
+const SAMPLE_PLUGIN_ZIP_BASE64 =
+  "UEsDBBQAAAAIAHcBgVyusmujBwAAAAUAAAAhAAAAbW9vZGxlLW1vZF9ib2FyZC1tYWluL3ZlcnNpb24ucGhws7EvyCgAAFBLAwQUAAAACAB3AYFczmE/Ew8AAAANAAAAKQAAAG1vb2RsZS1tb2RfYm9hcmQtbWFpbi9jbGFzc2VzL2V4YW1wbGUucGhws7EvyChQSE3OyFcwtAYAUEsBAhQDFAAAAAgAdwGBXK6ya6MHAAAABQAAACEAAAAAAAAAAAAAAIABAAAAAG1vb2RsZS1tb2RfYm9hcmQtbWFpbi92ZXJzaW9uLnBocFBLAQIUAxQAAAAIAHcBgVzOYT8TDwAAAA0AAAApAAAAAAAAAAAAAACAAUYAAABtb29kbGUtbW9kX2JvYXJkLW1haW4vY2xhc3Nlcy9leGFtcGxlLnBocFBLBQYAAAAAAgACAKYAAACcAAAAAAA=";
+const SAMPLE_THEME_ZIP_BASE64 =
+  "UEsDBBQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAdGhlbWVfbW9vdmUtbWFzdGVyL3ZlcnNpb24ucGhws7EvyCgAAFBLAQIUAxQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAAAAAAAAAAACAAQAAAAB0aGVtZV9tb292ZS1tYXN0ZXIvdmVyc2lvbi5waHBQSwUGAAAAAAEAAQBMAAAAQwAAAAAA";
+
+function decodeBase64Bytes(base64) {
+  return Uint8Array.from(Buffer.from(base64, "base64"));
+}
 
 describe("installMoodlePlugin step handler", () => {
   const handler = getStepHandler("installMoodlePlugin");
@@ -193,5 +203,140 @@ describe("sample blueprint URLs are valid", () => {
       assert.ok(parsed.pathname.includes("/archive/"), `${url}`);
       assert.ok(parsed.pathname.endsWith(".zip"), `${url}`);
     }
+  });
+});
+
+describe("ZIP download strategy", () => {
+  const pluginHandler = getStepHandler("installMoodlePlugin");
+  const themeHandler = getStepHandler("installTheme");
+
+  function createPhpMock() {
+    const writes = [];
+    const mkdirs = [];
+    const rawPhp = {
+      mkdirTree(path) {
+        mkdirs.push(path);
+      },
+      writeFile(path, data) {
+        writes.push([path, data]);
+      },
+    };
+    return {
+      rawPhp,
+      writes,
+      mkdirs,
+      php: {
+        _php: rawPhp,
+        async run() {
+          return { text: '{"ok":true}', errors: "" };
+        },
+      },
+    };
+  }
+
+  it("proxifies GitHub archive ZIPs before downloading", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const zipBytes = decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64);
+    const { php, writes } = createPhpMock();
+
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      return new Response(zipBytes, {
+        status: 200,
+        headers: { "content-type": "application/zip" },
+      });
+    };
+
+    try {
+      await pluginHandler(
+        {
+          url: "https://github.com/brickfield/moodle-mod_board/archive/refs/heads/feature/embedded-static-editor.zip",
+        },
+        {
+          php,
+          config: {
+            addonProxyUrl: "https://github-proxy.exelearning.dev/",
+          },
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0],
+      "https://github-proxy.exelearning.dev/?url=https%3A%2F%2Fgithub.com%2Fbrickfield%2Fmoodle-mod_board%2Farchive%2Frefs%2Fheads%2Ffeature%2Fembedded-static-editor.zip",
+    );
+    assert.deepEqual(writes.map(([path]) => path).sort(), [
+      "/www/moodle/mod/board/classes/example.php",
+      "/www/moodle/mod/board/version.php",
+    ]);
+  });
+
+  it("downloads non-GitHub ZIPs directly", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const zipBytes = decodeBase64Bytes(SAMPLE_THEME_ZIP_BASE64);
+    const { php } = createPhpMock();
+
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      return new Response(zipBytes, {
+        status: 200,
+        headers: { "content-type": "application/zip" },
+      });
+    };
+
+    try {
+      await themeHandler(
+        {
+          pluginName: "moove",
+          url: "https://downloads.example.com/theme-moove.zip",
+        },
+        {
+          php,
+          config: {
+            addonProxyUrl: "https://github-proxy.exelearning.dev/",
+          },
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.deepEqual(calls, ["https://downloads.example.com/theme-moove.zip"]);
+  });
+});
+
+describe("proxy helpers", () => {
+  it("detects GitHub ZIP URLs that should be proxied", () => {
+    assert.equal(
+      __testables.shouldProxyZipUrl(
+        "https://github.com/org/repo/archive/refs/heads/main.zip",
+      ),
+      true,
+    );
+    assert.equal(
+      __testables.shouldProxyZipUrl(
+        "https://codeload.github.com/org/repo/zip/refs/heads/main",
+      ),
+      true,
+    );
+    assert.equal(
+      __testables.shouldProxyZipUrl("https://example.com/plugin.zip"),
+      false,
+    );
+  });
+
+  it("builds a proxied download URL from config", () => {
+    assert.equal(
+      __testables.resolvePluginZipDownloadUrl(
+        "https://github.com/org/repo/archive/refs/heads/main.zip",
+        { config: { addonProxyUrl: "https://github-proxy.exelearning.dev/" } },
+      ),
+      "https://github-proxy.exelearning.dev/?url=https%3A%2F%2Fgithub.com%2Forg%2Frepo%2Farchive%2Frefs%2Fheads%2Fmain.zip",
+    );
   });
 });

@@ -237,6 +237,44 @@ patch in `patches/shared/lib/classes/encryption.php` handles encryption needs.
 6. **MEMFS inspection** — use `php.listFiles()` and `php.readFileAsText()` to inspect
    the virtual filesystem during debugging
 
+## Fragile Areas (from AGENTS.md)
+
+These areas have repeatedly caused regressions and require extra care:
+
+### php.ini configuration
+- WP Playground hardcodes `/internal/shared/php.ini` via `PHP_INI_PATH` in `@php-wasm/universal`
+- Writing a separate php.ini file (e.g., `/www/php.ini`) has NO effect — PHP never reads it
+- All php.ini settings must be applied via `setPhpIniEntries()` from `@php-wasm/universal`
+- Settings are applied in `src/runtime/php-loader.js` during runtime creation
+- Blueprint timezone overrides are applied in `src/runtime/bootstrap.js` after provisioning
+
+### Outbound PHP networking
+- `tcpOverFetch` must stay enabled in `src/runtime/php-loader.js`; disabling it removes
+  the generated CA and breaks all outbound HTTP(S) from PHP.
+- `openssl.cafile` and `curl.cainfo` must point to `/internal/shared/playground-ca.pem`
+  whenever `tcpOverFetch` is active.
+- `playground.config.json` should use `phpCorsProxyUrl` for PHP networking fallback and
+  `addonProxyUrl` for browser-side ZIP downloads; the old generic `proxyUrl` alias should
+  not be reintroduced.
+- `MOODLE_PLAYGROUND_PROXY_URL` must stay scope-aware (`/playground/<scope>/<runtime>/...`);
+  plugins that choose the same-origin proxy path must not derive proxy URLs from
+  `$CFG->wwwroot` alone.
+- The Service Worker endpoint `__playground_proxy__` must preserve the incoming query
+  string and forward it to the configured external proxy unchanged.
+- The supported and tested paths for GitHub feeds/assets from PHP are now both:
+  direct HTTPS through `phpCorsProxyUrl` and the same-origin proxy endpoint.
+
+### php-compat.js CGI variables
+- CGI environment variables such as `HTTP_USER_AGENT`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` are critical
+- The Request-to-PHPRequest conversion must preserve headers, method, and body
+- The PHPResponse-to-Response conversion must preserve status codes and headers
+- **URL base path in `$_SERVER`**: `SCRIPT_NAME`, `PHP_SELF`, and `REQUEST_URI` must include
+  the URL base path (e.g., `/moodle-playground` on GitHub Pages). Moodle's
+  `setup_get_remote_url()` in `lib/setuplib.php` constructs `$FULLME`/`$FULLSCRIPT` by
+  extracting **only the scheme+host** from `$CFG->wwwroot` and combining it with
+  `$_SERVER['SCRIPT_NAME']`. If SCRIPT_NAME lacks the base path, all redirect URLs lose
+  the subpath, causing infinite redirect loops on subpath deployments.
+
 ## Checklist for php-wasm-touching changes
 
 - [ ] Does the change work with the stateless `php.run()` model? (no PHP state persists)

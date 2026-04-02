@@ -28,6 +28,7 @@ let selection = resolveRuntimeSelection({
 let runtimeId = selection.runtimeId;
 let phpVersion = selection.phpVersion;
 let moodleBranch = selection.moodleBranch;
+let phpCorsProxyUrlOverride = workerUrl.searchParams.get("phpCorsProxyUrl") || null;
 let debug = workerUrl.searchParams.get("debug") || null;
 let profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
@@ -479,7 +480,10 @@ async function getRuntimeState() {
     if (!runtime) {
       throw new Error("Unable to resolve a runtime configuration.");
     }
-    activeRuntimeConfig = runtime;
+    activeRuntimeConfig = {
+      ...runtime,
+      corsProxyUrl: phpCorsProxyUrlOverride || config.phpCorsProxyUrl || null,
+    };
     const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
     const webRoot = branchMeta?.webRoot || "/www/moodle";
     activeWebRoot = webRoot;
@@ -487,7 +491,11 @@ async function getRuntimeState() {
       "resolved",
       `runtimeId=${runtimeId} php=${phpVersion} moodleBranch=${moodleBranch} runtimeConfig=${runtime.id}`,
     );
-    const php = createPhpRuntime(runtime, { appBaseUrl: appRootUrl, phpVersion, webRoot });
+    const php = createPhpRuntime(activeRuntimeConfig, {
+      appBaseUrl: appRootUrl,
+      phpVersion,
+      webRoot,
+    });
 
     postShell({
       kind: "progress",
@@ -754,6 +762,9 @@ function installMessageListener() {
       runtimeId = selection.runtimeId;
       phpVersion = selection.phpVersion;
       moodleBranch = selection.moodleBranch;
+      if (params.phpCorsProxyUrl !== undefined) {
+        phpCorsProxyUrlOverride = params.phpCorsProxyUrl || null;
+      }
       if (params.debug !== undefined) debug = params.debug;
       if (params.profile !== undefined) profile = params.profile;
       // Reset any cached runtime state so it boots with the new params

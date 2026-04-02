@@ -123,6 +123,18 @@ describe("resolveMoodleBranch", () => {
   });
 });
 
+describe("parseQueryParams", () => {
+  it("reads addonProxyUrl and phpCorsProxyUrl when present", () => {
+    const parsed = parseQueryParams(
+      "https://example.com/?addonProxyUrl=http%3A%2F%2F127.0.0.1%3A9999%2F&phpCorsProxyUrl=http%3A%2F%2F127.0.0.1%3A9999%2F%3Furl%3D&debug=true",
+    );
+
+    assert.strictEqual(parsed.addonProxyUrl, "http://127.0.0.1:9999/");
+    assert.strictEqual(parsed.phpCorsProxyUrl, "http://127.0.0.1:9999/?url=");
+    assert.strictEqual(parsed.debug, "true");
+  });
+});
+
 describe("resolveVersions", () => {
   it("returns defaults when called with no args", () => {
     const result = resolveVersions();

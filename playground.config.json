@@ -3,6 +3,8 @@
   "defaultBlueprintUrl": "./assets/blueprints/default.blueprint.json",
   "siteTitle": "Moodle Playground",
   "landingPath": "/login/index.php",
+  "addonProxyUrl": "https://github-proxy.exelearning.dev/",
+  "phpCorsProxyUrl": "https://github-proxy.exelearning.dev/?url=",
   "locale": "en",
   "timezone": "UTC",
   "autologin": false,
