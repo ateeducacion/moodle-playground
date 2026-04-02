@@ -16,7 +16,7 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@php-wasm/universal": "^3.1.12",
+    "@php-wasm/universal": "^3.1.15",
     "@php-wasm/web": "^3.1.14",
     "fflate": "^0.8.2"
   },
