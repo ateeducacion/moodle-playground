@@ -229,4 +229,56 @@ describe("PHP helpers: addModule", () => {
     assert.ok(script.includes("'assign'"));
     assert.ok(script.includes("insert_record"));
   });
+
+  it("generates generic module without files by default", () => {
+    const script = phpAddModule({
+      module: "exeweb",
+      course: "C1",
+      section: 1,
+      name: "Test",
+    });
+    assert.ok(script.includes("'exeweb'"));
+    assert.ok(script.includes("insert_record"));
+    assert.ok(!script.includes("get_file_storage"));
+  });
+
+  it("generates file attachment code when fileSpecs provided", () => {
+    const script = phpAddModule(
+      {
+        module: "exeweb",
+        course: "C1",
+        section: 1,
+        name: "Test",
+      },
+      [
+        {
+          filearea: "package",
+          itemid: 1,
+          filepath: "/",
+          filename: "test.elpx",
+          tmppath: "/tmp/blueprint-modfile-0-123.bin",
+        },
+      ],
+    );
+    assert.ok(script.includes("get_file_storage"));
+    assert.ok(script.includes("create_file_from_pathname"));
+    assert.ok(script.includes("'package'"));
+    assert.ok(script.includes("test.elpx"));
+    assert.ok(script.includes("/tmp/blueprint-modfile-0-123.bin"));
+  });
+
+  it("attaches multiple files when multiple fileSpecs given", () => {
+    const script = phpAddModule(
+      { module: "resource", course: "C1", section: 0, name: "R" },
+      [
+        { filearea: "content", filename: "a.pdf", tmppath: "/tmp/a.bin" },
+        { filearea: "content", filename: "b.pdf", tmppath: "/tmp/b.bin" },
+      ],
+    );
+    assert.ok(script.includes("a.pdf"));
+    assert.ok(script.includes("b.pdf"));
+    // Should only have one require
+    const requireCount = (script.match(/require\(/g) || []).length;
+    assert.strictEqual(requireCount, 1);
+  });
 });
