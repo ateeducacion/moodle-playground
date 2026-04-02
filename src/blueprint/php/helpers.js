@@ -38,7 +38,42 @@ set_exception_handler(function($e) {
 // We avoid add_moduleinfo() because it uses delegated transactions that
 // crash in SQLite PDO WASM (nested savepoints + events/calendar/completion
 // writes cause "Error writing to database" + exit(1) via default_exception_handler).
-const ADD_MODULE_EXEC = `
+//
+// Returns the PHP code as a string. When fileSpecs is non-empty, appends
+// Moodle file-storage calls that attach files to the newly created module.
+function addModuleExec(fileSpecs = []) {
+  let filesBlock = "";
+  if (fileSpecs.length > 0) {
+    const entries = fileSpecs
+      .map(
+        (f) =>
+          `['filearea'=>'${escapePhp(f.filearea || "content")}','itemid'=>${parseInt(f.itemid || 0, 10)},'filepath'=>'${escapePhp(f.filepath || "/")}','filename'=>'${escapePhp(f.filename)}','tmppath'=>'${escapePhp(f.tmppath)}']`,
+      )
+      .join(",");
+    filesBlock = `
+    // Attach uploaded files to the module via Moodle file storage.
+    $ctx = context_module::instance($cmid);
+    $fs = get_file_storage();
+    foreach ([${entries}] as $fSpec) {
+        if (!file_exists($fSpec['tmppath'])) continue;
+        $fileinfo = [
+            'contextid' => $ctx->id,
+            'component' => 'mod_' . $moduleInfo->modulename,
+            'filearea'  => $fSpec['filearea'],
+            'itemid'    => $fSpec['itemid'],
+            'filepath'  => $fSpec['filepath'],
+            'filename'  => $fSpec['filename'],
+            'userid'    => 2,
+            'source'    => $fSpec['filename'],
+            'author'    => 'Admin User',
+            'license'   => 'unknown',
+        ];
+        $fs->create_file_from_pathname($fileinfo, $fSpec['tmppath']);
+        @unlink($fSpec['tmppath']);
+    }`;
+  }
+
+  return `
 try {
     $modid = $DB->get_field('modules', 'id', ['name' => $moduleInfo->modulename], MUST_EXIST);
 
@@ -73,11 +108,16 @@ try {
     $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
     context_module::instance($cmid);
     course_add_cm_to_section($course, $cmid, $moduleInfo->section);
+${filesBlock}
 
     echo json_encode(['ok' => true, 'cmid' => $cmid]);
 } catch (\\Throwable $e) {
     echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
 }`;
+}
+
+// Backward-compatible constant for callers that don't need files.
+const ADD_MODULE_EXEC = addModuleExec();
 
 export function phpSetConfig(name, value, plugin = null) {
   const pluginArg = plugin ? `'${escapePhp(plugin)}'` : "null";
@@ -262,26 +302,27 @@ echo json_encode(['ok' => true, 'enrolled' => $enrolled]);
 `;
 }
 
-export function phpAddModule(mod) {
+export function phpAddModule(mod, fileSpecs = []) {
   const course = escapePhp(mod.course);
   const section = parseInt(mod.section || 0, 10);
   const name = escapePhp(mod.name || mod.module);
+  const intro = escapePhp(mod.intro || "");
+
+  // When files are present, always use the generic handler (it supports
+  // custom fields AND file attachment in one pass).
+  if (fileSpecs.length > 0) {
+    return phpAddGenericModule(mod.module, course, section, name, intro, fileSpecs);
+  }
 
   switch (mod.module) {
     case "label":
-      return phpAddLabel(course, section, name, escapePhp(mod.intro || ""));
+      return phpAddLabel(course, section, name, intro);
     case "folder":
-      return phpAddFolder(course, section, name, escapePhp(mod.intro || ""));
+      return phpAddFolder(course, section, name, intro);
     case "assign":
-      return phpAddAssign(course, section, name, escapePhp(mod.intro || ""));
+      return phpAddAssign(course, section, name, intro);
     default:
-      return phpAddGenericModule(
-        mod.module,
-        course,
-        section,
-        name,
-        escapePhp(mod.intro || ""),
-      );
+      return phpAddGenericModule(mod.module, course, section, name, intro);
   }
 }
 
@@ -356,7 +397,7 @@ ${ADD_MODULE_EXEC}
 `;
 }
 
-function phpAddGenericModule(moduleName, course, section, name, intro) {
+function phpAddGenericModule(moduleName, course, section, name, intro, fileSpecs = []) {
   return `${CLI_HEADER}
 ${ADD_MODULE_SETUP}
 $course = $DB->get_record('course', ['shortname' => '${course}'], '*', MUST_EXIST);
@@ -371,7 +412,7 @@ $moduleInfo->visible = 1;
 $moduleInfo->cmidnumber = '';
 $moduleInfo->groupmode = 0;
 $moduleInfo->groupingid = 0;
-${ADD_MODULE_EXEC}
+${addModuleExec(fileSpecs)}
 `;
 }
 

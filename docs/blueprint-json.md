@@ -324,10 +324,50 @@ modules, install the plugin first with `installMoodlePlugin`.
 | `section` | no | Section number (default: 0) |
 | `name` | no | Activity name (defaults to module type) |
 | `intro` | no | Description HTML |
+| `files` | no | Array of file descriptors to attach to the module (see below) |
 
 Works with any installed module type, including plugins installed via
 `installMoodlePlugin` in earlier blueprint steps. The module is created using
 direct database inserts (not `add_moduleinfo()`) for SQLite WASM compatibility.
+
+Any additional fields not listed above are copied directly to the module's
+database record, allowing you to set module-specific columns (e.g.,
+`exeorigin`, `exescormtype`, `grade`).
+
+#### Attaching files to modules
+
+Use the `files` array to upload files into a module's Moodle file storage area.
+Each entry supports the same resource descriptors used by `writeFile` (`url`,
+`base64`, `@reference`, etc.):
+
+```json
+{
+  "step": "addModule",
+  "module": "exeweb",
+  "course": "EXEWEB01",
+  "section": 1,
+  "name": "My Content",
+  "exeorigin": "local",
+  "files": [
+    {
+      "filearea": "package",
+      "filename": "content.elpx",
+      "data": { "url": "https://example.com/content.elpx" }
+    }
+  ]
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `filename` | yes | — | Name for the stored file |
+| `data` | yes | — | Resource descriptor: `{"url": "..."}`, `{"base64": "..."}`, `"@resourceName"`, etc. |
+| `filearea` | no | `content` | Moodle file area name (e.g., `package`, `content`, `intro`) |
+| `itemid` | no | `0` | Item ID within the file area |
+| `filepath` | no | `/` | Directory path within the file area |
+
+Files are stored via Moodle's `get_file_storage()->create_file_from_pathname()`
+using the module's context, with `mod_{module}` as the component name.
 
 ### installMoodlePlugin
 

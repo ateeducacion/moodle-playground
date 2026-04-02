@@ -4,11 +4,41 @@ export function registerMoodleModuleSteps(register) {
   register("addModule", handleAddModule);
 }
 
-async function handleAddModule(step, { php, publish }) {
+async function handleAddModule(step, { php, publish, resources }) {
   if (!step.module) throw new Error("addModule: 'module' type is required.");
   if (!step.course)
     throw new Error("addModule: 'course' shortname is required.");
-  const code = phpAddModule(step);
+
+  // Resolve file resources to temporary VFS paths so the generated PHP
+  // can attach them to the module via Moodle's file storage API.
+  const fileSpecs = [];
+  if (Array.isArray(step.files) && step.files.length > 0) {
+    for (let i = 0; i < step.files.length; i++) {
+      const file = step.files[i];
+      if (!file.filename) {
+        throw new Error(
+          `addModule files[${i}]: 'filename' is required.`,
+        );
+      }
+      if (!file.data) {
+        throw new Error(
+          `addModule files[${i}]: 'data' is required (URL, @reference, or resource descriptor).`,
+        );
+      }
+      const data = await resources.resolve(file.data);
+      const tmpPath = `/tmp/blueprint-modfile-${i}-${Date.now()}.bin`;
+      await php.writeFile(tmpPath, data);
+      fileSpecs.push({
+        filearea: file.filearea || "content",
+        itemid: file.itemid ?? 0,
+        filepath: file.filepath || "/",
+        filename: file.filename,
+        tmppath: tmpPath,
+      });
+    }
+  }
+
+  const code = phpAddModule(step, fileSpecs);
   let result;
   try {
     result = await php.run(code);
