@@ -4,6 +4,15 @@ export function buildScopeKey(scopeId, suffix) {
   return `${SCOPE_PREFIX}${scopeId}:${suffix}`;
 }
 
+function createScopeId() {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  if (randomId) {
+    return `tab-${randomId}`;
+  }
+
+  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function getOrCreateScopeId() {
   const url = new URL(window.location.href);
   const existing =
@@ -15,7 +24,7 @@ export function getOrCreateScopeId() {
     return existing;
   }
 
-  const next = "main";
+  const next = createScopeId();
   window.sessionStorage.setItem(`${SCOPE_PREFIX}active`, next);
   return next;
 }
