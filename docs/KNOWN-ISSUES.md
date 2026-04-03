@@ -13,7 +13,7 @@ For historical context, see:
 
 - [`sqlite-wasm-migration-notes.md`](./sqlite-wasm-migration-notes.md)
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)
-- [Resolved issues log](../.agents/references/resolved-issues.md)
+- [Resolved issues log](https://github.com/ateeducacion/moodle-playground/blob/main/.agents/references/resolved-issues.md)
 
 ## 1. sodium extension is NOT available in the WASM binary
 
