@@ -18,7 +18,7 @@ index.html
 
 The PHP runtime is provided by WordPress Playground's `@php-wasm/web` and `@php-wasm/universal` packages. The compatibility wrapper in `src/runtime/php-compat.js` maps the WP Playground API to the interface expected by the rest of the codebase.
 
-The PHP 8.3 WASM binary includes all required extensions built-in: `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`, `mbstring`, `openssl`, `intl`, `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
+The PHP WASM binary (available for versions 8.1 through 8.5, default 8.3) includes all required extensions built-in: `sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`, `mbstring`, `openssl`, `intl`, `iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
 
 !!! note
     `sodium` is **not** available in the WASM binary. The OpenSSL fallback patch handles all encryption needs.

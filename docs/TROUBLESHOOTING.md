@@ -330,7 +330,7 @@ If failure happens:
 
 ## Extension reality in this repo
 
-The `@php-wasm/web` PHP 8.3 runtime includes all required extensions built into the WASM binary:
+The `@php-wasm/web` PHP runtime (available for versions 8.1–8.5, default 8.3) includes all required extensions built into the WASM binary:
 
 - `dom`, `iconv`, `intl`, `libxml`, `simplexml`, `xml`, `zip`, `mbstring`, `openssl`,
   `sqlite3`, `pdo_sqlite`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`

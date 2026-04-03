@@ -2,6 +2,9 @@
 
 This document records the repo-local changes made to run Moodle in WebAssembly PHP with an in-memory SQLite database (MEMFS-backed file) instead of the previous PGlite/PDO-PGlite path.
 
+!!! info "Upstream SQLite support"
+    Moodle is tracking native SQLite support in [MDL-88218](https://moodle.atlassian.net/browse/MDL-88218). This project uses an experimental PDO driver patch that restores and maintains SQLite compatibility independently.
+
 > **Runtime update (March 2025)**: The PHP runtime was migrated from `seanmorris/php-wasm` (v0.0.9-alpha-32) to WordPress Playground's `@php-wasm/web` + `@php-wasm/universal` (v3.1.11). This replaced 14 vendored packages and a manual extension-loading pipeline with two npm packages. The compatibility wrapper in `src/runtime/php-compat.js` maps the WP Playground API to the interface expected by the existing codebase. All PHP extensions (including previously-missing `curl`, `gd`, `fileinfo`, `sodium`) are now built into the WASM binary.
 
 > **In-memory refactor (March 2026)**: The runtime is now explicitly ephemeral. The SQLite database file lives in Emscripten MEMFS (JavaScript heap) with no durable storage. SQLite pragmas are tuned for in-memory operation (`journal_mode=MEMORY`, `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`). Moodle caching is fully enabled (file-based caches write to MEMFS). Debug mode defaults to disabled for performance, but the initial level can be seeded at boot and later changed from Moodle administration. All state is lost when the browser tab closes.

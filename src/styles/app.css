@@ -256,6 +256,7 @@ button.danger:hover {
   width: auto;
   padding: 0 12px;
   gap: var(--space-xs);
+  text-decoration: none;
 }
 
 .browser-toolbar .icon-button__label {

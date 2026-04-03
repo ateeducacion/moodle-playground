@@ -45,8 +45,8 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 ## Features
 
 - Full Moodle 4.4 / 5.0 running in WebAssembly
-- PHP 8.3 with all required extensions built-in
-- SQLite database (in-memory, no persistence needed)
+- PHP 8.1 to 8.5 support (version depends on Moodle branch; default: 8.3)
+- SQLite database via [experimental PDO driver patch](https://moodle.atlassian.net/browse/MDL-88218) (in-memory, no persistence needed)
 - Pre-built install snapshot for fast boot (~3s vs ~8s full install)
 - Step-based blueprint system for provisioning users, courses, enrolments, modules, and more
 - Works on GitHub Pages with subpath support
@@ -58,6 +58,14 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 - [Architecture](architecture.md)
 - [Blueprint reference](blueprint-json.md)
 - [Plugin install notes for this branch](plugin-install-branch-notes.md)
+
+## CI/CD and GitHub Actions
+
+The project includes a reusable GitHub Action for generating live PR previews of Moodle Playground:
+
+- [**action-moodle-playground-pr-preview**](https://github.com/ateeducacion/action-moodle-playground-pr-preview) — Deploys a temporary Moodle Playground instance for each pull request, allowing reviewers to test changes in the browser before merging.
+
+The main CI/CD pipeline (`.github/workflows/ci.yml`) handles linting, unit tests, E2E tests (Chromium + Firefox), and deployment to GitHub Pages on push to `main`.
 
 ---
 
