@@ -385,12 +385,12 @@ function decodeHtmlAttributeEntities(value) {
   return value
     .replace(/&#x([0-9a-f]+);/giu, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/&#([0-9]+);/gu, (_, dec) => String.fromCodePoint(Number.parseInt(dec, 10)))
-    .replaceAll("&amp;", "&")
     .replaceAll("&quot;", "\"")
     .replaceAll("&#39;", "'")
     .replaceAll("&apos;", "'")
     .replaceAll("&sol;", "/")
-    .replaceAll("&colon;", ":");
+    .replaceAll("&colon;", ":")
+    .replaceAll("&amp;", "&");
 }
 
 function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
