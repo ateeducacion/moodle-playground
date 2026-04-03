@@ -1,7 +1,7 @@
 # Moodle Playground
 
 <p align="center">
-  <img src="ogimage.png" alt="Moodle Playground" width="600">
+  <img src=".github/screenshot.png" alt="Moodle Playground" width="600">
 </p>
 
 [Live demo](https://ateeducacion.github.io/moodle-playground/) · [Documentation](docs/) · [Blueprints](docs/blueprint-json.md)

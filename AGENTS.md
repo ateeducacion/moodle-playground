@@ -363,7 +363,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 1. **When to write an ADR**: Any change that introduces a new pattern, modifies the request
    pipeline, changes the storage model, adds a dependency, or alters build/deployment behavior.
    When in doubt, write one â€” a short ADR is better than no ADR.
-2. **Template**: Always start from `.templates/adr-template.md`. Do not invent a new format.
+2. **Template**: Always start from `.agents/templates/adr-template.md`. Do not invent a new format.
 3. **Location**: `docs/decisions/NNNN-kebab-case-title.md`, numbered sequentially.
 4. **Language**: English.
 5. **Status values**: `Proposed`, `Accepted`, `Rejected`, `Obsolete`, `Superseded by ADR-NNNN`.

@@ -16,3 +16,4 @@ test-results/
 playwright-report/
 playwright-artifacts/
 .omc/
+.claude/projects/

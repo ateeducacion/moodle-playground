@@ -13,37 +13,55 @@ For historical context, see:
 
 - [`sqlite-wasm-migration-notes.md`](./sqlite-wasm-migration-notes.md)
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)
+- [Resolved issues log](../.agents/references/resolved-issues.md)
 
-## ~~1. First render inside the nested iframe is still fragile~~ — resolved
-
-Status:
-
-- **resolved**
-
-This was previously the most visible issue — the inner iframe would reach a valid Moodle URL
-but the document body remained empty (white screen). The watchdog recovery logic in
-`src/remote/main.js` and improvements to the boot sequence have resolved this.
-
-The recovery code (`isFrameDocumentStalled()`, `scheduleFrameRecovery()`) is still present
-as a safety net but is no longer triggered during normal operation.
-
-## 2. PHP extensions — mostly resolved
+## 1. sodium extension is NOT available in the WASM binary
 
 Status:
 
-- mostly resolved (migrated to `@php-wasm/web`)
+- open (upstream limitation)
 
-The `@php-wasm/web` PHP runtime (8.1–8.5) includes most previously-missing extensions
-(`curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`) built into the WASM binary.
+Impact:
 
-**sodium is NOT available** in the WASM binary. The OpenSSL fallback patch in
-`patches/shared/lib/classes/encryption.php` handles all encryption needs. The
-runtime also downgrades the `admin/environment.xml` sodium check from `required`
-to `optional`, so plugin upgrades are no longer blocked by this mismatch.
+- low — fully mitigated by the OpenSSL fallback patch
 
-**OPcache cannot work** in the WASM SAPI. This is a PHP/Emscripten limitation,
-not something that can be fixed in this project. The environment check warning
-for OPcache is expected and harmless.
+The `@php-wasm/web` PHP WASM binary does not include the `sodium` extension.
+The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handles
+all encryption needs. The runtime also downgrades the `admin/environment.xml` sodium
+check from `required` to `optional`, so plugin upgrades are not blocked.
+
+**OPcache** also cannot work in the WASM SAPI (PHP/Emscripten limitation). The
+environment check warning for OPcache is expected and harmless.
+
+## 2. PHP CLI / proc_open is not available in the WASM runtime
+
+Status:
+
+- open (upstream limitation, solution identified)
+
+Impact:
+
+- medium — prevents background job dispatch, CLI-based module operations, and any
+  Moodle functionality that relies on `exec()` or `proc_open()`
+
+Moodle uses PHP CLI execution for scheduled tasks (`admin/cli/cron.php`), plugin
+management operations, and various admin tools. In the WASM runtime, `proc_open()`
+and `exec()` are not functional because there is no native process spawning.
+
+WordPress Playground solved this in `@php-wasm/universal` v3.x with the **spawn
+handler** API (`php.setSpawnHandler()`), which intercepts `proc_open()` calls at
+the WASM level and runs PHP scripts in-process via `php.run()`. The API is available
+in our `@php-wasm/web` dependency but not yet wired up.
+
+The Omeka S Playground tracks the same limitation:
+[ateeducacion/omeka-s-playground#30](https://github.com/ateeducacion/omeka-s-playground/issues/30)
+
+Where to continue:
+
+- Register a spawn handler in `src/runtime/php-loader.js` during runtime creation
+- Intercept `php` commands and run them in the same WASM instance via `php.run()`
+- Add an allowlist for permitted commands (security)
+- Evaluate whether scheduled tasks can run via the spawn handler
 
 ## 3. Runtime still relies on both build-time and boot-time patching
 
@@ -72,53 +90,7 @@ Main files involved:
 - `scripts/patch-moodle-source.sh`
 - `src/runtime/bootstrap.js`
 
-## ~~4. CACHE_DISABLE_ALL must stay true (admin redirect loop)~~ — resolved
-
-Status:
-
-- **resolved**
-
-There were three interacting issues when enabling MUC (`CACHE_DISABLE_ALL = false`):
-
-1. **Missing cache store admin settings** — cache store plugin settings (`cachestore_apcu`,
-   `cachestore_redis`) were not in the database. `any_new_admin_settings()` detected them
-   as "new" and redirected to `upgradesettings.php`.
-2. **`adminsetuppending` flag** — the CLI installer sets `adminsetuppending = 1` in
-   `mdl_config`. With MUC disabled the web admin flow cleared it; with MUC enabled the
-   stale flag caused `is_major_upgrade_required()` to redirect all pages to admin.
-3. **`moodle_needs_upgrading()` version hash mismatch** — the `allversionshash` computed
-   at runtime differs from the snapshot value (component scanning varies in WASM MEMFS).
-   This caused `/my/` to redirect to `/admin/index.php` on every request.
-
-Fix:
-
-- **Snapshot generation** (`scripts/generate-install-snapshot.sh`): runs
-  `admin_apply_default_settings()` at build time, seeds cache store defaults, clears
-  `adminsetuppending`
-- **Config normalizer** (`src/runtime/bootstrap.js`): seeds cache store plugin defaults
-  and clears `adminsetuppending` on every boot
-- **Admin defaults seeder** (`src/runtime/bootstrap.js`): runs
-  `admin_apply_default_settings(NULL, false)` with MUC-enabled config after the normalizer
-- **Runtime patches** (`src/runtime/bootstrap.js`): `moodle_needs_upgrading()` returns
-  `false` (ephemeral runtime, no upgrades possible); `any_new_admin_settings()` returns
-  `false` (defaults are seeded at boot)
-
-`CACHE_DISABLE_ALL` and `CACHE_DISABLE_STORES` are now `false` in `config-template.js`.
-MUC file-based caches live in MEMFS and persist for the worker session lifetime, making
-`cachetemplates` and `langstringcache` effective across requests.
-
-## ~~5. Large readonly bundle still puts pressure on browser memory~~ — resolved
-
-Status:
-
-- **resolved**
-
-The bundle loader in `lib/moodle-loader.js` preallocates a single destination buffer when
-`content-length` is known and fills it incrementally, eliminating the double-buffer allocation
-that previously caused `RangeError: Array buffer allocation failed`. This is no longer an
-issue in practice.
-
-## 6. Asset routing issues may still recur after changes to SW/CGI logic
+## 4. Asset routing issues may still recur after changes to SW/CGI logic
 
 Status:
 
@@ -146,7 +118,7 @@ Notes:
 - current good sessions in Chrome showed these endpoints returning `200`
 - this area should still be treated as sensitive whenever routing code changes
 
-## 7. The prototype does not yet claim full Moodle parity
+## 5. The prototype does not yet claim full Moodle parity
 
 Status:
 
@@ -168,8 +140,6 @@ Examples:
 
 If continuing work from here, the next priority should be:
 
-1. ~~make the first render of the inner Moodle iframe deterministic~~ — **resolved**
-2. ~~keep the login/home route rendering without a manual second load~~ — **resolved**
-3. verify all newly-available extensions work correctly with Moodle
-4. benchmark navigation performance with caching enabled vs disabled
-5. ~~consider pre-building a post-install SQLite snapshot to skip CLI provisioning on boot~~ — **implemented**: `scripts/generate-install-snapshot.sh` creates a snapshot at build time; `bootstrap.js` loads it at runtime, falling back to the full CLI install if the snapshot is unavailable
+1. verify all newly-available extensions work correctly with Moodle
+2. benchmark navigation performance with caching enabled vs disabled
+3. evaluate spawn handler integration for PHP CLI support (see issue #2)
