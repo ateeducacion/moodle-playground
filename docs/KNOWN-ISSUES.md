@@ -33,7 +33,7 @@ Status:
 
 - mostly resolved (migrated to `@php-wasm/web`)
 
-The `@php-wasm/web` PHP 8.3 runtime includes most previously-missing extensions
+The `@php-wasm/web` PHP runtime (8.1–8.5) includes most previously-missing extensions
 (`curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`) built into the WASM binary.
 
 **sodium is NOT available** in the WASM binary. The OpenSSL fallback patch in
