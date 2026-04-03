@@ -31,6 +31,7 @@ Then open <http://localhost:8080>.
 - Node.js 18+
 - npm
 - Python 3 for Moodle patch/build helpers and docs
+- PHP 8.3 with `pdo_sqlite` (for `make up-local`)
 - Git
 
 ## How It Works
@@ -99,44 +100,7 @@ See the [Blueprint reference](docs/blueprint-json.md) for the full format, all s
 
 Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-schema.json).
 
-## Development
-
-| Command | Description |
-|---------|-------------|
-| `make up` | Install deps, build all Moodle bundles with colorized per-branch output, and serve locally |
-| `make prepare` | Install npm deps and build the worker only |
-| `make prepare-dev` | Install npm deps, build the worker, and build the default Moodle bundle |
-| `make prepare-dev-pretty` | Build the worker and default bundle in parallel with colorized local output |
-| `make prepare-all` | Install npm deps, build the worker, and build all Moodle bundles |
-| `make bundle` | Rebuild the default Moodle bundle and manifest (`BRANCH=...` to override) |
-| `make bundle-all` | Rebuild all Moodle bundles; supports parallel jobs via `JOBS=...` |
-| `make bundle-all-pretty` | Rebuild all Moodle bundles with colorized per-branch output |
-| `make serve` | Start a local server on port 8080 |
-| `make up-local` | Start native `php -S` Moodle for the selected branch (`BRANCH=...`, isolated local SQLite per branch) |
-| `make clean` | Remove generated bundle and manifest artifacts |
-| `make reset` | Full clean including vendored runtime assets |
-| `npm run test:blueprint` | Run blueprint unit tests |
-
-### Worker bundling
-
-The PHP worker is bundled with esbuild into `dist/php-worker.bundle.js`:
-
-```bash
-npm run build:worker
-```
-
-## Deployment
-
-Designed for static hosting, including GitHub Pages. The app handles subpath deployments (e.g., `/moodle-playground`) automatically via Service Worker URL rewriting.
-
-## Technical Details
-
-- **PHP runtime**: `@php-wasm/web` PHP 8.3 with built-in extensions (`sqlite3`, `pdo_sqlite`, `dom`, `xml`, `mbstring`, `openssl`, `intl`, `curl`, `gd`, `zip`, and more)
-- **Database**: SQLite via PDO, running from an in-memory file (MEMFS)
-- **Boot**: Pre-built install snapshot eliminates the CLI install phase
-- **Patches**: Minimal patches to Moodle core for WASM compatibility (SQLite driver, XML parsing, encryption fallback)
-
-For architecture details and migration notes, see the [`docs/`](docs/) directory.
+See the [development docs](docs/development.md) and [`AGENTS.md`](AGENTS.md) for the full command reference.
 
 ## Contributing
 
