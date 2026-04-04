@@ -308,14 +308,20 @@ Defaults currently seeded:
 ## SQLite driver bugs (upstream)
 
 If the error originates from the DML/DDL layer (`sqlite3_pdo_moodle_database.php` or
-`sqlite_sql_generator.php`), it is a driver bug that must be fixed upstream in the
-[ateeducacion/moodle](https://github.com/ateeducacion/moodle) repository.
+`sqlite_sql_generator.php`), it is a driver bug that must be fixed in **two places**:
+
+1. The upstream fork [ateeducacion/moodle](https://github.com/ateeducacion/moodle) (3 maintained branches for Moodle tracker PRs)
+2. The **local patch copies** in this repository under `patches/shared/lib/dml/` and `patches/shared/lib/ddl/`
+
+This repository maintains its own independent copies of the SQLite driver files.
+The build pipeline clones official Moodle and overlays these local patches — it does
+NOT pull from the `ateeducacion/moodle` fork. Fixing only the fork will NOT fix the playground.
 
 **Workflow:**
 
 1. Reproduce and fix on the `mdl-88218-workbench` branch using `make up` (local PHP + SQLite)
-2. Replicate the fix to all three maintained branches (`MDL-88218-sqlite-500`, `MDL-88218-sqlite-501`, `MDL-88218-Add-experimental-SQLite-support-for-Moodle-WASM-environments`)
-3. Update the patch in `patches/shared/lib/dml/` or `patches/shared/lib/ddl/` if it affects the WASM build
+2. Replicate the fix to all three maintained upstream branches
+3. **Also** apply the fix to `patches/shared/lib/dml/` or `patches/shared/lib/ddl/` in this repo
 4. Trigger a manual rebuild via [GitHub Actions](https://github.com/ateeducacion/moodle-playground/actions/workflows/ci.yml) (Run workflow → select `main`)
 
 See [`.agents/references/sqlite-upstream-workflow.md`](https://github.com/ateeducacion/moodle-playground/blob/main/.agents/references/sqlite-upstream-workflow.md) for the full procedure.

@@ -27,10 +27,12 @@ In `ateeducacion/moodle`:
 - `sqlite3_pdo_moodle_database.php` — DML driver (queries, connections, column introspection)
 - `sqlite_sql_generator.php` — DDL generator (CREATE TABLE, ALTER TABLE emulation, temp tables)
 
-In `ateeducacion/moodle-playground` (patches applied at build time):
+In `ateeducacion/moodle-playground` (independent copies, applied at build time):
 
 - `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
 - `patches/shared/lib/ddl/sqlite_sql_generator.php`
+
+**CRITICAL**: moodle-playground maintains its **own independent copies** of the SQLite driver files in `patches/shared/`. It does NOT pull from `ateeducacion/moodle`. The build pipeline (`scripts/patch-moodle-source.sh`) clones official Moodle from `github.com/moodle/moodle` and overlays these local patches. Any fix applied to `ateeducacion/moodle` must ALSO be applied to the patch files in this repository, otherwise the playground will keep using the old buggy version.
 
 ## When you find a SQLite bug
 
@@ -67,9 +69,9 @@ git checkout origin/<branch> -B <branch>
 git push origin <branch>
 ```
 
-### 4. Update the playground patches
+### 4. Update the playground patches (MANDATORY)
 
-If the fix also affects the WASM build, update the corresponding patch file in this repository:
+The fix **must also** be applied to the local patch files in this repository, since the playground build uses these copies, not the upstream fork:
 
 ```bash
 # Copy the fixed file to the patches directory
