@@ -308,7 +308,9 @@ class sqlite3_pdo_moodle_database extends pdo_moodle_database {
     protected function fetch_columns(string $table): array {
         $structure = array();
 
-        $sql = 'SELECT sql FROM sqlite_master WHERE type="table" AND tbl_name="' . $this->prefix . $table . '"';
+        $sql = 'SELECT sql FROM sqlite_master WHERE type="table" AND tbl_name="' . $this->prefix . $table . '"'
+             . ' UNION ALL '
+             . 'SELECT sql FROM sqlite_temp_master WHERE type="table" AND tbl_name="' . $this->prefix . $table . '"';
         if ($this->debug) {
             $this->debug_query($sql);
         }
