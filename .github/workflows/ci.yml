@@ -7,6 +7,11 @@ on:
     branches: ["main"]
     types: [opened, reopened, synchronize, closed]
   workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual rebuild (e.g., SQLite driver patch updated, new Moodle version)"
+        required: false
+        type: string
 
 permissions:
   contents: read

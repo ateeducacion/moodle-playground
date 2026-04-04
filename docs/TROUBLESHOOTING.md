@@ -305,6 +305,27 @@ Defaults currently seeded:
 - `maintenance_enabled`
 - `maxbytes`
 
+## SQLite driver bugs (upstream)
+
+If the error originates from the DML/DDL layer (`sqlite3_pdo_moodle_database.php` or
+`sqlite_sql_generator.php`), it is a driver bug that must be fixed upstream in the
+[ateeducacion/moodle](https://github.com/ateeducacion/moodle) repository.
+
+**Workflow:**
+
+1. Reproduce and fix on the `mdl-88218-workbench` branch using `make up` (local PHP + SQLite)
+2. Replicate the fix to all three maintained branches (`MDL-88218-sqlite-500`, `MDL-88218-sqlite-501`, `MDL-88218-Add-experimental-SQLite-support-for-Moodle-WASM-environments`)
+3. Update the patch in `patches/shared/lib/dml/` or `patches/shared/lib/ddl/` if it affects the WASM build
+4. Trigger a manual rebuild via [GitHub Actions](https://github.com/ateeducacion/moodle-playground/actions/workflows/ci.yml) (Run workflow → select `main`)
+
+See [`.agents/references/sqlite-upstream-workflow.md`](https://github.com/ateeducacion/moodle-playground/blob/main/.agents/references/sqlite-upstream-workflow.md) for the full procedure.
+
+### Example: `ddltablenotexist` — Table "backup_ids_temp" does not exist
+
+Root cause: `fetch_columns()` only queried `sqlite_master` but SQLite stores
+temporary tables in `sqlite_temp_master`. Fixed by adding `UNION ALL` with
+`sqlite_temp_master` ([#48](https://github.com/ateeducacion/moodle-playground/issues/48)).
+
 ## If install fails mid-way
 
 Inspect the staged bootstrap messages from `src/runtime/bootstrap.js`:
