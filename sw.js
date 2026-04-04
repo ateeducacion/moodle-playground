@@ -470,8 +470,8 @@ function rewriteHtmlDocument(html, scope) {
   // scoped runtime and hit the static dev server (405 Method Not Allowed).
   // Moodle JSON-escapes forward slashes in its inline JS config, so we must
   // match both escaped (http:\/\/host) and unescaped (http://host) forms.
-  const jsonEscapedOrigin = origin.replace(/\//gu, "\\/");
-  const jsonEscapedBase = scopedBase.replace(/\//gu, "\\/");
+  const jsonEscapedOrigin = JSON.stringify(origin).slice(1, -1);
+  const jsonEscapedBase = JSON.stringify(scopedBase).slice(1, -1);
   // Match JSON-escaped form: "wwwroot":"http:\/\/localhost:8080"
   result = result.replaceAll(
     `"wwwroot":"${jsonEscapedOrigin}"`,
