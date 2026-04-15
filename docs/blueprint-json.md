@@ -493,7 +493,8 @@ Example — install Moove and make it the active theme:
 ```
 
 A ready-to-run version of this example ships as
-[`assets/blueprints/examples/visual-theme-moove.blueprint.json`](../assets/blueprints/examples/visual-theme-moove.blueprint.json).
+`assets/blueprints/examples/visual-theme-moove.blueprint.json` in the
+repository.
 
 > **Compatibility tip:** third-party themes track Moodle's stable branches. If
 > you see a blank page or the theme falls back to Boost, your Moove ref does
