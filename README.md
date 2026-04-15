@@ -4,7 +4,7 @@
   <img src=".github/screenshot.png" alt="Moodle Playground" width="600">
 </p>
 
-[Live demo](https://ateeducacion.github.io/moodle-playground/) · [Documentation](docs/) · [Blueprints](docs/blueprint-json.md)
+[Live demo](https://moodle-playground.com/) · [Documentation](https://moodle-playground.com/docs/) · [Blueprints](https://moodle-playground.com/docs/blueprint-json/)
 
 > Run a full Moodle site in the browser — no server required.
 
@@ -14,7 +14,7 @@ Moodle Playground runs [Moodle](https://moodle.org) entirely in the browser usin
 
 ### Try it online
 
-Open the [live demo](https://ateeducacion.github.io/moodle-playground/) — no install needed.
+Open the [live demo](https://moodle-playground.com/) — no install needed.
 
 ### Run it locally
 
