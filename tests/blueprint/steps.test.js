@@ -13,6 +13,7 @@ describe("step registry", () => {
       "login",
       "setConfig",
       "setConfigs",
+      "setTheme",
       "setLandingPage",
       "createUser",
       "createUsers",
@@ -68,5 +69,37 @@ describe("step registry", () => {
   it("setLandingPage throws without path", async () => {
     const handler = getStepHandler("setLandingPage");
     await assert.rejects(() => handler({}, {}), /path/);
+  });
+
+  it("setTheme is registered", () => {
+    const handler = getStepHandler("setTheme");
+    assert.strictEqual(typeof handler, "function");
+  });
+
+  it("setTheme throws without name", async () => {
+    const handler = getStepHandler("setTheme");
+    await assert.rejects(
+      () => handler({}, { php: { run: async () => ({}) } }),
+      /name/,
+    );
+  });
+
+  it("setTheme runs php.run with a set_config('theme', ...) script", async () => {
+    const handler = getStepHandler("setTheme");
+    const calls = [];
+    await handler(
+      { name: "moove" },
+      {
+        php: {
+          async run(code) {
+            calls.push(code);
+            return { text: '{"ok":true}' };
+          },
+        },
+      },
+    );
+    assert.strictEqual(calls.length, 1);
+    assert.ok(calls[0].includes("set_config('theme', 'moove'"));
+    assert.ok(calls[0].includes("theme_reset_all_caches"));
   });
 });

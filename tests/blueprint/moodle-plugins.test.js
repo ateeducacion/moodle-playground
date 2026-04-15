@@ -189,6 +189,44 @@ describe("resolvePluginDir path mapping", () => {
   }
 });
 
+describe("popular free theme URLs are recognized", () => {
+  const themeUrls = [
+    "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/MOODLE_500_STABLE.zip",
+    "https://github.com/tonyjbutler/moodle-theme_adaptable/archive/refs/heads/MOODLE_405_STABLE.zip",
+    "https://github.com/tremadesigns/moodle-theme_trema/archive/refs/heads/master.zip",
+  ];
+
+  for (const url of themeUrls) {
+    it(`detectPluginTypeAndName parses ${url.split("/").slice(3, 5).join("/")}`, () => {
+      const result = __testables.detectPluginTypeAndName(url);
+      assert.strictEqual(result.type, "theme");
+      assert.ok(result.name && result.name.length > 0);
+    });
+  }
+
+  it("installTheme accepts Moove pinned to MOODLE_500_STABLE (auto-detects name)", async () => {
+    const handler = getStepHandler("installTheme");
+    // Handler passes validation but fails at fetch (no network). We verify it
+    // gets past the name-detection guard.
+    await assert.rejects(
+      () =>
+        handler(
+          {
+            url: "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/MOODLE_500_STABLE.zip",
+          },
+          {},
+        ),
+      (err) => {
+        assert.ok(
+          !err.message.includes("pluginName"),
+          `Should auto-detect theme name but got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+});
+
 describe("sample blueprint URLs are valid", () => {
   it("all sample URLs follow GitHub archive format", () => {
     const urls = [

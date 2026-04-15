@@ -1,9 +1,16 @@
-import { phpSetConfig, phpSetConfigs } from "../php/helpers.js";
+import { phpSetConfig, phpSetConfigs, phpSetTheme } from "../php/helpers.js";
 
 export function registerMoodleConfigSteps(register) {
   register("setConfig", handleSetConfig);
   register("setConfigs", handleSetConfigs);
+  register("setTheme", handleSetTheme);
   register("setLandingPage", handleSetLandingPage);
+}
+
+async function handleSetTheme(step, { php }) {
+  if (!step.name) throw new Error("setTheme: 'name' is required.");
+  const code = phpSetTheme(step.name);
+  await php.run(code);
 }
 
 async function handleSetConfig(step, { php }) {

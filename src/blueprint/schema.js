@@ -4,6 +4,7 @@ const KNOWN_STEP_NAMES = new Set([
   "login",
   "setConfig",
   "setConfigs",
+  "setTheme",
   "setLandingPage",
   "createUser",
   "createUsers",

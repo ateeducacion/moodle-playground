@@ -1,0 +1,35 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/",
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "admin",
+        "adminPass": "password",
+        "adminEmail": "admin@example.com",
+        "siteName": "Moove Theme Showcase"
+      }
+    },
+    {
+      "step": "installTheme",
+      "url": "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/MOODLE_500_STABLE.zip"
+    },
+    {
+      "step": "setTheme",
+      "name": "moove"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Welcome to Moove",
+      "shortname": "MOOVE101",
+      "summary": "This course exists so the Moove theme has real content to render on the homepage.",
+      "format": "topics",
+      "numsections": 3
+    },
+    {
+      "step": "login",
+      "username": "admin"
+    }
+  ]
+}

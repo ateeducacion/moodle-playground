@@ -11,6 +11,7 @@ import {
   phpSetAdminAccount,
   phpSetConfig,
   phpSetConfigs,
+  phpSetTheme,
 } from "../../src/blueprint/php/helpers.js";
 
 describe("PHP helpers: CLI header", () => {
@@ -162,6 +163,25 @@ describe("PHP helpers: setConfig", () => {
   it("uses null for core config", () => {
     const script = phpSetConfig("theme", "boost");
     assert.ok(script.includes("null"));
+  });
+});
+
+describe("PHP helpers: setTheme", () => {
+  it("writes set_config('theme', name) and purges theme caches", () => {
+    const script = phpSetTheme("moove");
+    assert.ok(script.includes("define('CLI_SCRIPT', true)"));
+    assert.ok(script.includes("set_config('theme', 'moove')"));
+    assert.ok(script.includes("theme_reset_all_caches"));
+  });
+
+  it("escapes theme name with quotes", () => {
+    const script = phpSetTheme("o'evil");
+    assert.ok(script.includes("'o\\'evil'"));
+  });
+
+  it("works for bundled themes without install", () => {
+    const script = phpSetTheme("boost");
+    assert.ok(script.includes("set_config('theme', 'boost')"));
   });
 });
 

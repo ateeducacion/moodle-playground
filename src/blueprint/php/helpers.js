@@ -180,6 +180,18 @@ echo json_encode(['ok' => true, 'name' => '${escapePhp(name)}']);
 `;
 }
 
+export function phpSetTheme(name) {
+  return `${CLI_HEADER}
+require_once($CFG->libdir . '/outputlib.php');
+set_config('theme', '${escapePhp(name)}');
+// Reset theme CSS caches so the next request serves the new theme.
+if (function_exists('theme_reset_all_caches')) {
+    theme_reset_all_caches();
+}
+echo json_encode(['ok' => true, 'theme' => '${escapePhp(name)}']);
+`;
+}
+
 export function phpSetConfigs(configs) {
   const lines = configs.map(({ name, value, plugin }) => {
     const pluginArg = plugin ? `'${escapePhp(plugin)}'` : "null";

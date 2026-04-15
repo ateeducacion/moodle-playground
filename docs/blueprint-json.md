@@ -411,13 +411,94 @@ Supported plugin types: `mod`, `block`, `local`, `theme`, `auth`, `enrol`, `filt
 
 ### installTheme
 
+Downloads a Moodle theme ZIP and registers it with the Moodle upgrade pipeline.
+This step only installs the files — it does **not** activate the theme. Pair it
+with `setTheme` (below) to switch the site to the newly installed theme.
+
+```json
+{
+  "step": "installTheme",
+  "url": "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/MOODLE_500_STABLE.zip"
+}
+```
+
+Theme name is auto-detected from the GitHub repository name (`moodle-theme_moove`
+→ `moove`). Override it when the repo does not follow the `moodle-theme_<name>`
+convention:
+
 ```json
 {
   "step": "installTheme",
   "pluginName": "moove",
-  "url": "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/master.zip"
+  "url": "https://example.com/custom-theme.zip"
 }
 ```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | yes | GitHub archive ZIP URL (or any direct ZIP URL) |
+| `pluginName` | no | Auto-detected from URL. Override for non-standard repo names |
+
+> Install and activation are intentionally separate steps. If the upgrade phase
+> of `installTheme` fails but the files land on disk, the subsequent `setTheme`
+> still activates the theme on the next request. See
+> [ADR-0005](./decisions/0005-resilient-blueprint-step-execution.md) for the
+> rationale.
+
+### setTheme
+
+Switches the active site theme by writing `$CFG->theme` and purging the Moodle
+theme caches so the next page load serves the new CSS.
+
+```json
+{
+  "step": "setTheme",
+  "name": "moove"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Theme directory name under `/theme/<name>` (e.g. `boost`, `classic`, `moove`) |
+
+Bundled themes (`boost`, `classic`) do not need `installTheme` — `setTheme` alone
+is enough. For third-party themes, call `installTheme` first, then `setTheme`.
+
+#### Popular free themes
+
+Pin theme branches to match the Moodle version served by your playground build.
+Moodle theme repositories follow the `MOODLE_<version>_STABLE` branch convention.
+
+| Theme | Repository | Recommended ref |
+|-------|------------|-----------------|
+| **Boost** | bundled with Moodle | (no install required) |
+| **Classic** | bundled with Moodle | (no install required) |
+| **Moove** | [willianmano/moodle-theme_moove](https://github.com/willianmano/moodle-theme_moove) | `MOODLE_500_STABLE` or `MOODLE_405_STABLE` |
+| **Adaptable** | [tonyjbutler/moodle-theme_adaptable](https://github.com/tonyjbutler/moodle-theme_adaptable) | `MOODLE_405_STABLE` |
+| **Trema** | [tremadesigns/moodle-theme_trema](https://github.com/tremadesigns/moodle-theme_trema) | tag matching your Moodle branch |
+
+Example — install Moove and make it the active theme:
+
+```json
+{
+  "steps": [
+    { "step": "installMoodle" },
+    {
+      "step": "installTheme",
+      "url": "https://github.com/willianmano/moodle-theme_moove/archive/refs/heads/MOODLE_500_STABLE.zip"
+    },
+    { "step": "setTheme", "name": "moove" }
+  ]
+}
+```
+
+A ready-to-run version of this example ships as
+[`assets/blueprints/examples/visual-theme-moove.blueprint.json`](../assets/blueprints/examples/visual-theme-moove.blueprint.json).
+
+> **Compatibility tip:** third-party themes track Moodle's stable branches. If
+> you see a blank page or the theme falls back to Boost, your Moove ref does
+> not match the Moodle version used by this playground. Check the Moodle
+> branch shown in the shell footer and swap the ref accordingly.
 
 ## Naming Conventions
 
