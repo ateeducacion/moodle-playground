@@ -1,8 +1,42 @@
-/* Match the navbar orange from the main app (--color-orange-soft: #f5923a) */
+/* ------------------------------------------------------------------
+   Moodle Playground — docs theme overrides
+
+   Keep the orange navbar in sync with the main app
+   (--color-orange-soft: #f5923a)
+------------------------------------------------------------------- */
+
 :root,
 [data-md-color-scheme="default"],
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #f5923a;
-  --md-primary-fg-color--light: #f9a85e;
-  --md-primary-fg-color--dark: #e07010;
+  --md-primary-fg-color:        #f5923a;
+  --md-primary-fg-color--light:  #f9a85e;
+  --md-primary-fg-color--dark:   #e07010;
+
+  --md-accent-fg-color:         #e07010;
+  --md-accent-fg-color--transparent: rgba(224, 112, 16, 0.1);
+}
+
+/* Make the sidebar nav slightly tighter so deeper hierarchies fit */
+.md-nav--primary .md-nav__link {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+/* Nicer feature grid on the index page */
+.md-typeset .grid.cards > :is(ul, ol) > li,
+.md-typeset .grid > .card {
+  border-radius: 0.5rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  border-color: var(--md-primary-fg-color);
+}
+
+/* Code blocks: slightly rounder corners and a bit more contrast */
+.md-typeset pre > code,
+.md-typeset .highlight pre {
+  border-radius: 0.5rem;
 }

@@ -4,69 +4,155 @@
   <img src="../ogimage.png" alt="Moodle Playground" width="600">
 </p>
 
-Moodle running entirely in your browser using WebAssembly. No server required.
+**Moodle running entirely in your browser, via WebAssembly.** No server, no installation, no data leaves your machine.
+
+[![Open the playground](https://img.shields.io/badge/Open-moodle--playground.com-f5923a?style=for-the-badge)](https://moodle-playground.com)
+[![GitHub](https://img.shields.io/badge/source-GitHub-181717?style=for-the-badge&logo=github)](https://github.com/ateeducacion/moodle-playground)
+[![License GPL](https://img.shields.io/badge/license-GPLv3-blue?style=for-the-badge)](https://github.com/ateeducacion/moodle-playground/blob/main/LICENSE)
 
 ## What is this?
 
-Moodle Playground lets you run a full Moodle LMS instance in your browser for learning, testing, and prototyping course experiences. Everything runs locally — no installation, no server, no data leaves your machine.
+Moodle Playground lets you run a **full Moodle LMS instance in your browser** for learning, testing, and prototyping course experiences. Perfect for:
 
-The runtime is **fully ephemeral**: all state lives in memory and is lost when you close the tab.
+- :material-school: **Teachers** evaluating new activities without touching a production server
+- :material-puzzle: **Plugin developers** testing changes before pushing to a live site
+- :material-book-open: **Trainers** giving workshops where every attendee gets a disposable Moodle
+- :material-flask: **Researchers** reproducing a specific Moodle version in an isolated environment
 
-Default credentials: username `admin`, password `password`.
+The runtime is **fully ephemeral**: everything lives in memory and resets when you close the tab.
+
+!!! tip "Default credentials"
+    Username `admin`, password `password`. Override them via a blueprint if needed.
 
 ## How it works
 
-The project follows a layered architecture:
+The project is a layered architecture with clear boundaries:
 
-1. **Shell UI** (`index.html` + `src/shell/main.js`) — toolbar, URL bar, iframe host, runtime logs
-2. **Runtime host** (`remote.html` + `src/remote/main.js`) — registers the service worker and hosts the playground iframe
-3. **Request routing** (`sw.js` + `php-worker.js`) — intercepts requests and routes them to the PHP runtime
-4. **PHP/Moodle runtime** (`src/runtime/*`) — boots Moodle via `@php-wasm/web` and serves HTTP requests through a bridge
-5. **Generated assets** (`assets/moodle/`) — prebuilt ZIP bundle with Moodle core (extracted into writable MEMFS at runtime)
+``` { .text .no-copy }
+┌─────────────────────────────────────────────────────────┐
+│  Shell UI  (index.html · src/shell/main.js)             │
+│     toolbar · URL bar · iframe host · runtime logs      │
+├─────────────────────────────────────────────────────────┤
+│  Runtime host  (remote.html · src/remote/main.js)       │
+│     registers the service worker                        │
+├─────────────────────────────────────────────────────────┤
+│  Request routing  (sw.js · php-worker.js)               │
+│     intercepts HTTP requests, routes to PHP runtime     │
+├─────────────────────────────────────────────────────────┤
+│  PHP / Moodle runtime  (src/runtime/*)                  │
+│     boots Moodle via @php-wasm/web                      │
+├─────────────────────────────────────────────────────────┤
+│  Generated assets  (assets/moodle/)                     │
+│     prebuilt ZIP bundle (extracted into MEMFS at boot)  │
+└─────────────────────────────────────────────────────────┘
+```
+
+See the [Architecture overview](architecture.md) for the full picture.
 
 ## Quick start
 
-```bash
-# Clone the repo
-git clone https://github.com/ateeducacion/moodle-playground.git
-cd moodle-playground
+=== "Use it right now"
 
-# Install and build
-npm install
-make prepare
-make bundle
+    Nothing to install — just open the hosted instance:
 
-# Start the dev server
-make serve
-```
+    <https://moodle-playground.com>
 
-Then open [http://localhost:8080](http://localhost:8080) in your browser.
+=== "Run it locally"
+
+    ```bash
+    # Clone
+    git clone https://github.com/ateeducacion/moodle-playground.git
+    cd moodle-playground
+
+    # Install and build
+    npm install
+    make prepare
+    make bundle
+
+    # Start the dev server
+    make serve
+    ```
+
+    Then open <http://localhost:8080>.
+
+=== "Quick blueprint demo"
+
+    Provision a site with a custom name and a demo course in one go:
+
+    ```
+    https://moodle-playground.com/?blueprint-url=/assets/blueprints/examples/demo-course.blueprint.json
+    ```
+
+    See the [Blueprint gallery](blueprint-gallery.md) for more.
 
 ## Features
 
-- Full Moodle 4.4 / 5.0 running in WebAssembly
-- PHP 8.1 to 8.5 support (version depends on Moodle branch; default: 8.3)
-- SQLite database via [experimental PDO driver patch](https://moodle.atlassian.net/browse/MDL-88218) (in-memory, no persistence needed)
-- Pre-built install snapshot for fast boot (~3s vs ~8s full install)
-- Step-based blueprint system for provisioning users, courses, enrolments, modules, and more
-- Works on GitHub Pages with subpath support
+<div class="grid cards" markdown>
 
-## Project links
+- :material-language-php: **PHP 8.1 → 8.5**
 
-- [GitHub repository](https://github.com/ateeducacion/moodle-playground)
-- [Getting started](getting-started.md)
-- [Architecture](architecture.md)
-- [Blueprint reference](blueprint-json.md)
-- [Plugin install notes for this branch](plugin-install-branch-notes.md)
+    Version depends on the Moodle branch; default `8.3`.
+
+- :material-school: **Moodle 4.4 / 5.0**
+
+    Multiple upstream branches built at the same time.
+
+- :material-database: **SQLite via PDO**
+
+    Experimental driver patch — see [MDL-88218](https://moodle.atlassian.net/browse/MDL-88218).
+
+- :material-rocket-launch: **Fast boot**
+
+    Pre-built install snapshot boots in ~3 s vs ~8 s for a full install.
+
+- :material-view-list: **Blueprints**
+
+    Step-based JSON to provision users, courses, enrolments, modules, and more.
+
+- :material-github: **Works on GitHub Pages**
+
+    Subpath-aware; deployable as a static site.
+
+</div>
+
+## Where to go next
+
+<div class="grid cards" markdown>
+
+- :material-rocket-launch: **[Getting started](getting-started.md)**
+
+    Local setup, build commands, and a first blueprint.
+
+- :material-code-braces: **[Blueprint reference](blueprint-json.md)**
+
+    The complete JSON schema for blueprint files.
+
+- :material-image-multiple: **[Blueprint gallery](blueprint-gallery.md)**
+
+    Ready-to-use blueprint examples for courses, users, plugins.
+
+- :material-sitemap: **[Architecture](architecture.md)**
+
+    How the shell, service worker and PHP-WASM runtime fit together.
+
+- :material-lightbulb-on: **[Troubleshooting](TROUBLESHOOTING.md)**
+
+    Common failure modes and how to fix them.
+
+- :material-alert-circle: **[Known issues](KNOWN-ISSUES.md)**
+
+    Upstream bugs and limitations we are tracking.
+
+</div>
 
 ## CI/CD and GitHub Actions
 
-The project includes a reusable GitHub Action for generating live PR previews of Moodle Playground:
+The project includes a reusable GitHub Action for live PR previews:
 
-- [**action-moodle-playground-pr-preview**](https://github.com/ateeducacion/action-moodle-playground-pr-preview) — Deploys a temporary Moodle Playground instance for each pull request, allowing reviewers to test changes in the browser before merging.
+- [**action-moodle-playground-pr-preview**](https://github.com/ateeducacion/action-moodle-playground-pr-preview) — Deploys a temporary Moodle Playground instance for each pull request so reviewers can test changes in the browser before merging.
 
-The main CI/CD pipeline (`.github/workflows/ci.yml`) handles linting, unit tests, E2E tests (Chromium + Firefox), and deployment to GitHub Pages on push to `main`.
+The main CI/CD pipeline (`.github/workflows/ci.yml`) handles linting, unit tests, Playwright E2E (Chromium + Firefox), and deployment to GitHub Pages on push to `main`.
 
 ---
 
-Made with ❤️ by [Área de Tecnología Educativa](https://www3.gobiernodecanarias.org/medusa/ecoescuela/ate/)
+Made with :material-heart:{ .heart } by [Área de Tecnología Educativa](https://www3.gobiernodecanarias.org/medusa/ecoescuela/ate/)

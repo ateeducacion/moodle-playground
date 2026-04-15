@@ -1,34 +1,107 @@
-site_name: Moodle Playground Documentation
-site_description: Contributor and user documentation for Moodle Playground.
+site_name: Moodle Playground
+site_description: Moodle running entirely in your browser via WebAssembly — contributor and user documentation.
 site_url: https://ateeducacion.github.io/moodle-playground/docs/
 repo_url: https://github.com/ateeducacion/moodle-playground
+repo_name: ateeducacion/moodle-playground
 edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
+
 theme:
   name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/school
+
 extra_css:
   - stylesheets/extra.css
+
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Architecture: architecture.md
-  - Blueprint reference: blueprint-json.md
-  - Blueprint gallery: blueprint-gallery.md
-  - Development: development.md
-  - Troubleshooting: TROUBLESHOOTING.md
-  - Known issues: KNOWN-ISSUES.md
+  - User guide:
+      - Getting started: getting-started.md
+      - Troubleshooting: TROUBLESHOOTING.md
+      - Known issues: KNOWN-ISSUES.md
+  - Blueprints:
+      - Blueprint reference: blueprint-json.md
+      - Blueprint gallery: blueprint-gallery.md
+  - Architecture:
+      - Overview: architecture.md
+      - Implementation status: implementation-status.md
+      - Moodle WASM plan: moodle-wasm-plan.md
+      - Plugin install notes: plugin-install-branch-notes.md
+      - SQLite WASM migration: sqlite-wasm-migration-notes.md
+  - Development:
+      - Contributing: development.md
+  - Decision records:
+      - "ADR 0001 — SW-level scoped static asset caching": decisions/0001-sw-level-scoped-static-asset-caching.md
+      - "ADR 0002 — Plugin auto-detection from GitHub URLs": decisions/0002-plugin-auto-detection-from-github-urls.md
+      - "ADR 0003 — Direct DB inserts for course modules": decisions/0003-direct-db-inserts-for-course-modules.md
+      - "ADR 0004 — OPcache tuning and runtime UX defaults": decisions/0004-opcache-tuning-and-runtime-ux-defaults.md
+      - "ADR 0005 — Resilient blueprint step execution": decisions/0005-resilient-blueprint-step-execution.md
+  - Research:
+      - PHP process manager evaluation: research/php-process-manager-evaluation.md
+
 markdown_extensions:
+  - abbr
   - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
   - tables
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ateeducacion/moodle-playground
+    - icon: fontawesome/solid/globe
+      link: https://moodle-playground.com
