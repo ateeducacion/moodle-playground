@@ -16,6 +16,39 @@
   --md-accent-fg-color--transparent: rgba(224, 112, 16, 0.1);
 }
 
+/* Zensical paints .md-header with --md-default-bg-color--light, so
+   overriding --md-primary-fg-color isn't enough to colour the navbar.
+   Force the header (and the search input it hosts) to use the brand
+   orange with white foreground text. */
+.md-header,
+.md-header[data-md-state="shadow"] {
+  background-color: var(--md-primary-fg-color);
+  color: #fff;
+}
+
+.md-header .md-header__title,
+.md-header .md-header__button,
+.md-header .md-header__topic,
+.md-header .md-source,
+.md-header .md-source__fact,
+.md-header .md-source__repository {
+  color: #fff;
+}
+
+.md-header .md-search__input {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.md-header .md-search__input::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.md-header .md-search__input + .md-search__icon,
+.md-header .md-search__icon[for="__search"] {
+  color: #fff;
+}
+
 /* Make the sidebar nav slightly tighter so deeper hierarchies fit */
 .md-nav--primary .md-nav__link {
   padding-top: 0.35rem;
