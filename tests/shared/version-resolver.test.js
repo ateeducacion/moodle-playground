@@ -40,6 +40,14 @@ describe("getBranchMetadata", () => {
     const meta = getBranchMetadata("MOODLE_500_STABLE");
     assert.strictEqual(meta.webRoot, "/www/moodle");
   });
+
+  it("returns metadata for MOODLE_502_STABLE", () => {
+    const meta = getBranchMetadata("MOODLE_502_STABLE");
+    assert.ok(meta);
+    assert.strictEqual(meta.version, "5.2");
+    assert.strictEqual(meta.label, "Moodle 5.2.x");
+    assert.strictEqual(meta.webRoot, "/www/moodle/public");
+  });
 });
 
 describe("getDefaultBranch", () => {
@@ -103,6 +111,10 @@ describe("resolveMoodleBranch", () => {
 
   it("resolves by version string", () => {
     assert.strictEqual(resolveMoodleBranch("5.0"), "MOODLE_500_STABLE");
+  });
+
+  it("resolves version 5.2 to MOODLE_502_STABLE", () => {
+    assert.strictEqual(resolveMoodleBranch("5.2"), "MOODLE_502_STABLE");
   });
 
   it("resolves 'dev' to main", () => {
@@ -271,6 +283,13 @@ describe("buildRuntimeId", () => {
     assert.strictEqual(
       buildRuntimeId("8.3", "MOODLE_500_STABLE"),
       "php83-moodle50",
+    );
+  });
+
+  it("builds correct ID for 5.2 branch", () => {
+    assert.strictEqual(
+      buildRuntimeId("8.3", "MOODLE_502_STABLE"),
+      "php83-moodle52",
     );
   });
 

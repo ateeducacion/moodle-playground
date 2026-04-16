@@ -25,7 +25,7 @@ check-php:
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
 .PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test test-e2e test-e2e-chrome test-e2e-firefox lint format
-.PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-main
+.PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-MOODLE_502_STABLE bundle-main
 
 deps:
 	npm install
@@ -60,6 +60,7 @@ bundle-all: check-php
 		bundle-MOODLE_405_STABLE \
 		bundle-MOODLE_500_STABLE \
 		bundle-MOODLE_501_STABLE \
+		bundle-MOODLE_502_STABLE \
 		bundle-main
 
 # Colorized multi-branch build for local use.
@@ -82,6 +83,9 @@ bundle-MOODLE_500_STABLE:
 
 bundle-MOODLE_501_STABLE:
 	BRANCH=MOODLE_501_STABLE npm run bundle
+
+bundle-MOODLE_502_STABLE:
+	BRANCH=MOODLE_502_STABLE npm run bundle
 
 bundle-main:
 	BRANCH=main npm run bundle

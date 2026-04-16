@@ -61,7 +61,7 @@ jobs:
       - name: Lint
         run: make lint
 
-  # ── Build: all 5 Moodle branches + docs ──
+  # ── Build: all 6 Moodle branches + docs ──
   build:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
