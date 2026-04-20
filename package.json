@@ -18,7 +18,7 @@
   "dependencies": {
     "@php-wasm/stream-compression": "^3.1.20",
     "@php-wasm/universal": "^3.1.15",
-    "@php-wasm/web": "^3.1.19",
+    "@php-wasm/web": "^3.1.20",
     "fflate": "^0.8.2"
   },
   "devDependencies": {
