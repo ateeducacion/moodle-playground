@@ -1031,7 +1031,8 @@ function landingPageHtml(origin) {
         <span class="method">GET</span>
         <span class="endpoint-name">URL Proxy</span>
       </div>
-      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, or Google Drive file URLs with CORS headers (for Drive, direct <code>/uc?id=...</code> links and shared <code>/file/d/{id}/view</code> links are accepted).</div>
+      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, or Google Drive file URLs with CORS headers.</div>
+      <div class="endpoint-desc">Drive accepts direct <code>/uc?id=...</code> links and shared <code>/file/d/{id}/view</code> links.</div>
       <div class="url-box">${base}/?url=<span class="param">{full_url}</span></div>
     </div>
 
