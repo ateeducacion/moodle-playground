@@ -196,6 +196,45 @@ describe("github-proxy-worker generic ?url= mode", () => {
     );
   });
 
+  it("translates Google Drive share URLs to direct download URLs", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": 'attachment; filename="plugin.zip"',
+        },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://drive.google.com/file/d/drive-file-id/view?usp=sharing",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://drive.google.com/uc?id=drive-file-id&export=download",
+    );
+    assert.equal(
+      upstreamRequest.init.headers.get("Accept"),
+      "application/octet-stream, text/plain;q=0.9, */*;q=0.8",
+    );
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      'attachment; filename="plugin.zip"',
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
   it("still rejects unrelated direct URLs", async () => {
     global.fetch = async () => {
       throw new Error("should not fetch upstream");
