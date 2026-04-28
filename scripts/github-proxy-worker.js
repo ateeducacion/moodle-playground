@@ -521,19 +521,29 @@ function isGitHubDirectProxyUrl(url) {
 }
 
 function isGoogleDriveDirectFileUrl(url) {
-  if (url.hostname.toLowerCase() !== "drive.google.com") {
+  const hostname = url.hostname.toLowerCase();
+
+  if (hostname === "drive.google.com") {
+    if (/^\/file\/d\/[^/]+(?:\/|$)/u.test(url.pathname)) {
+      return true;
+    }
+
+    if (
+      (url.pathname === "/uc" || url.pathname === "/open") &&
+      url.searchParams.has("id")
+    ) {
+      return true;
+    }
+
     return false;
   }
 
-  if (/^\/file\/d\/[^/]+(?:\/|$)/u.test(url.pathname)) {
-    return true;
-  }
+  if (hostname === "drive.usercontent.google.com") {
+    if (url.pathname === "/download" && url.searchParams.has("id")) {
+      return true;
+    }
 
-  if (
-    (url.pathname === "/uc" || url.pathname === "/open") &&
-    url.searchParams.has("id")
-  ) {
-    return true;
+    return false;
   }
 
   return false;
@@ -541,6 +551,10 @@ function isGoogleDriveDirectFileUrl(url) {
 
 function normalizeSupportedGenericProxyUrl(url) {
   if (!isGoogleDriveDirectFileUrl(url)) {
+    return url;
+  }
+
+  if (url.hostname.toLowerCase() === "drive.usercontent.google.com") {
     return url;
   }
 
