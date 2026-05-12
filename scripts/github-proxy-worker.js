@@ -4,7 +4,8 @@
 //
 // 1. Generic proxy mode (legacy): ?url={full_url}
 //    Proxies supported direct URLs with CORS headers. This includes ZIP downloads,
-//    GitHub-hosted text/binary resources, and FacturaScripts plugin pages.
+//    GitHub-hosted text/binary resources, FacturaScripts plugin pages, and
+//    omeka.org / dev.omeka.org resources (plugin/module pages and downloads).
 //
 // 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&atom=...]
 //    Builds the correct GitHub URL from semantic parameters and proxies the response.
@@ -498,7 +499,8 @@ function isSupportedGenericProxyUrl(url) {
     looksLikeZipUrl(url) ||
     isFacturaScriptsPluginPage(url) ||
     isGitHubDirectProxyUrl(url) ||
-    isGoogleDriveDirectFileUrl(url)
+    isGoogleDriveDirectFileUrl(url) ||
+    isOmekaOrgResourceUrl(url)
   );
 }
 
@@ -700,6 +702,11 @@ function isFacturaScriptsPluginPage(url) {
     url.hostname.toLowerCase() === "facturascripts.com" &&
     /^\/plugins\/[^/]+\/?$/u.test(url.pathname)
   );
+}
+
+function isOmekaOrgResourceUrl(url) {
+  const hostname = url.hostname.toLowerCase();
+  return hostname === "omeka.org" || hostname === "dev.omeka.org";
 }
 
 function buildZipFilename(url) {
@@ -1045,7 +1052,7 @@ function landingPageHtml(origin) {
         <span class="method">GET</span>
         <span class="endpoint-name">URL Proxy</span>
       </div>
-      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, or Google Drive file URLs with CORS headers.</div>
+      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, Google Drive, or omeka.org / dev.omeka.org URLs with CORS headers.</div>
       <div class="endpoint-desc">Drive accepts direct <code>/uc?id=...</code> links and shared <code>/file/d/{id}/view</code> links.</div>
       <div class="url-box">${base}/?url=<span class="param">{full_url}</span></div>
     </div>
