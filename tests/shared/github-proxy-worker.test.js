@@ -235,6 +235,62 @@ describe("github-proxy-worker generic ?url= mode", () => {
     );
   });
 
+  it("proxies omeka.org plugin/module pages", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response("<html>module page</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://omeka.org/s/modules/ContactUs/",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(upstreamRequest.url, "https://omeka.org/s/modules/ContactUs/");
+    assert.equal(
+      upstreamRequest.init.headers.get("User-Agent"),
+      "github-proxy-worker",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.equal(await response.text(), "<html>module page</html>");
+  });
+
+  it("proxies dev.omeka.org resources", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://dev.omeka.org/files/plugins/ContactUs-2.0.0.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://dev.omeka.org/files/plugins/ContactUs-2.0.0.zip",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
   it("still rejects unrelated direct URLs", async () => {
     global.fetch = async () => {
       throw new Error("should not fetch upstream");
