@@ -741,6 +741,23 @@ try {
     $CFG->debug = ${normalizedDebug};
     $CFG->debugdeveloper = (${normalizedDebug} >= 32767);
 
+    // Disable Moodle's curl_security_helper. It calls gethostbynamel() on
+    // every outbound URL and treats unresolved hosts as "blocked", returning
+    // the literal body "The URL is blocked." before the request leaves PHP.
+    // The WASM SAPI has no DNS resolver, so this rejects every external
+    // hostname (e.g. plugin API clients hitting public REST endpoints).
+    // Clearing both blocked hosts and allowed ports makes
+    // core\\files\\curl_security_helper::is_enabled() return false, which
+    // skips the host_is_blocked() DNS check entirely. Direct fetch still
+    // goes through tcpOverFetch + phpCorsProxyUrl, where real network
+    // policy lives.
+    set_config('curlsecurityblockedhosts', '');
+    set_config('curlsecurityallowedport', '');
+    $CFG->curlsecurityblockedhosts = '';
+    $CFG->curlsecurityallowedport = '';
+    $result['set']['curlsecurityblockedhosts'] = '';
+    $result['set']['curlsecurityallowedport'] = '';
+
     $pluginDefaults = [
         'moodlecourse' => [
             'hiddensections' => '1',
