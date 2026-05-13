@@ -175,7 +175,9 @@ function decodePathInfo(raw) {
 describe("decodePathInfo", () => {
   it("URL-decodes percent-encoded spaces", () => {
     assert.strictEqual(
-      decodePathInfo("/5/user/draft/123/The%20Adventures%20of%20Sherlock%20Holmes"),
+      decodePathInfo(
+        "/5/user/draft/123/The%20Adventures%20of%20Sherlock%20Holmes",
+      ),
       "/5/user/draft/123/The Adventures of Sherlock Holmes",
     );
   });
