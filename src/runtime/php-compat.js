@@ -52,6 +52,23 @@ async function normalizeRequest(requestOrUrl) {
 }
 
 /**
+ * Decode a `PATH_INFO` value pulled from a URL pathname into the form PHP
+ * expects from a CGI environment.  Apache and nginx URL-decode PATH_INFO
+ * before exposing it to PHP (per RFC 3875 §4.1.5), so a request URI of
+ * `/draftfile.php/5/user/draft/123/The%20Adventures` exposes PATH_INFO
+ * as `/5/user/draft/123/The Adventures` — not as the raw `%20`-encoded
+ * form.  `decodeURIComponent` throws on malformed sequences; fall back
+ * to the raw value rather than blowing up the entire request.
+ */
+function decodePathInfo(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * Resolve the PHP script path and PATH_INFO from a URL pathname.
  * Handles directory requests by appending index.php.
  * Handles PATH_INFO (e.g., /theme/styles.php/boost/123/all).
@@ -308,7 +325,17 @@ export function wrapPhpInstance(
         HTTP_USER_AGENT: "MoodlePlayground/1.0 (WASM)",
         REMOTE_ADDR: "127.0.0.1",
         HTTPS: parsedAbsoluteUrl.protocol === "https:" ? "on" : "",
-        PATH_INFO: pathInfo || "",
+        // PATH_INFO must arrive at PHP URL-DECODED, matching the CGI spec
+        // (RFC 3875 §4.1.5) and the behaviour of Apache/nginx + mod_php.
+        // Moodle's `get_file_argument()` reads `$_SERVER['PATH_INFO']` as-is
+        // and uses the result directly as the relative file path; if we leave
+        // the `%20` literals in, the parsed filename ends up containing
+        // literal "%20" instead of spaces, the SHA1 pathnamehash computed
+        // from it does not match what `create_file_from_pathname()` stored,
+        // and `draftfile.php` / `pluginfile.php` answer 404 for any file
+        // whose name contains a space, comma, accent, etc.  REQUEST_URI
+        // intentionally stays raw — that's how Apache exposes it.
+        PATH_INFO: pathInfo ? decodePathInfo(pathInfo) : "",
       };
 
       // Add HTTP_* headers from the request.

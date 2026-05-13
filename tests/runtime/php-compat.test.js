@@ -161,3 +161,57 @@ describe("getMimeType", () => {
     );
   });
 });
+
+// Replicate the helper from php-compat.js — same approach as the other
+// reimplemented helpers in this file.
+function decodePathInfo(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+describe("decodePathInfo", () => {
+  it("URL-decodes percent-encoded spaces", () => {
+    assert.strictEqual(
+      decodePathInfo(
+        "/5/user/draft/123/The%20Adventures%20of%20Sherlock%20Holmes",
+      ),
+      "/5/user/draft/123/The Adventures of Sherlock Holmes",
+    );
+  });
+
+  it("URL-decodes commas, parentheses, and accents", () => {
+    assert.strictEqual(
+      decodePathInfo("/5/user/draft/123/Walter%20Benington%2C%201914.jpg"),
+      "/5/user/draft/123/Walter Benington, 1914.jpg",
+    );
+    assert.strictEqual(
+      decodePathInfo("/5/user/draft/123/foto%20(1).jpg"),
+      "/5/user/draft/123/foto (1).jpg",
+    );
+    assert.strictEqual(
+      decodePathInfo("/5/user/draft/123/jos%C3%A9.txt"),
+      "/5/user/draft/123/josé.txt",
+    );
+  });
+
+  it("returns ASCII paths unchanged", () => {
+    assert.strictEqual(
+      decodePathInfo("/5/user/draft/123/omeka-logo.png"),
+      "/5/user/draft/123/omeka-logo.png",
+    );
+  });
+
+  it("falls back to the raw value on malformed percent-encoding", () => {
+    // `decodeURIComponent("%E0%A4%A")` throws; the helper must not bubble
+    // that up — leaving the request to die is worse than serving a
+    // PATH_INFO with a stray %.
+    assert.strictEqual(decodePathInfo("/bad%E0%A4%A"), "/bad%E0%A4%A");
+  });
+
+  it("returns empty string for empty input", () => {
+    assert.strictEqual(decodePathInfo(""), "");
+  });
+});
