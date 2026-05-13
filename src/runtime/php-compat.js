@@ -111,13 +111,25 @@ function getMimeType(path) {
 
 /**
  * Convert a PHPResponse to a native Response object.
+ *
+ * Optional `extraHeaders` (object of name → string) are appended after the
+ * PHP-emitted headers — used to surface diagnostic metadata (exit code,
+ * stderr) when the underlying script exited non-zero but still produced a
+ * well-formed CGI response.
  */
-function phpResponseToResponse(phpResponse) {
+function phpResponseToResponse(phpResponse, extraHeaders) {
   const headers = new Headers();
   if (phpResponse.headers) {
     for (const [key, values] of Object.entries(phpResponse.headers)) {
       for (const value of values) {
         headers.append(key, value);
+      }
+    }
+  }
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value !== undefined && value !== null && value !== "") {
+        headers.set(key, value);
       }
     }
   }
@@ -127,6 +139,93 @@ function phpResponseToResponse(phpResponse) {
     headers,
   });
 }
+
+/**
+ * Encode a string for safe transport in an HTTP header value.
+ * Uses base64 so arbitrary bytes (newlines, non-ASCII) survive the header
+ * grammar that browsers and Service Workers enforce.
+ */
+function encodeHeaderValue(value) {
+  const bytes = new TextEncoder().encode(String(value));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  if (typeof btoa === "function") {
+    return btoa(binary);
+  }
+  // Node fallback for tests.
+  return Buffer.from(binary, "binary").toString("base64");
+}
+
+/**
+ * Decide whether a PHPResponse that accompanied a non-zero exit code still
+ * represents a real, browser-deliverable HTTP response (e.g. Moodle's
+ * `repository_ajax.php` emitting a JSON error and exiting with code 1).
+ *
+ * The discriminator is intentionally conservative: only pass through when
+ *   1. PHP wrote at least one CGI header (so the response has a real
+ *      Content-Type) AND
+ *   2. the body bytes are non-empty.
+ *
+ * If either is missing, the response is treated as a true failure (segfault,
+ * fatal parse error before output, etc.) and the diagnostic wrapper still
+ * runs in `php-worker.js`.
+ */
+export function shouldPassThroughFailedPhpResponse(phpResponse) {
+  if (!phpResponse || typeof phpResponse !== "object") {
+    return false;
+  }
+  const headers = phpResponse.headers;
+  if (!headers || typeof headers !== "object") {
+    return false;
+  }
+  let hasHeader = false;
+  for (const key of Object.keys(headers)) {
+    const values = headers[key];
+    if (Array.isArray(values) ? values.length > 0 : Boolean(values)) {
+      hasHeader = true;
+      break;
+    }
+  }
+  if (!hasHeader) {
+    return false;
+  }
+  const bytes = phpResponse.bytes;
+  if (
+    !bytes ||
+    typeof bytes.byteLength !== "number" ||
+    bytes.byteLength === 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True when an error thrown by `@php-wasm/universal` represents a PHP script
+ * that ran to completion but exited non-zero. Such errors carry the parsed
+ * `PHPResponse` on `.response` and `"request"` on `.source`.
+ */
+function isPhpExecutionFailure(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  if (error.name === "PHPExecutionFailureError") {
+    return true;
+  }
+  if (error.source === "request" && error.response) {
+    return true;
+  }
+  return false;
+}
+
+export const __testing = {
+  encodeHeaderValue,
+  isPhpExecutionFailure,
+  phpResponseToResponse,
+  shouldPassThroughFailedPhpResponse,
+};
 
 /**
  * Wraps a WordPress Playground PHP instance with the compatibility API
@@ -260,14 +359,50 @@ export function wrapPhpInstance(
         // Non-fatal — directory might not exist yet during early boot.
       }
 
-      const phpResponse = await php.run({
-        scriptPath,
-        method: req.method || "GET",
-        headers: mergedHeaders,
-        body: req.body,
-        $_SERVER: serverVars,
-        relativeUri: urlPath,
-      });
+      // @php-wasm/universal throws `PHPExecutionFailureError` whenever the
+      // PHP process exits with a non-zero status — even when the script
+      // legitimately wrote a full CGI response first (Moodle's AJAX error
+      // handlers do this; e.g. repository_ajax.php prints a JSON error
+      // payload then calls die() / exits 1).  Without this guard the
+      // worker treated those responses as crashes and overwrote them with
+      // an HTML diagnostic page, producing "Unexpected token '<'" errors
+      // in any browser code that expected JSON.
+      //
+      // Catch that specific failure, and if the attached PHPResponse looks
+      // like a real CGI response (headers + body), deliver it untouched.
+      // Stderr is preserved via console.warn and a custom response header
+      // so debuggability isn't lost.
+      let phpResponse;
+      let nonZeroExitCode = 0;
+      let nonZeroExitErrors = "";
+      try {
+        phpResponse = await php.run({
+          scriptPath,
+          method: req.method || "GET",
+          headers: mergedHeaders,
+          body: req.body,
+          $_SERVER: serverVars,
+          relativeUri: urlPath,
+        });
+      } catch (error) {
+        if (
+          isPhpExecutionFailure(error) &&
+          shouldPassThroughFailedPhpResponse(error.response)
+        ) {
+          phpResponse = error.response;
+          nonZeroExitCode = Number(phpResponse.exitCode) || 1;
+          nonZeroExitErrors = String(phpResponse.errors || "");
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn(
+              `[playground] PHP exited ${nonZeroExitCode} for ${urlPath} but emitted a CGI response; passing it through.${
+                nonZeroExitErrors ? `\nstderr: ${nonZeroExitErrors}` : ""
+              }`,
+            );
+          }
+        } else {
+          throw error;
+        }
+      }
 
       // Remember cookies from Set-Cookie headers (case-insensitive lookup —
       // WP Playground may return "set-cookie" or "Set-Cookie" depending on version)
@@ -295,7 +430,18 @@ export function wrapPhpInstance(
         }
       }
 
-      const response = phpResponseToResponse(phpResponse);
+      let extraHeaders;
+      if (nonZeroExitCode !== 0) {
+        extraHeaders = {
+          "x-playground-php-exit-code": String(nonZeroExitCode),
+        };
+        if (nonZeroExitErrors) {
+          extraHeaders["x-playground-php-stderr"] =
+            encodeHeaderValue(nonZeroExitErrors);
+        }
+      }
+
+      const response = phpResponseToResponse(phpResponse, extraHeaders);
 
       if (syncFs) {
         await syncFs();
