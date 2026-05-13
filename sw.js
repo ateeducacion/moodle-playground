@@ -22,11 +22,6 @@ const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico
 // The revision acts as a natural cache key — when content changes, the URL changes.
 // Excludes pluginfile.php and draftfile.php (user content, not cacheable).
 const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|theme\/image\.php|theme\/font\.php)\//u;
-// Moodle scripts that accept `?preview=...` for on-the-fly image thumbnails
-// generated via GD. In the @php-wasm runtime GD-based resampling fails so
-// `get_file_preview()` returns false and the scripts answer 404. See
-// `maybePreviewFallback()` for the retry-without-preview workaround.
-const PREVIEW_FALLBACK_PATH_RE = /\/(draftfile|pluginfile)\.php(?:\/|$)/u;
 const INTERNAL_PROXY_PATH = "/__playground_proxy__";
 let playgroundConfigPromise;
 let addonProxyUrlOverride = null;
@@ -41,38 +36,6 @@ function isCacheablePhpAsset(requestPath) {
 
 function isInternalProxyPath(pathname) {
   return pathname.split("?")[0] === INTERNAL_PROXY_PATH;
-}
-
-function isPreviewFallbackCandidate(requestPath, status) {
-  if (status !== 404) {
-    return false;
-  }
-  const qIdx = requestPath.indexOf("?");
-  if (qIdx < 0) {
-    return false;
-  }
-  const pathOnly = requestPath.slice(0, qIdx);
-  if (!PREVIEW_FALLBACK_PATH_RE.test(pathOnly)) {
-    return false;
-  }
-  const params = new URLSearchParams(requestPath.slice(qIdx + 1));
-  const value = params.get("preview");
-  return value !== null && value !== "";
-}
-
-function stripPreviewParam(requestPath) {
-  const qIdx = requestPath.indexOf("?");
-  if (qIdx < 0) {
-    return requestPath;
-  }
-  const params = new URLSearchParams(requestPath.slice(qIdx + 1));
-  if (!params.has("preview")) {
-    return requestPath;
-  }
-  params.delete("preview");
-  const remaining = params.toString();
-  const pathOnly = requestPath.slice(0, qIdx);
-  return remaining ? `${pathOnly}?${remaining}` : pathOnly;
 }
 
 function getPlaygroundConfigUrl() {
@@ -746,32 +709,11 @@ self.addEventListener("fetch", (event) => {
         return fresh;
       }
 
-      let response = await forwardToPhpWorker({
+      const response = await forwardToPhpWorker({
         request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
         runtimeId,
         scopeId,
       }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
-
-      // GD-based `?preview=…` thumbnail generation fails in the wasm runtime,
-      // so `draftfile.php` / `pluginfile.php` answer 404 for an otherwise valid
-      // file. Retry without the preview param so the browser receives the
-      // original image (CSS-resized by the picker grid) instead of a broken
-      // thumbnail. See PREVIEW_FALLBACK_PATH_RE for the matched scripts.
-      if (
-        event.request.method === "GET"
-        && isPreviewFallbackCandidate(requestPath, response.status)
-      ) {
-        const fallbackPath = stripPreviewParam(requestPath);
-        const fallbackUrl = new URL(fallbackPath, `${url.origin}/`);
-        const fallbackResponse = await forwardToPhpWorker({
-          request: buildPhpRequest(event.request, fallbackUrl, null),
-          runtimeId,
-          scopeId,
-        }).catch(() => null);
-        if (fallbackResponse?.ok) {
-          response = fallbackResponse;
-        }
-      }
 
       if (response.status >= 300 && response.status < 400) {
         await broadcastToClients({
