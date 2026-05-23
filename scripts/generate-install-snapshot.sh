@@ -266,6 +266,40 @@ try {
 }
 " 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
 
+# Drain any adhoc tasks queued during install (e.g. Moodle 5.0+ enqueues
+# mod_qbank transfer tasks on upgrade paths).  Mirrors the runtime drainer in
+# src/runtime/bootstrap.js so the shipped snapshot ships with these tasks
+# already executed.  Failures are non-fatal here — the runtime drainer is the
+# safety net.
+${PHP_BIN:-php} -d max_input_vars=5000 -r "
+define('CLI_SCRIPT', true);
+define('CACHE_DISABLE_ALL', true);
+define('CACHE_DISABLE_STORES', true);
+require('$SOURCE_DIR/config.php');
+require_once(\$CFG->libdir . '/cronlib.php');
+
+\\core\\cron::setup_user();
+
+\$max = 50;
+\$executed = 0;
+\$failed = 0;
+for (\$i = 0; \$i < \$max; \$i++) {
+    \$task = \\core\\task\\manager::get_next_adhoc_task(time());
+    if (\$task === null) {
+        break;
+    }
+    try {
+        \\core\\cron::run_inner_adhoc_task(\$task);
+        \$executed++;
+    } catch (\\Throwable \$e) {
+        \\core\\task\\manager::adhoc_task_failed(\$task);
+        \$failed++;
+        echo 'Adhoc task failed: ' . get_class(\$task) . ': ' . \$e->getMessage() . PHP_EOL;
+    }
+}
+echo 'Drained ' . \$executed . ' adhoc task(s), ' . \$failed . ' failed.' . PHP_EOL;
+" 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
+
 # Note: $CFG->wwwroot comes from config.php (generated at runtime), not from
 # mdl_config. No wwwroot rewriting is needed in the snapshot.
 

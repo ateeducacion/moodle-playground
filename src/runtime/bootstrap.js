@@ -69,6 +69,7 @@ function buildRuntimePaths(webRoot) {
     LOG_SETTINGS_PATH: `${webRoot}/admin/tool/log/settings.php`,
     HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
     THEME_CSS_WARMUP_PATH: `${webRoot}/__theme_css_warmup.php`,
+    ADHOC_TASKS_DRAINER_PATH: `${webRoot}/__adhoc_tasks_drainer.php`,
   };
 }
 
@@ -960,6 +961,73 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
+// Drains pending Moodle adhoc tasks at boot.  The playground runtime has no cron,
+// so install/upgrade-time tasks (e.g. \mod_qbank\task\transfer_question_categories
+// and \mod_qbank\task\transfer_questions on Moodle 5.0+) would otherwise stay
+// queued forever and block UI such as /question/banks.php.
+export function createAdhocTasksDrainerPhp() {
+  return `<?php
+header('content-type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+
+unset($_SERVER['REMOTE_ADDR']);
+define('CLI_SCRIPT', true);
+
+$result = [
+    'ok' => false,
+    'executed' => [],
+    'failed' => [],
+];
+
+try {
+    require_once('/www/moodle/config.php');
+    require_once($CFG->libdir . '/cronlib.php');
+
+    \\core\\cron::setup_user();
+
+    $maxIterations = 50;
+    $iterations = 0;
+
+    while ($iterations < $maxIterations) {
+        $iterations++;
+        $task = \\core\\task\\manager::get_next_adhoc_task(time());
+        if ($task === null) {
+            break;
+        }
+        $classname = '\\\\' . ltrim(get_class($task), '\\\\');
+        try {
+            \\core\\cron::run_inner_adhoc_task($task);
+            $result['executed'][] = $classname;
+        } catch (\\Throwable $taskError) {
+            \\core\\task\\manager::adhoc_task_failed($task);
+            $result['failed'][] = [
+                'task' => $classname,
+                'type' => get_class($taskError),
+                'message' => $taskError->getMessage(),
+            ];
+        }
+    }
+
+    $result['ok'] = true;
+    $result['iterations'] = $iterations - 1;
+} catch (\\Throwable $error) {
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+    ];
+}
+
+$buffer = ob_get_clean();
+if ($buffer !== '') {
+    $result['output'] = $buffer;
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+`;
+}
+
 function createPdoProbePhp({ dbFile }) {
   const dsn = `sqlite:${dbFile}`;
 
@@ -1738,6 +1806,10 @@ async function prepareMoodleRuntime({
     rp.THEME_CSS_WARMUP_PATH,
     textEncoder.encode(createThemeCssWarmupPhp()),
   );
+  await php.writeFile(
+    rp.ADHOC_TASKS_DRAINER_PATH,
+    textEncoder.encode(createAdhocTasksDrainerPhp()),
+  );
   const filesMs = Math.round(performance.now() - tFiles);
 
   const tPatch = performance.now();
@@ -1919,6 +1991,20 @@ async function runThemeCssWarmup(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
     "/__theme_css_warmup.php",
+    undefined,
+    webRoot,
+  );
+  const payload = output.trim();
+  const jsonStart = payload.indexOf("{");
+  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
+
+  return jsonPayload ? JSON.parse(jsonPayload) : {};
+}
+
+async function runAdhocTasksDrainer(php, webRoot) {
+  const output = await requestRuntimeScript(
+    php,
+    "/__adhoc_tasks_drainer.php",
     undefined,
     webRoot,
   );
@@ -2413,6 +2499,40 @@ export async function bootstrapMoodle({
     publish(
       `Admin defaults seeder failed: ${adminDefaults.error.message} [${adminDefaultsMs}ms]`,
       0.919,
+    );
+  }
+
+  // Drain any adhoc tasks queued during install/upgrade.  Moodle 5.0 enqueues
+  // mod_qbank transfer tasks that block /question/banks.php until executed; the
+  // playground has no cron, so we run them here.  Failures are non-fatal.
+  const tAdhoc = performance.now();
+  try {
+    publish(
+      "Draining pending ad-hoc tasks (question-bank migration, etc.).",
+      0.9195,
+    );
+    const adhoc = await runAdhocTasksDrainer(php, webRoot);
+    const adhocMs = Math.round(performance.now() - tAdhoc);
+    if (adhoc?.ok) {
+      const executed = adhoc.executed?.length ?? 0;
+      const failed = adhoc.failed?.length ?? 0;
+      publish(
+        failed > 0
+          ? `Drained ${executed} ad-hoc task(s), ${failed} failed. [${adhocMs}ms]`
+          : `Drained ${executed} pending ad-hoc task(s). [${adhocMs}ms]`,
+        0.9197,
+      );
+    } else {
+      publish(
+        `Ad-hoc task drainer reported failure: ${adhoc?.error?.message || "unknown error"}. [${adhocMs}ms]`,
+        0.9197,
+      );
+    }
+  } catch (adhocError) {
+    const adhocMs = Math.round(performance.now() - tAdhoc);
+    publish(
+      `Ad-hoc task drainer crashed (${adhocError.message}). [${adhocMs}ms]`,
+      0.9197,
     );
   }
 
