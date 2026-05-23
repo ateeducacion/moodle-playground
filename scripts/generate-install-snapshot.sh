@@ -266,6 +266,31 @@ try {
 }
 " 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
 
+# Strip mod_qbank's transfer-questions ad-hoc tasks that Moodle 5.0+ enqueues
+# during install.  The playground has no cron and no pre-existing question data
+# to migrate, but leaving these queued would block /question/banks.php with a
+# "tasks are not yet complete" banner.  Mirrors the runtime drainer in
+# src/runtime/bootstrap.js.
+${PHP_BIN:-php} -d max_input_vars=5000 -r "
+define('CLI_SCRIPT', true);
+define('CACHE_DISABLE_ALL', true);
+define('CACHE_DISABLE_STORES', true);
+require('$SOURCE_DIR/config.php');
+
+global \$DB;
+\$classes = [
+    '\\\\mod_qbank\\\\task\\\\transfer_question_categories',
+    '\\\\mod_qbank\\\\task\\\\transfer_questions',
+];
+foreach (\$classes as \$classname) {
+    \$count = \$DB->count_records('task_adhoc', ['classname' => \$classname]);
+    if (\$count > 0) {
+        \$DB->delete_records('task_adhoc', ['classname' => \$classname]);
+        echo 'Cleared ' . \$count . ' ' . \$classname . ' task(s).' . PHP_EOL;
+    }
+}
+" 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
+
 # Note: $CFG->wwwroot comes from config.php (generated at runtime), not from
 # mdl_config. No wwwroot rewriting is needed in the snapshot.
 
