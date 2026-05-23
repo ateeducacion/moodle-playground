@@ -961,10 +961,17 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-// Drains pending Moodle adhoc tasks at boot.  The playground runtime has no cron,
-// so install/upgrade-time tasks (e.g. \mod_qbank\task\transfer_question_categories
-// and \mod_qbank\task\transfer_questions on Moodle 5.0+) would otherwise stay
-// queued forever and block UI such as /question/banks.php.
+// Clears Moodle 5.0+ qbank transfer adhoc tasks at boot.  These tasks
+// (\mod_qbank\task\transfer_question_categories and \mod_qbank\task\transfer_questions)
+// are queued during install/upgrade to migrate questions from legacy contexts
+// into the new course-shared question bank.  The playground has no cron and no
+// pre-existing question data to migrate, so executing the tasks is both slow
+// and pointless — but leaving them queued blocks /question/banks.php with a
+// "tasks are not yet complete" banner.  We simply remove them from the queue.
+//
+// The list of blocking classnames is the same one
+// question_bank_helper::has_bank_migration_task_completed_successfully()
+// inspects (see question/classes/local/bank/question_bank_helper.php).
 export function createAdhocTasksDrainerPhp() {
   return `<?php
 header('content-type: application/json; charset=utf-8');
@@ -977,41 +984,28 @@ define('CLI_SCRIPT', true);
 
 $result = [
     'ok' => false,
-    'executed' => [],
-    'failed' => [],
+    'cleared' => [],
+];
+
+$blockingClasses = [
+    '\\\\mod_qbank\\\\task\\\\transfer_question_categories',
+    '\\\\mod_qbank\\\\task\\\\transfer_questions',
 ];
 
 try {
     require_once('/www/moodle/config.php');
-    require_once($CFG->libdir . '/cronlib.php');
 
-    \\core\\cron::setup_user();
-
-    $maxIterations = 50;
-    $iterations = 0;
-
-    while ($iterations < $maxIterations) {
-        $iterations++;
-        $task = \\core\\task\\manager::get_next_adhoc_task(time());
-        if ($task === null) {
-            break;
-        }
-        $classname = '\\\\' . ltrim(get_class($task), '\\\\');
+    global $DB;
+    foreach ($blockingClasses as $classname) {
         try {
-            \\core\\cron::run_inner_adhoc_task($task);
-            $result['executed'][] = $classname;
+            $deleted = $DB->delete_records('task_adhoc', ['classname' => $classname]);
+            $result['cleared'][$classname] = (bool) $deleted;
         } catch (\\Throwable $taskError) {
-            \\core\\task\\manager::adhoc_task_failed($task);
-            $result['failed'][] = [
-                'task' => $classname,
-                'type' => get_class($taskError),
-                'message' => $taskError->getMessage(),
-            ];
+            $result['cleared'][$classname] = false;
+            $result['errors'][$classname] = $taskError->getMessage();
         }
     }
-
     $result['ok'] = true;
-    $result['iterations'] = $iterations - 1;
 } catch (\\Throwable $error) {
     $result['error'] = [
         'type' => get_class($error),
@@ -2502,24 +2496,18 @@ export async function bootstrapMoodle({
     );
   }
 
-  // Drain any adhoc tasks queued during install/upgrade.  Moodle 5.0 enqueues
-  // mod_qbank transfer tasks that block /question/banks.php until executed; the
-  // playground has no cron, so we run them here.  Failures are non-fatal.
+  // Clear Moodle 5.0+ qbank transfer adhoc tasks queued during install — the
+  // playground has no cron and no legacy question data to migrate, so leaving
+  // them queued only serves to block /question/banks.php.  Non-fatal.
   const tAdhoc = performance.now();
   try {
-    publish(
-      "Draining pending ad-hoc tasks (question-bank migration, etc.).",
-      0.9195,
-    );
+    publish("Clearing qbank transfer ad-hoc tasks.", 0.9195);
     const adhoc = await runAdhocTasksDrainer(php, webRoot);
     const adhocMs = Math.round(performance.now() - tAdhoc);
     if (adhoc?.ok) {
-      const executed = adhoc.executed?.length ?? 0;
-      const failed = adhoc.failed?.length ?? 0;
+      const cleared = Object.values(adhoc.cleared || {}).filter(Boolean).length;
       publish(
-        failed > 0
-          ? `Drained ${executed} ad-hoc task(s), ${failed} failed. [${adhocMs}ms]`
-          : `Drained ${executed} pending ad-hoc task(s). [${adhocMs}ms]`,
+        `Cleared ${cleared} blocking qbank task entry/entries. [${adhocMs}ms]`,
         0.9197,
       );
     } else {
