@@ -1498,9 +1498,42 @@ async function patchRuntimePhpSources(php, webRoot) {
 
         self::init();
 
+        if (!self::playground_refresh_plugin_inmemory($component, $fulldir)) {
+            return;
+        }
+
+        self::playground_refresh_subplugin_types($component, $fulldir);
+
+        if (is_array(self::$classmap)) {
+            ksort(self::$classmap);
+        }
+        if (is_array(self::$classmaprenames)) {
+            ksort(self::$classmaprenames);
+        }
+
+        file_put_contents($CFG->alternative_component_cache, self::get_cache_content());
+        clearstatcache(true, $CFG->alternative_component_cache);
+    }
+
+    /**
+     * PLAYGROUND: in-memory refresh of a single plugin's component cache entries.
+     *
+     * Does the classmap / filemap / plugin-list updates for one plugin without
+     * writing the cache file. The public entry point above writes the cache
+     * once after all parents and subplugins have been processed.
+     *
+     * @param string $component frankenstyle component name
+     * @param string $fulldir absolute plugin directory
+     * @return bool true if the plugin was refreshed, false if the component is invalid
+     */
+    protected static function playground_refresh_plugin_inmemory(string $component, string $fulldir): bool {
+        if (!is_dir($fulldir)) {
+            return false;
+        }
+
         [$plugintype, $pluginname] = self::normalize_component($component);
         if (empty($plugintype) || empty($pluginname)) {
-            return;
+            return false;
         }
 
         if (!isset(self::$plugins[$plugintype]) || !is_array(self::$plugins[$plugintype])) {
@@ -1517,15 +1550,131 @@ async function patchRuntimePhpSources(php, webRoot) {
         self::load_renamed_classes($fulldir);
         self::playground_refresh_plugin_filemap($plugintype, $pluginname, $fulldir);
 
-        if (is_array(self::$classmap)) {
-            ksort(self::$classmap);
-        }
-        if (is_array(self::$classmaprenames)) {
-            ksort(self::$classmaprenames);
+        return true;
+    }
+
+    /**
+     * PLAYGROUND: read db/subplugins.json from a freshly installed plugin and
+     * register its subplugin types + each subplugin instance in the in-memory
+     * component cache.
+     *
+     * Without this, plugins like mod_customcert (which ships
+     * customcertelement_* subplugins) end up with an autoloader that has no
+     * mapping for their subplugin classes, because the prebuilt
+     * alternative_component_cache was generated before the plugin existed and
+     * did not see the subplugins.json declaration.
+     *
+     * Supports both the modern "plugintypes" key (paths relative to dirroot)
+     * and the legacy "subplugintypes" key (paths relative to the parent plugin
+     * directory).
+     *
+     * @param string $parentcomponent frankenstyle component name of the parent plugin
+     * @param string $parentfulldir absolute path of the parent plugin directory
+     * @return void
+     */
+    protected static function playground_refresh_subplugin_types(
+        string $parentcomponent,
+        string $parentfulldir,
+    ): void {
+        global $CFG;
+
+        $subpluginsfile = $parentfulldir . '/db/subplugins.json';
+        if (!is_readable($subpluginsfile)) {
+            return;
         }
 
-        file_put_contents($CFG->alternative_component_cache, self::get_cache_content());
-        clearstatcache(true, $CFG->alternative_component_cache);
+        $raw = @file_get_contents($subpluginsfile);
+        if ($raw === false) {
+            return;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return;
+        }
+
+        $types = [];
+        if (!empty($decoded['plugintypes']) && is_array($decoded['plugintypes'])) {
+            // Modern format: paths are relative to $CFG->dirroot.
+            foreach ($decoded['plugintypes'] as $type => $relpath) {
+                if (!is_string($type) || !is_string($relpath)) {
+                    continue;
+                }
+                $types[$type] = rtrim($CFG->dirroot, '/') . '/' . ltrim($relpath, '/');
+            }
+        } else if (!empty($decoded['subplugintypes']) && is_array($decoded['subplugintypes'])) {
+            // Legacy format: paths are relative to the parent plugin directory.
+            foreach ($decoded['subplugintypes'] as $type => $relpath) {
+                if (!is_string($type) || !is_string($relpath)) {
+                    continue;
+                }
+                $types[$type] = rtrim($parentfulldir, '/') . '/' . ltrim($relpath, '/');
+            }
+        }
+
+        if (empty($types)) {
+            return;
+        }
+
+        if (property_exists(static::class, 'subplugins')) {
+            if (!is_array(self::$subplugins)) {
+                self::$subplugins = [];
+            }
+            self::$subplugins[$parentcomponent] = [];
+        }
+
+        foreach ($types as $subplugintype => $subplugintyperoot) {
+            if (!is_dir($subplugintyperoot)) {
+                continue;
+            }
+
+            if (property_exists(static::class, 'plugintypes')) {
+                if (!is_array(self::$plugintypes)) {
+                    self::$plugintypes = [];
+                }
+                self::$plugintypes[$subplugintype] = $subplugintyperoot;
+                ksort(self::$plugintypes);
+            }
+
+            // Discover every subplugin shipped under the type root. A subplugin
+            // is any direct subdirectory that contains a version.php.
+            $discovered = [];
+            foreach (new \\DirectoryIterator($subplugintyperoot) as $entry) {
+                if ($entry->isDot() || !$entry->isDir()) {
+                    continue;
+                }
+                $name = $entry->getFilename();
+                if ($name[0] === '.' || $name[0] === '_') {
+                    continue;
+                }
+                $subdir = $entry->getPathname();
+                if (!file_exists($subdir . '/version.php')) {
+                    continue;
+                }
+                $discovered[$name] = $subdir;
+            }
+            ksort($discovered);
+
+            foreach ($discovered as $name => $subdir) {
+                $subcomponent = $subplugintype . '_' . $name;
+                self::playground_refresh_plugin_inmemory($subcomponent, $subdir);
+
+                if (property_exists(static::class, 'subplugins')
+                        && isset(self::$subplugins[$parentcomponent])) {
+                    if (!isset(self::$subplugins[$parentcomponent][$subplugintype])
+                            || !is_array(self::$subplugins[$parentcomponent][$subplugintype])) {
+                        self::$subplugins[$parentcomponent][$subplugintype] = [];
+                    }
+                    self::$subplugins[$parentcomponent][$subplugintype][] = $name;
+                }
+            }
+
+            if (property_exists(static::class, 'subplugins')
+                    && isset(self::$subplugins[$parentcomponent][$subplugintype])) {
+                self::$subplugins[$parentcomponent][$subplugintype]
+                    = array_values(array_unique(self::$subplugins[$parentcomponent][$subplugintype]));
+                sort(self::$subplugins[$parentcomponent][$subplugintype]);
+            }
+        }
     }
 
     /**
