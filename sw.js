@@ -381,6 +381,21 @@ function getScopedBasePath(scopeId, runtimeId) {
   return withAppBasePath(`/playground/${scopeId}/${runtimeId}`);
 }
 
+// Build a cache key for the shared scoped-static cache that is namespaced by
+// scope AND runtime. Many Moodle assets (theme CSS, /pix svgs, fonts) are served
+// without a revision in their URL, so keying on the prefix-stripped requestPath
+// alone would make two runtimes / version switches collide on the same entry and
+// serve stale cross-runtime content. Including scopeId + runtimeId keeps each
+// runtime's assets isolated within the single global cache.
+function buildScopedCacheKey(origin, scopeId, runtimeId, requestPath) {
+  const queryIndex = requestPath.indexOf("?");
+  const pathPart = queryIndex === -1 ? requestPath : requestPath.slice(0, queryIndex);
+  const searchPart = queryIndex === -1 ? "" : requestPath.slice(queryIndex);
+  const normalizedPath = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  const scopedPath = `/playground/${scopeId}/${runtimeId}${normalizedPath}`.replace(/\/{2,}/gu, "/");
+  return new URL(`${scopedPath}${searchPart}`, origin).toString();
+}
+
 function decodeHtmlAttributeEntities(value) {
   return value
     .replace(/&#x([0-9a-f]+);/giu, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
@@ -461,7 +476,12 @@ function rewriteHtmlDocument(html, scope) {
 
   let result = html.replace(
     /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
-    (match, prefix, rawValue, suffix) => `${prefix}${rewriteHtmlAttributeUrl(rawValue, scope)}${suffix}`,
+    // rewriteHtmlAttributeUrl returns a *decoded* URL (entities turned back into
+    // raw &, ", <, > characters). Re-encode it for HTML attribute context before
+    // interpolating it back between the quotes, otherwise a decoded value
+    // containing a quote could close the attribute early and inject HTML into
+    // the playground iframe (reflected XSS).
+    (match, prefix, rawValue, suffix) => `${prefix}${escapeHtml(rewriteHtmlAttributeUrl(rawValue, scope))}${suffix}`,
   );
 
   // Rewrite M.cfg.wwwroot in inline <script> blocks so Moodle's JavaScript
@@ -678,7 +698,7 @@ self.addEventListener("fetch", (event) => {
         && (isScopedStaticAsset(requestPath) || isCacheablePhpAsset(pathOnly))
       ) {
         const scopedCache = await caches.open(SCOPED_STATIC_CACHE);
-        const cacheKey = new URL(requestPath, url.origin).toString();
+        const cacheKey = buildScopedCacheKey(url.origin, scopeId, runtimeId, requestPath);
         const cached = await scopedCache.match(cacheKey);
         if (cached) {
           return cached;

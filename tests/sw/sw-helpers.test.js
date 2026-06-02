@@ -146,6 +146,42 @@ function rewriteHtmlAttributeUrl(
   }
 }
 
+// Replicate escapeHtml from sw.js
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+// Replicate the attribute-rewrite step from rewriteHtmlDocument in sw.js: the
+// decoded, rewritten value must be re-encoded for HTML attribute context before
+// it is interpolated back between the quotes.
+function rewriteHtmlDocumentAttributes(html, scope) {
+  return html.replace(
+    /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
+    (_match, prefix, rawValue, suffix) =>
+      `${prefix}${escapeHtml(rewriteHtmlAttributeUrl(rawValue, scope))}${suffix}`,
+  );
+}
+
+// Replicate buildScopedCacheKey from sw.js
+function buildScopedCacheKey(origin, scopeId, runtimeId, requestPath) {
+  const queryIndex = requestPath.indexOf("?");
+  const pathPart =
+    queryIndex === -1 ? requestPath : requestPath.slice(0, queryIndex);
+  const searchPart = queryIndex === -1 ? "" : requestPath.slice(queryIndex);
+  const normalizedPath = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  const scopedPath =
+    `/playground/${scopeId}/${runtimeId}${normalizedPath}`.replace(
+      /\/{2,}/gu,
+      "/",
+    );
+  return new URL(`${scopedPath}${searchPart}`, origin).toString();
+}
+
 // Replicate extractScopedRuntime pattern from sw.js
 function extractScopedRuntime(pathname, search = "") {
   const match = pathname.match(/\/playground\/([^/]+)\/([^/]+)(\/.*)?$/u);
@@ -342,6 +378,121 @@ describe("rewriteHtmlAttributeUrl", () => {
         scope,
       ),
       "/moodle-playground/playground/main/php83-moodle50/course/edit.php?category=0",
+    );
+  });
+});
+
+describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
+  const scope = {
+    origin: "https://ateeducacion.github.io",
+    scopeId: "main",
+    runtimeId: "php83-moodle50",
+    appBasePath: "/moodle-playground",
+  };
+
+  it("re-encodes & in rewritten query strings for attribute context", () => {
+    // Moodle emits &amp; in attributes; rewriteHtmlAttributeUrl decodes it,
+    // so the document rewrite must re-encode it back to &amp; (not raw &).
+    const html =
+      '<a href="/moodle-playground/admin/index.php?cache=1&amp;sesskey=abc">x</a>';
+    const out = rewriteHtmlDocumentAttributes(html, scope);
+    assert.strictEqual(
+      out,
+      '<a href="/moodle-playground/playground/main/php83-moodle50/admin/index.php?cache=1&amp;sesskey=abc">x</a>',
+    );
+    // The raw, unescaped ampersand must never appear in the output attribute.
+    assert.ok(!/sesskey=abc/.test(out) || /&amp;sesskey=abc/.test(out));
+  });
+
+  it("neutralizes a quote-injection payload that would close the attribute", () => {
+    // A reflected RELATIVE URL whose entity-decoded form contains a double quote.
+    // rewriteHtmlAttributeUrl returns relative URLs untouched (without going
+    // through URL normalization that would percent-encode the quote), so the
+    // document rewrite's escapeHtml is the layer that prevents the decoded quote
+    // from closing the attribute early and injecting markup into the iframe.
+    const html =
+      '<a href="foo.php?x=&quot;&gt;&lt;img src=x onerror=alert(1)&gt;">x</a>';
+    const out = rewriteHtmlDocumentAttributes(html, scope);
+    // The attribute must still be a single quoted value (not broken out of).
+    const valueMatch = out.match(/href="([^"]*)"/u);
+    assert.ok(valueMatch, "attribute should still be a single quoted value");
+    // The decoded quote must have been re-encoded back to an entity.
+    assert.ok(out.includes("&quot;"), "double quote must be encoded");
+    // The dangerous unencoded markup must not be present.
+    assert.ok(!out.includes('"><img'), "must not break out of the attribute");
+    assert.ok(
+      !/<img\s+src=x\s+onerror=/u.test(out),
+      "injected <img> tag must not appear unescaped",
+    );
+  });
+
+  it("re-encodes a single quote in a relative URL (single-quote breakout)", () => {
+    // Single-quoted attribute with a decoded single quote in a relative URL.
+    const html = "<a href='foo.php?n=&#39;a&#39;'>x</a>";
+    const out = rewriteHtmlDocumentAttributes(html, scope);
+    assert.ok(out.includes("&#39;"), "single quote must be encoded");
+    assert.ok(!/n='a'/u.test(out), "raw single quotes must not appear");
+  });
+
+  it("leaves clean relative URLs intact after re-encoding", () => {
+    const html = '<a href="upgradesettings.php">x</a>';
+    const out = rewriteHtmlDocumentAttributes(html, scope);
+    assert.strictEqual(out, '<a href="upgradesettings.php">x</a>');
+  });
+});
+
+describe("buildScopedCacheKey", () => {
+  const origin = "https://ateeducacion.github.io";
+
+  it("namespaces the cache key by scope and runtime", () => {
+    assert.strictEqual(
+      buildScopedCacheKey(origin, "main", "php83-moodle50", "/theme/main.css"),
+      "https://ateeducacion.github.io/playground/main/php83-moodle50/theme/main.css",
+    );
+  });
+
+  it("produces different keys for different runtimes (no cross-runtime collision)", () => {
+    const path = "/pix/i/logo.svg";
+    const keyA = buildScopedCacheKey(origin, "main", "php83-moodle50", path);
+    const keyB = buildScopedCacheKey(origin, "main", "php83-moodle51", path);
+    assert.notStrictEqual(keyA, keyB);
+  });
+
+  it("produces different keys for different scopes", () => {
+    const path = "/theme/font.php/boost/core/fa.woff2";
+    const keyA = buildScopedCacheKey(origin, "main", "php83-moodle50", path);
+    const keyB = buildScopedCacheKey(origin, "alt", "php83-moodle50", path);
+    assert.notStrictEqual(keyA, keyB);
+  });
+
+  it("preserves the query string", () => {
+    assert.strictEqual(
+      buildScopedCacheKey(
+        origin,
+        "main",
+        "php83-moodle50",
+        "/lib/javascript.php?ver=123",
+      ),
+      "https://ateeducacion.github.io/playground/main/php83-moodle50/lib/javascript.php?ver=123",
+    );
+  });
+
+  it("normalizes a leading-slash-less request path", () => {
+    assert.strictEqual(
+      buildScopedCacheKey(origin, "main", "php83-moodle50", "theme/main.css"),
+      "https://ateeducacion.github.io/playground/main/php83-moodle50/theme/main.css",
+    );
+  });
+
+  it("collapses duplicate slashes in the path but not the query", () => {
+    assert.strictEqual(
+      buildScopedCacheKey(
+        origin,
+        "main",
+        "php83-moodle50",
+        "//theme//main.css?u=a//b",
+      ),
+      "https://ateeducacion.github.io/playground/main/php83-moodle50/theme/main.css?u=a//b",
     );
   });
 });

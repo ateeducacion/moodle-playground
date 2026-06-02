@@ -163,11 +163,13 @@ async function handleAtomFeed(repo, type) {
   const url = `${GITHUB_BASE}/${repo}/${type}.atom`;
 
   try {
-    const upstream = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": "github-proxy-worker" },
-    });
+    // Atom feeds live on github.com; re-validate any redirect hop against the
+    // GitHub host allowlist instead of blindly following it.
+    const upstream = await fetchWithValidatedRedirects(
+      url,
+      { method: "GET", headers: { "User-Agent": "github-proxy-worker" } },
+      isGitHubDirectProxyUrl,
+    );
 
     if (!upstream.ok) {
       return jsonResponse(
@@ -188,6 +190,9 @@ async function handleAtomFeed(repo, type) {
 
     return new Response(upstream.body, { status: 200, headers });
   } catch (error) {
+    if (error instanceof RedirectBlockedError) {
+      return redirectBlockedResponse(error);
+    }
     return jsonResponse(
       { error: "Failed to fetch Atom feed.", details: error.message },
       502,
@@ -294,6 +299,102 @@ async function githubApiRequest(url, env) {
 }
 
 // ---------------------------------------------------------------------------
+// Redirect-safe fetch
+// ---------------------------------------------------------------------------
+
+// Maximum number of redirect hops to follow before giving up.
+const MAX_REDIRECT_HOPS = 5;
+
+class RedirectBlockedError extends Error {
+  constructor(message, blockedUrl) {
+    super(message);
+    this.name = "RedirectBlockedError";
+    this.blockedUrl = blockedUrl;
+  }
+}
+
+// Fetches a URL while validating every redirect hop instead of blindly
+// following them. Using redirect:"follow" would let an allowlisted host (or one
+// with an open redirect / attacker-influenced content) 302 us into a private or
+// otherwise unauthorized target (e.g. http://169.254.169.254/, internal Redis),
+// bypassing the SSRF guard. We re-run the SSRF check and the supplied
+// authorization predicate against each Location before re-issuing the request.
+//
+//   isAuthorized(url) -> boolean : returns true when the host/path is allowed.
+//
+// Throws RedirectBlockedError if any hop fails authorization or the hop cap is
+// exceeded. The caller is expected to map that to a 400/blocked response.
+async function fetchWithValidatedRedirects(initialUrl, init, isAuthorized) {
+  let currentUrl = new URL(initialUrl);
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    const response = await fetch(currentUrl.toString(), {
+      ...init,
+      redirect: "manual",
+    });
+
+    if (!isRedirectStatus(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("Location");
+    if (!location) {
+      // A 3xx without a Location header is not actionable; return as-is.
+      return response;
+    }
+
+    if (hop >= MAX_REDIRECT_HOPS) {
+      throw new RedirectBlockedError(
+        `Too many redirects (exceeded ${MAX_REDIRECT_HOPS} hops).`,
+        currentUrl.toString(),
+      );
+    }
+
+    let nextUrl;
+    try {
+      nextUrl = new URL(location, currentUrl);
+    } catch {
+      throw new RedirectBlockedError(
+        "Redirect Location is not a valid URL.",
+        location,
+      );
+    }
+
+    if (nextUrl.protocol !== "https:" && nextUrl.protocol !== "http:") {
+      throw new RedirectBlockedError(
+        "Redirect target uses an unsupported protocol.",
+        nextUrl.toString(),
+      );
+    }
+
+    if (isPrivateOrLocalHost(nextUrl) || !isAuthorized(nextUrl)) {
+      throw new RedirectBlockedError(
+        "Redirect target is not authorized.",
+        nextUrl.toString(),
+      );
+    }
+
+    currentUrl = nextUrl;
+  }
+
+  // Unreachable: the loop returns or throws within MAX_REDIRECT_HOPS + 1 passes.
+  throw new RedirectBlockedError(
+    `Too many redirects (exceeded ${MAX_REDIRECT_HOPS} hops).`,
+    currentUrl.toString(),
+  );
+}
+
+function isRedirectStatus(status) {
+  return (
+    status === 301 ||
+    status === 302 ||
+    status === 303 ||
+    status === 307 ||
+    status === 308
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ZIP proxy (shared by all archive downloads)
 // ---------------------------------------------------------------------------
 
@@ -314,11 +415,15 @@ async function proxyGitHubZip(
       headers.set("Range", forwardedRange);
     }
 
-    const upstream = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers,
-    });
+    // GitHub archive/release downloads legitimately 302 to codeload.github.com
+    // and objects.githubusercontent.com. Re-validate every redirect hop against
+    // the GitHub host allowlist so the 302 cannot be used to reach an internal
+    // or unauthorized host.
+    const upstream = await fetchWithValidatedRedirects(
+      url,
+      { method: "GET", headers },
+      isGitHubDirectProxyUrl,
+    );
 
     if (!upstream.ok) {
       return jsonResponse(
@@ -354,6 +459,9 @@ async function proxyGitHubZip(
       headers: responseHeaders,
     });
   } catch (error) {
+    if (error instanceof RedirectBlockedError) {
+      return redirectBlockedResponse(error);
+    }
     return jsonResponse(
       { error: "Failed to fetch remote resource.", details: error.message },
       502,
@@ -405,11 +513,14 @@ async function handleGenericProxy(targetUrl, request, env) {
   try {
     const upstreamHeaders = buildGenericProxyRequestHeaders(parsedUrl, request);
 
-    const upstream = await fetch(parsedUrl.toString(), {
-      method: "GET",
-      redirect: "follow",
-      headers: upstreamHeaders,
-    });
+    // Re-validate every redirect hop against the same generic-proxy allowlist
+    // (and SSRF guard) that authorized the initial URL, so an allowlisted host
+    // cannot 302 us into an internal or unsupported target.
+    const upstream = await fetchWithValidatedRedirects(
+      parsedUrl.toString(),
+      { method: "GET", headers: upstreamHeaders },
+      isSupportedGenericProxyUrl,
+    );
 
     if (!upstream.ok) {
       return jsonResponse(
@@ -443,6 +554,9 @@ async function handleGenericProxy(targetUrl, request, env) {
       headers,
     });
   } catch (error) {
+    if (error instanceof RedirectBlockedError) {
+      return redirectBlockedResponse(error);
+    }
     return jsonResponse(
       { error: "Failed to fetch remote resource.", details: error.message },
       502,
@@ -482,6 +596,19 @@ function jsonResponse(data, status) {
   });
 }
 
+// Maps a blocked redirect into a 400 response. A redirect into an
+// unauthorized/internal target is a client-visible policy rejection, not an
+// upstream failure.
+function redirectBlockedResponse(error) {
+  return jsonResponse(
+    {
+      error: "Redirect target is not an allowed proxy destination.",
+      details: error.message,
+    },
+    400,
+  );
+}
+
 function looksLikeZipUrl(url) {
   const pathname = url.pathname.toLowerCase();
 
@@ -495,13 +622,165 @@ function looksLikeZipUrl(url) {
 }
 
 function isSupportedGenericProxyUrl(url) {
-  return (
-    looksLikeZipUrl(url) ||
+  // Defensive SSRF guard: never proxy private, loopback, or link-local hosts,
+  // even if the path looks zip-like or otherwise matches an allowlist helper.
+  if (isPrivateOrLocalHost(url)) {
+    return false;
+  }
+
+  // Specific endpoint helpers authorize a URL regardless of its path shape.
+  if (
     isFacturaScriptsPluginPage(url) ||
     isGitHubDirectProxyUrl(url) ||
     isGoogleDriveDirectFileUrl(url) ||
     isOmekaOrgResourceUrl(url)
+  ) {
+    return true;
+  }
+
+  // A zip-like path only authorizes a request when it also targets an
+  // allowlisted host. Path shape alone must never grant proxy access — that
+  // would turn the worker into an open proxy / SSRF vector.
+  if (looksLikeZipUrl(url) && isAllowlistedProxyHost(url)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Hosts that may serve zip-like downloads through the generic proxy. Specific
+// endpoint helpers (GitHub, Google Drive, omeka, FacturaScripts plugin pages)
+// are checked separately; this list additionally authorizes zip-only paths
+// such as FacturaScripts build downloads (`/downloadbuild/{n}/{channel}`).
+function isAllowlistedProxyHost(url) {
+  const hostname = url.hostname.toLowerCase();
+
+  return (
+    hostname === "github.com" ||
+    hostname === "codeload.github.com" ||
+    hostname === "raw.githubusercontent.com" ||
+    hostname === "gist.githubusercontent.com" ||
+    hostname === "media.githubusercontent.com" ||
+    hostname === "objects.githubusercontent.com" ||
+    hostname === "release-assets.githubusercontent.com" ||
+    hostname.endsWith(".githubusercontent.com") ||
+    hostname === "drive.google.com" ||
+    hostname === "drive.usercontent.google.com" ||
+    hostname === "omeka.org" ||
+    hostname === "dev.omeka.org" ||
+    hostname === "facturascripts.com"
   );
+}
+
+// Reject hosts that resolve to private, loopback, or link-local addresses to
+// avoid SSRF into internal infrastructure (cloud metadata endpoints, Redis on
+// localhost, internal corp services, etc.).
+function isPrivateOrLocalHost(url) {
+  const hostname = url.hostname.toLowerCase();
+
+  // Hostnames that are not numeric IPs but always resolve locally or to a
+  // cloud-metadata endpoint.
+  if (
+    hostname === "localhost" ||
+    hostname === "localhost.localdomain" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname === "metadata.google.internal" ||
+    hostname === "metadata"
+  ) {
+    return true;
+  }
+
+  // IPv6 literals (URL hostname keeps the surrounding brackets).
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    const ipv6 = hostname.slice(1, -1);
+    if (
+      ipv6 === "::1" ||
+      ipv6 === "::" ||
+      ipv6.startsWith("fe80:") || // link-local
+      ipv6.startsWith("fc") || // unique local fc00::/7
+      ipv6.startsWith("fd")
+    ) {
+      return true;
+    }
+
+    // IPv4-mapped IPv6 addresses (::ffff:x.x.x.x or ::ffff:HHHH:HHHH) tunnel an
+    // embedded IPv4 address through an IPv6 literal. Extract the v4 address and
+    // apply the same private/loopback/link-local checks so e.g.
+    // [::ffff:127.0.0.1] and [::ffff:169.254.169.254] are blocked.
+    const embeddedIpv4 = extractIpv4MappedAddress(ipv6);
+    if (embeddedIpv4 && isPrivateIpv4(embeddedIpv4)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // IPv4 literals.
+  return isPrivateIpv4(hostname);
+}
+
+// Returns true when the dotted-decimal IPv4 string falls inside a private,
+// loopback, or link-local range. Non-IPv4 strings return false.
+function isPrivateIpv4(hostname) {
+  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u);
+  if (!ipv4) {
+    return false;
+  }
+
+  const octets = ipv4.slice(1).map((part) => Number(part));
+  // Dead guard: an octet > 255 is not a valid IPv4 literal. Kept (rather than
+  // treated as blocked) to mirror the original behavior; URL parsing already
+  // rejects such hosts before they reach here.
+  if (octets.some((octet) => octet > 255)) {
+    return false;
+  }
+  const [a, b] = octets;
+
+  if (a === 127) return true; // 127.0.0.0/8 loopback
+  if (a === 10) return true; // 10.0.0.0/8 private
+  if (a === 0) return true; // 0.0.0.0/8 "this network"
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
+
+  return false;
+}
+
+// Extracts the embedded IPv4 address from an IPv4-mapped IPv6 literal.
+// Handles both the dotted form (::ffff:127.0.0.1) and the hex form
+// (::ffff:7f00:1). Returns a dotted-decimal string, or null when the input is
+// not an IPv4-mapped address.
+function extractIpv4MappedAddress(ipv6) {
+  const lower = ipv6.toLowerCase();
+  const mappedPrefix = "::ffff:";
+
+  if (!lower.startsWith(mappedPrefix)) {
+    return null;
+  }
+
+  const tail = lower.slice(mappedPrefix.length);
+
+  // Dotted form: ::ffff:169.254.169.254
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(tail)) {
+    return tail;
+  }
+
+  // Hex form: ::ffff:a9fe:a9fe -> two 16-bit groups encode the four octets.
+  const hexMatch = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (hexMatch) {
+    const high = Number.parseInt(hexMatch[1], 16);
+    const low = Number.parseInt(hexMatch[2], 16);
+    const octets = [
+      (high >> 8) & 0xff,
+      high & 0xff,
+      (low >> 8) & 0xff,
+      low & 0xff,
+    ];
+    return octets.join(".");
+  }
+
+  return null;
 }
 
 function isGitHubDirectProxyUrl(url) {
@@ -509,6 +788,7 @@ function isGitHubDirectProxyUrl(url) {
 
   if (
     hostname === "github.com" ||
+    hostname === "codeload.github.com" ||
     hostname === "raw.githubusercontent.com" ||
     hostname === "gist.githubusercontent.com" ||
     hostname === "media.githubusercontent.com" ||

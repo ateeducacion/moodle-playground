@@ -305,4 +305,369 @@ describe("github-proxy-worker generic ?url= mode", () => {
     const body = await response.json();
     assert.match(body.error, /not a supported direct GitHub\/resource URL/i);
   });
+
+  it("rejects zip-like paths on non-allowlisted hosts (open proxy / SSRF)", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const targets = [
+      "https://internal.corp/secret.zip",
+      "https://evil.example/archive/refs/heads/main.zip",
+      "https://attacker.test/zip/payload",
+      "https://example.com/downloadbuild/123/stable",
+    ];
+
+    for (const target of targets) {
+      const response = await worker.fetch(
+        new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+        {},
+      );
+
+      assert.equal(response.status, 400, `expected 400 for ${target}`);
+      const body = await response.json();
+      assert.match(body.error, /not a supported direct GitHub\/resource URL/i);
+    }
+  });
+
+  it("rejects private, loopback, and link-local hosts even with zip-like paths", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const targets = [
+      "http://169.254.169.254/latest/meta-data/foo.zip",
+      "http://127.0.0.1/x.zip",
+      "http://localhost:6379/x.zip",
+      "http://10.0.0.5/internal.zip",
+      "http://172.16.4.4/internal.zip",
+      "http://192.168.1.1/internal.zip",
+      "http://0.0.0.0/x.zip",
+      "http://[::1]/x.zip",
+      "http://service.local/x.zip",
+    ];
+
+    for (const target of targets) {
+      const response = await worker.fetch(
+        new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+        {},
+      );
+
+      assert.equal(response.status, 400, `expected 400 for ${target}`);
+      const body = await response.json();
+      assert.match(body.error, /not a supported direct GitHub\/resource URL/i);
+    }
+  });
+
+  it("still allows FacturaScripts build downloads on the allowlisted host", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://facturascripts.com/DownloadBuild/123/stable",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://facturascripts.com/DownloadBuild/123/stable",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+});
+
+describe("github-proxy-worker redirect validation (SSRF)", () => {
+  it("blocks a redirect from an allowlisted host into an internal IP", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      // omeka.org is allowlisted, but its (compromised/open-redirect) response
+      // tries to bounce the proxy into the AWS metadata endpoint.
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "http://169.254.169.254/latest/meta-data/" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://omeka.org/s/modules/ContactUs/",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.match(body.error, /not an allowed proxy destination/i);
+    // Only the initial hop was issued; the internal target was never fetched.
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://omeka.org/s/modules/ContactUs/");
+    assert.equal(calls[0].init.redirect, "manual");
+  });
+
+  it("blocks a redirect into a loopback host", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 301,
+        headers: { Location: "http://127.0.0.1:6379/" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://omeka.org/s/modules/ContactUs/",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("blocks a redirect into a host outside the generic allowlist", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://evil.example/payload" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://omeka.org/s/modules/ContactUs/",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("follows a GitHub archive redirect into codeload.github.com", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (u === "https://github.com/owner/repo/archive/refs/heads/main.zip") {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              "https://codeload.github.com/owner/repo/zip/refs/heads/main",
+          },
+        });
+      }
+
+      if (u === "https://codeload.github.com/owner/repo/zip/refs/heads/main") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&branch=main"),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(
+      calls[0].url,
+      "https://github.com/owner/repo/archive/refs/heads/main.zip",
+    );
+    assert.equal(calls[0].init.redirect, "manual");
+    assert.equal(
+      calls[1].url,
+      "https://codeload.github.com/owner/repo/zip/refs/heads/main",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("follows a GitHub release-asset redirect into objects.githubusercontent.com", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (
+        u === "https://api.github.com/repos/owner/repo/releases/tags/v1.0.0"
+      ) {
+        return new Response(
+          JSON.stringify({
+            assets: [
+              {
+                name: "plugin.zip",
+                browser_download_url:
+                  "https://github.com/owner/repo/releases/download/v1.0.0/plugin.zip",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (
+        u ===
+        "https://github.com/owner/repo/releases/download/v1.0.0/plugin.zip"
+      ) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              "https://objects.githubusercontent.com/github-production-release-asset/plugin.zip",
+          },
+        });
+      }
+
+      if (
+        u ===
+        "https://objects.githubusercontent.com/github-production-release-asset/plugin.zip"
+      ) {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=v1.0.0&asset=plugin.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      calls[calls.length - 1].url,
+      "https://objects.githubusercontent.com/github-production-release-asset/plugin.zip",
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("blocks a GitHub archive redirect into a non-GitHub host", async () => {
+    let calls = 0;
+    global.fetch = async (url) => {
+      calls++;
+      if (
+        String(url) ===
+        "https://github.com/owner/repo/archive/refs/heads/main.zip"
+      ) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "http://169.254.169.254/latest/" },
+        });
+      }
+      throw new Error(`unexpected url ${url}`);
+    };
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&branch=main"),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("caps the number of redirect hops", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      // Always redirect to another allowlisted-but-distinct path on omeka.org.
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `https://omeka.org/s/modules/hop-${calls}/` },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://omeka.org/s/modules/ContactUs/",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.match(body.details, /too many redirects/i);
+    // Initial fetch + MAX_REDIRECT_HOPS (5) = 6 issued requests, then capped.
+    assert.equal(calls, 6);
+  });
+});
+
+describe("github-proxy-worker isPrivateOrLocalHost extras", () => {
+  it("rejects IPv4-mapped IPv6 loopback and link-local literals", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const targets = [
+      "http://[::ffff:127.0.0.1]/x.zip",
+      "http://[::ffff:169.254.169.254]/latest/meta-data/foo.zip",
+      "http://[::ffff:7f00:1]/x.zip", // hex form of 127.0.0.1
+      "http://[::ffff:a9fe:a9fe]/x.zip", // hex form of 169.254.169.254
+      "http://[::ffff:10.0.0.5]/internal.zip",
+    ];
+
+    for (const target of targets) {
+      const response = await worker.fetch(
+        new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+        {},
+      );
+
+      assert.equal(response.status, 400, `expected 400 for ${target}`);
+    }
+  });
+
+  it("rejects the cloud metadata DNS name", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const targets = [
+      "http://metadata.google.internal/computeMetadata/v1/x.zip",
+      "http://metadata/computeMetadata/v1/x.zip",
+    ];
+
+    for (const target of targets) {
+      const response = await worker.fetch(
+        new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+        {},
+      );
+
+      assert.equal(response.status, 400, `expected 400 for ${target}`);
+    }
+  });
 });

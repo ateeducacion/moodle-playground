@@ -118,8 +118,16 @@ async function handleUnzip(step, { php, resources }) {
   const entries = await readZipEntries(zipBytes);
 
   const rawPhp = php._php;
+  // Containment prefix used to verify every resolved path stays within
+  // destination (defense-in-depth against ZIP-slip; readZipEntries already
+  // sanitizes traversal segments).
+  const containmentPrefix = `${destination}/`;
   for (const { path, data } of entries) {
     const fullPath = `${destination}/${path}`;
+    // Skip any entry whose resolved path escapes destination.
+    if (!fullPath.startsWith(containmentPrefix)) {
+      continue;
+    }
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir) {
       rawPhp.mkdirTree(parentDir);

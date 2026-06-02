@@ -201,6 +201,54 @@ class sqlite_sql_generator extends sql_generator {
         if ($xmldb_delete_field) {
             $xmldb_table->deleteField($oldname);
         }
+
+        // SQLite cannot ALTER a table in place, so we rebuild it: copy the live
+        // table into temp_data (SELECT *), drop it, recreate it from the desired
+        // schema, then copy the data back. Both halves of this need the real
+        // current column set, because add_field()/add_key()/etc. are routinely
+        // called with an xmldb_table that only carries the table name (and at
+        // most the single field being changed) — see database_manager::add_field
+        // which documents "just the name is mandatory". Trusting
+        // $xmldb_table->getFields() alone would recreate the table with only that
+        // one column and silently drop every existing column.
+        $livecolumns = $this->mdb->get_columns($xmldb_table->getName(), false);
+        $existingcolumns = array();
+        if ($livecolumns) {
+            foreach ($livecolumns as $livecolumn) {
+                $existingcolumns[strtolower($livecolumn->name)] = $livecolumn;
+            }
+        }
+
+        // Re-declare every surviving live column (in its original order) that the
+        // caller did not describe, so getCreateTableSQL() recreates them instead
+        // of dropping them. Skip the field being dropped, and the old name of a
+        // rename (its data is moved to $newname, which the caller adds below).
+        // While iterating, capture the live primary-key columns (in declaration
+        // order) so the constraint can be rebuilt below — without it
+        // getCreateTableSQL() either throws ddsequenceerror for the autoincrement
+        // 'id' column or silently drops a composite primary key.
+        $pkcolumns = array();
+        foreach ($existingcolumns as $columnname => $livecolumn) {
+            if (!empty($livecolumn->primary_key)) {
+                if ($oldname && $columnname === strtolower($oldname)) {
+                    // The primary-key column is the field being dropped or renamed.
+                    // A drop removes it from the key; a rename moves it to $newname.
+                    if ($newname) {
+                        $pkcolumns[] = $newname;
+                    }
+                } else {
+                    $pkcolumns[] = $livecolumn->name;
+                }
+            }
+            if ($oldname && $columnname === strtolower($oldname)) {
+                continue;
+            }
+            if ($xmldb_table->getField($livecolumn->name)) {
+                continue; // Already described by the caller's table object.
+            }
+            $xmldb_table->addField($this->column_info_to_xmldb_field($livecolumn));
+        }
+
         if ($xmldb_add_field) {
             $xmldb_table->addField($xmldb_add_field);
         }
@@ -244,13 +292,39 @@ class sqlite_sql_generator extends sql_generator {
             }
         }
 
+        // The caller's xmldb_table usually carries no keys (add_field()/etc. are
+        // documented to need "just the name"). Re-add the live primary key unless
+        // the caller already described one, otherwise getCreateTableSQL() throws
+        // ddsequenceerror for the autoincrement 'id' and any composite primary key
+        // would be silently dropped.
+        $hasprimary = false;
+        foreach ($xmldb_table->getKeys() as $existingkey) {
+            if ($existingkey->getType() == XMLDB_KEY_PRIMARY) {
+                $hasprimary = true;
+                break;
+            }
+        }
+        if (!$hasprimary && count($pkcolumns)) {
+            $xmldb_table->addKey(new xmldb_key('primary', XMLDB_KEY_PRIMARY, $pkcolumns));
+        }
+
+        // Build the data-copy SELECT list. It must reference ONLY columns that
+        // physically exist in temp_data (the pre-change table). Columns in the
+        // recreated schema that are absent from temp_data (genuinely new fields)
+        // are populated with NULL so SQLite applies their column default.
         $fields = $xmldb_table->getFields();
         foreach ($fields as $key => $field) {
             $fieldname = $field->getName();
             if ($fieldname == $newname && $oldname && $oldname != $newname) {
+                // Renamed field: the data still lives under the old column name
+                // in temp_data, so copy it across to the new name.
                 $fields[$key] = $this->getEncQuoted($oldname) . ' AS ' . $this->getEncQuoted($newname);
+            } else if (!isset($existingcolumns[strtolower($fieldname)])) {
+                // Brand-new column not present in temp_data: select NULL so the
+                // recreated table falls back to the column default for this field.
+                $fields[$key] = 'NULL AS ' . $this->getEncQuoted($fieldname);
             } else {
-                $fields[$key] = $this->getEncQuoted($field->getName());
+                $fields[$key] = $this->getEncQuoted($fieldname);
             }
         }
         $fields = implode(',', $fields);
@@ -262,6 +336,67 @@ class sqlite_sql_generator extends sql_generator {
         $results[] = 'DROP TABLE temp_data';
         $results[] = 'COMMIT';
         return $results;
+    }
+
+    /**
+     * Build an xmldb_field describing an existing live column, so it can be
+     * re-declared when SQLite rebuilds a table for an ALTER emulation.
+     *
+     * The mapping is driven by the canonical meta_type that
+     * sqlite3_pdo_moodle_database::get_columns() assigns, which is more reliable
+     * than the raw SQLite type affinity string.
+     *
+     * @param database_column_info $column
+     * @return xmldb_field
+     */
+    protected function column_info_to_xmldb_field($column) {
+        $field = new xmldb_field($column->name);
+
+        switch ($column->meta_type) {
+            case 'N': // Number / decimal.
+                $type = XMLDB_TYPE_NUMBER;
+                break;
+            case 'C': // Char / varchar.
+                $type = XMLDB_TYPE_CHAR;
+                break;
+            case 'X': // Text.
+                $type = XMLDB_TYPE_TEXT;
+                break;
+            case 'B': // Binary / blob.
+                $type = XMLDB_TYPE_BINARY;
+                break;
+            case 'R': // Auto-increment counter.
+            case 'I': // Integer.
+            case 'L': // Boolean stored as integer.
+            case 'T': // Timestamp stored as integer.
+            case 'D': // Date stored as integer.
+            default:
+                $type = XMLDB_TYPE_INTEGER;
+                break;
+        }
+
+        $field->setType($type);
+
+        if ($type !== XMLDB_TYPE_TEXT && $type !== XMLDB_TYPE_BINARY) {
+            if (!empty($column->max_length)) {
+                $field->setLength($column->max_length);
+            }
+            if ($type === XMLDB_TYPE_NUMBER && !empty($column->scale)) {
+                $field->setDecimals($column->scale);
+            }
+        }
+
+        $field->setNotNull(!empty($column->not_null));
+
+        if (!empty($column->has_default)) {
+            $field->setDefault($column->default_value);
+        }
+
+        if (!empty($column->auto_increment) || $column->meta_type === 'R') {
+            $field->setSequence(true);
+        }
+
+        return $field;
     }
 
     public function getAlterFieldSQL($xmldb_table, $xmldb_field, $skip_type_clause = null, $skip_default_clause = null, $skip_notnull_clause = null) {

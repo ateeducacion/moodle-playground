@@ -35,6 +35,24 @@ describe("parseBlueprint", () => {
     assert.deepStrictEqual(result.steps, []);
   });
 
+  it("parses data: URLs with a charset parameter and base64", () => {
+    const obj = { steps: [{ step: "login" }] };
+    const b64 = Buffer.from(JSON.stringify(obj)).toString("base64");
+    const result = parseBlueprint(
+      `data:application/json;charset=utf-8;base64,${b64}`,
+    );
+    assert.deepStrictEqual(result.steps, [{ step: "login" }]);
+  });
+
+  it("parses data: URLs with a charset parameter without base64", () => {
+    const obj = { steps: [] };
+    const encoded = encodeURIComponent(JSON.stringify(obj));
+    const result = parseBlueprint(
+      `data:application/json;charset=utf-8,${encoded}`,
+    );
+    assert.deepStrictEqual(result.steps, []);
+  });
+
   it("throws on null input", () => {
     assert.throws(() => parseBlueprint(null), /null or undefined/);
   });

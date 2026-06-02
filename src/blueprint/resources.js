@@ -155,7 +155,7 @@ function base64ToBytes(str) {
 }
 
 function dataUrlToBytes(dataUrl) {
-  const match = dataUrl.match(/^data:([^;,]*?)?(;base64)?,(.*)$/su);
+  const match = dataUrl.match(/^data:([^,]*?)(;base64)?,(.*)$/su);
   if (!match) {
     throw new Error("Malformed data: URL in resource descriptor.");
   }

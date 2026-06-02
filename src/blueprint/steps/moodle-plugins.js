@@ -6,8 +6,15 @@
  */
 
 import { readZipEntries } from "../../../lib/moodle-loader.js";
+import { escapePhp } from "../php/helpers.js";
 
 const MOODLE_ROOT = "/www/moodle";
+
+// Moodle plugin names (the part after the type prefix) are lowercase
+// alphanumerics and underscores, starting with a letter (Moodle frankenstyle).
+// We validate user-supplied names against this before interpolating the
+// derived component string into generated PHP.
+const VALID_PLUGIN_NAME = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_ADDON_PROXY_URL = "https://github-proxy.exelearning.dev/";
 
 // Map Moodle plugin types to their directory under MOODLE_ROOT
@@ -114,6 +121,17 @@ function resolvePluginDir(pluginType, pluginName, webRoot) {
       `Unknown plugin type '${pluginType}'. Known types: ${Object.keys(PLUGIN_TYPE_DIRS).join(", ")}`,
     );
   }
+  // pluginName is interpolated into targetDir and resolved on MEMFS. A name
+  // containing '..' (e.g. '../../admin/cli') would escape the plugin directory
+  // and let ZIP extraction overwrite Moodle core BEFORE runMoodleUpgrade's late
+  // check ever runs. Validate here — the shared chokepoint both handlers call —
+  // so targetDir can never be built from a traversal name.
+  if (!VALID_PLUGIN_NAME.test(pluginName)) {
+    throw new Error(
+      `installMoodlePlugin: invalid plugin name '${pluginName}'. ` +
+        "Plugin names must match /^[a-z][a-z0-9_]*$/.",
+    );
+  }
   const base = webRoot || MOODLE_ROOT;
   return `${base}/${typeDir}/${pluginName}`;
 }
@@ -215,6 +233,11 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
   const rawPhp = php._php;
   rawPhp.mkdirTree(targetDir);
 
+  // Containment prefix used to verify every resolved path stays within
+  // targetDir (defense-in-depth against ZIP-slip; readZipEntries already
+  // sanitizes traversal segments).
+  const containmentPrefix = `${targetDir}/`;
+
   let fileCount = 0;
   for (const { path: entryPath, data: entryData } of rawEntries) {
     const relativePath = commonPrefix
@@ -223,6 +246,11 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
     if (!relativePath) continue;
 
     const fullPath = `${targetDir}/${relativePath}`;
+    // Skip any entry whose resolved path escapes targetDir.
+    if (!fullPath.startsWith(containmentPrefix)) {
+      if (publish) publish(`Skipping unsafe plugin entry: ${entryPath}`, 0.935);
+      continue;
+    }
     const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
     if (parentDir && parentDir !== targetDir) {
       rawPhp.mkdirTree(parentDir);
@@ -246,8 +274,21 @@ async function runMoodleUpgrade(
 ) {
   if (publish) publish("Running Moodle upgrade to register plugin.", 0.945);
 
-  const component = `${pluginType}_${pluginName}`;
-  const safeDir = targetDir.replaceAll("'", "\\'");
+  // pluginName is user-supplied and is interpolated (via `component`) into
+  // generated PHP. resolvePluginDir already rejects invalid names before any
+  // file extraction; this is defense-in-depth in case runMoodleUpgrade is ever
+  // reached with an unvalidated name.
+  if (!VALID_PLUGIN_NAME.test(pluginName)) {
+    throw new Error(
+      `installMoodlePlugin: invalid plugin name '${pluginName}'. ` +
+        "Plugin names must match /^[a-z][a-z0-9_]*$/.",
+    );
+  }
+
+  // Both values are escaped for a single-quoted PHP literal (escapePhp handles
+  // backslashes and single quotes) before interpolation.
+  const component = escapePhp(`${pluginType}_${pluginName}`);
+  const safeDir = escapePhp(targetDir);
 
   const base = webRoot || MOODLE_ROOT;
   const code = `<?php
