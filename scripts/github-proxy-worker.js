@@ -633,7 +633,9 @@ function isSupportedGenericProxyUrl(url) {
     isFacturaScriptsPluginPage(url) ||
     isGitHubDirectProxyUrl(url) ||
     isGoogleDriveDirectFileUrl(url) ||
-    isOmekaOrgResourceUrl(url)
+    isOmekaOrgResourceUrl(url) ||
+    isGitLabResourceUrl(url) ||
+    isJsDelivrResourceUrl(url)
   ) {
     return true;
   }
@@ -668,7 +670,10 @@ function isAllowlistedProxyHost(url) {
     hostname === "drive.usercontent.google.com" ||
     hostname === "omeka.org" ||
     hostname === "dev.omeka.org" ||
-    hostname === "facturascripts.com"
+    hostname === "facturascripts.com" ||
+    hostname === "gitlab.com" ||
+    hostname === "cdn.jsdelivr.net" ||
+    hostname === "data.jsdelivr.com"
   );
 }
 
@@ -987,6 +992,20 @@ function isFacturaScriptsPluginPage(url) {
 function isOmekaOrgResourceUrl(url) {
   const hostname = url.hostname.toLowerCase();
   return hostname === "omeka.org" || hostname === "dev.omeka.org";
+}
+
+// GitLab repositories serve branch/tag archives and raw files. Allow the host
+// for any path (mirrors how the legacy zip-proxy authorized gitlab.com).
+function isGitLabResourceUrl(url) {
+  return url.hostname.toLowerCase() === "gitlab.com";
+}
+
+// jsDelivr CDN (cdn.jsdelivr.net) and its package metadata API
+// (data.jsdelivr.com) serve non-zip resources too, so authorize the host for
+// any path rather than only zip-like paths.
+function isJsDelivrResourceUrl(url) {
+  const hostname = url.hostname.toLowerCase();
+  return hostname === "cdn.jsdelivr.net" || hostname === "data.jsdelivr.com";
 }
 
 function buildZipFilename(url) {

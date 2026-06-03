@@ -291,6 +291,81 @@ describe("github-proxy-worker generic ?url= mode", () => {
     );
   });
 
+  it("proxies gitlab.com archive downloads", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://gitlab.com/owner/repo/-/archive/main/repo-main.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://gitlab.com/owner/repo/-/archive/main/repo-main.zip",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+  });
+
+  it("proxies jsDelivr CDN resources on non-zip paths", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response("console.log('hi');", {
+        status: 200,
+        headers: { "Content-Type": "application/javascript" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://cdn.jsdelivr.net/gh/owner/repo@1.0.0/dist/file.js",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://cdn.jsdelivr.net/gh/owner/repo@1.0.0/dist/file.js",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+  });
+
+  it("proxies data.jsdelivr.com package metadata API", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url, init };
+      return new Response(JSON.stringify({ versions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://data.jsdelivr.com/v1/packages/gh/owner/repo",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://data.jsdelivr.com/v1/packages/gh/owner/repo",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+  });
+
   it("still rejects unrelated direct URLs", async () => {
     global.fetch = async () => {
       throw new Error("should not fetch upstream");
