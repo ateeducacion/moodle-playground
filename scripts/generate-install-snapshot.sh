@@ -125,22 +125,29 @@ CFGEOF
 
 echo "Running Moodle CLI install to generate snapshot..." >&2
 
-# Run the Moodle CLI installer
+# Run the Moodle CLI installer.
+# Guard the invocation so `set -e` does not abort before we can dump the log:
+# a non-zero installer exit must surface the captured output and a clear error,
+# otherwise the caller (build-moodle-bundle.sh) would treat it as non-fatal and
+# ship a snapshot-less bundle with the installer error lost.
 INSTALL_LOG="$TMPROOT/install.log"
-${PHP_BIN:-php} -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/install_database.php" \
+if ${PHP_BIN:-php} -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/install_database.php" \
   --agree-license \
   --adminuser=admin \
   --adminpass=password \
   --adminemail=admin@example.com \
   --fullname="Moodle Playground" \
   --shortname="Playground" \
-  >"$INSTALL_LOG" 2>&1
-INSTALL_EXIT=$?
+  >"$INSTALL_LOG" 2>&1; then
+  INSTALL_EXIT=0
+else
+  INSTALL_EXIT=$?
+fi
 
-# Show output prefixed for readability
+# Show output prefixed for readability (always, including on failure)
 sed 's/^/[snapshot] /' "$INSTALL_LOG" >&2
 
-if [ $INSTALL_EXIT -ne 0 ]; then
+if [ "$INSTALL_EXIT" -ne 0 ]; then
   echo "Error: Moodle CLI installer exited with code $INSTALL_EXIT" >&2
   exit 1
 fi

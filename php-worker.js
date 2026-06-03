@@ -666,32 +666,62 @@ function installBridgeListener() {
         }
 
         // --- Fatal WASM error path ---
-        // Save the DB file before destroying the runtime.
-        // MEMFS lives in JS heap so readFileAsBuffer works even with
-        // a corrupted WASM linear memory.
+        // Capture the current PHP instance reference BEFORE resetRuntime()
+        // clears runtimeStatePromise, but defer the actual hydration until
+        // we know a restart will happen. Hydration pulls the full DB, all
+        // uploaded files, and tracked plugin dirs into the JS heap — doing
+        // it when resetRuntime() returns false (e.g. the
+        // MIN_REQUESTS_BEFORE_RESTART guard fires on a first-boot OOM) would
+        // pin that large snapshot for the tab's life on an already
+        // memory-pressured worker, and leave hasPendingRestore stuck true.
+        let phpToHydrate = null;
         try {
           const currentState = await runtimeStatePromise;
-          if (currentState?.php?._php) {
-            postShell({
-              kind: "trace",
-              detail: `[runtime] hydrating snapshot before runtime reset (dbPath=${buildDbPath()})`,
-            });
-            await snapshot.hydrate(currentState.php, buildDbPath());
+          phpToHydrate = currentState?.php?._php ? currentState.php : null;
+        } catch {
+          phpToHydrate = null;
+        }
+
+        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
+        const canReplay = isSafeToReplay(data.request);
+
+        // Only hydrate the snapshot when a restart will actually happen.
+        // When resetRuntime() returns false (e.g. the
+        // MIN_REQUESTS_BEFORE_RESTART guard fires on a first-boot OOM), no
+        // fresh runtime ever boots, so snapshot.restore() never runs and the
+        // hydrated buffers would stay pinned for the tab's life on an
+        // already memory-pressured worker (with hasPendingRestore stuck
+        // true). In that case discard any leftover snapshot instead.
+        //
+        // When resetRuntime() returns true, the next getRuntimeState() boot
+        // will consume the snapshot — either via the immediate replay below
+        // (idempotent requests) or on the next user-triggered request
+        // (non-idempotent requests that aren't replayed here).
+        if (didReset) {
+          // MEMFS lives in JS heap so readFileAsBuffer works even with a
+          // corrupted WASM linear memory.
+          if (phpToHydrate) {
+            try {
+              postShell({
+                kind: "trace",
+                detail: `[runtime] hydrating snapshot before runtime reset (dbPath=${buildDbPath()})`,
+              });
+              await snapshot.hydrate(phpToHydrate, buildDbPath());
+            } catch (hydrateErr) {
+              postShell({
+                kind: "error",
+                detail: `[runtime] snapshot hydration failed: ${hydrateErr.message}`,
+              });
+            }
           } else {
             postShell({
               kind: "trace",
               detail: `[runtime] no PHP instance available for snapshot hydration`,
             });
           }
-        } catch (hydrateErr) {
-          postShell({
-            kind: "error",
-            detail: `[runtime] snapshot hydration failed: ${hydrateErr.message}`,
-          });
+        } else {
+          snapshot.clear();
         }
-
-        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
-        const canReplay = isSafeToReplay(data.request);
 
         // If we already retried this request, or the request is not
         // idempotent, or we hit the restart limit — give up.
@@ -767,8 +797,12 @@ function installMessageListener() {
       }
       if (params.debug !== undefined) debug = params.debug;
       if (params.profile !== undefined) profile = params.profile;
-      // Reset any cached runtime state so it boots with the new params
+      // Reset any cached runtime state so it boots with the new params.
+      // Discard any pending crash snapshot too: it was hydrated from the
+      // previous runtime/scope and must never be restored onto this freshly
+      // (re)configured — potentially foreign — runtime.
       runtimeStatePromise = null;
+      snapshot.clear();
       // Recreate bridge channel if scopeId changed
       if (params.scopeId !== undefined && bridgeChannel) {
         bridgeChannel.close();
@@ -783,6 +817,12 @@ function installMessageListener() {
       kind: "worker-ready",
       scopeId,
       runtimeId,
+      // Best initial landing path known before bootstrap runs. The
+      // authoritative post-bootstrap path (e.g. "/my/" after auto-login)
+      // is delivered later via the "ready" shell message; this hint lets
+      // remote.js point the very first navigation at the blueprint's
+      // landing page instead of a stale URL path from a previous session.
+      initialPath: activeBlueprint?.landingPage || null,
     });
   });
 }

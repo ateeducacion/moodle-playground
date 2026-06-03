@@ -265,7 +265,7 @@ function ensureRemoteServiceWorkerControl(scopeId, runtimeId) {
 }
 
 async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
-  await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
       reject(
         new Error(
@@ -295,7 +295,9 @@ async function waitForPhpWorkerReady(scopeId, runtimeId, worker) {
 
       window.clearTimeout(timeoutId);
       worker.removeEventListener("message", onWorkerMessage);
-      resolve();
+      // Resolve with the message so callers can read the worker's
+      // best-known initial landing path (e.g. the blueprint landingPage).
+      resolve(message);
     };
 
     worker.addEventListener("message", onWorkerMessage);
@@ -617,9 +619,16 @@ async function bootstrapRemote() {
       });
     });
   }
+  // Tracks whether the iframe has been navigated yet. The initial
+  // navigation triggers bootstrap (the worker boots on the first PHP
+  // request), so the worker's "ready" shell message — which carries the
+  // authoritative post-bootstrap path — can only arrive AFTER this first
+  // navigation. The "ready" handler therefore corrects the path only when
+  // bootstrap discovers a genuinely different one, avoiding a redundant
+  // second navigation when the initial path was already correct.
+  let frameNavigated = false;
   // Listen to the shell channel so we can pick up bootstrap progress
   // messages from the worker and display them on the loading overlay.
-  let readyNavigated = false;
   const shellChannel = new BroadcastChannel(createShellChannel(scopeId));
   shellChannel.addEventListener("message", (event) => {
     const msg = event.data;
@@ -632,15 +641,18 @@ async function bootstrapRemote() {
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
       // If bootstrap returns a readyPath (e.g. "/my/" after auto-login),
-      // override the stale path from the URL so we don't navigate to
-      // a previous session's install.php or other outdated path.
+      // override the stale path so we don't sit on a previous session's
+      // install.php or other outdated path. Only force-navigate when it
+      // differs from where we already pointed the frame — when the initial
+      // navigation already used the correct path, this is a no-op and the
+      // frame is navigated exactly once.
       if (msg.path && msg.path !== activePath) {
         activePath = msg.path;
-        readyNavigated = true;
         navigateFrame(scopeId, selection.runtimeId, activePath, {
           force: true,
         });
       }
+      frameNavigated = true;
     }
   });
 
@@ -662,7 +674,7 @@ async function bootstrapRemote() {
       profile,
     },
   });
-  await workerReadyPromise;
+  const workerReadyMessage = await workerReadyPromise;
 
   saveSessionState(scopeId, {
     runtimeId: selection.runtimeId,
@@ -671,10 +683,24 @@ async function bootstrapRemote() {
 
   bindShellCommands(scopeId, selection.runtimeId);
   bindFrameNavigation(scopeId, selection.runtimeId);
-  // Navigate to the requested path only if the ready handler hasn't
-  // already navigated to a fresh readyPath from bootstrap. This avoids
-  // a wasted PHP request to a stale path from a previous session.
-  if (!readyNavigated) {
+  // The shell already resolves `requestedPath` to the user's intended path
+  // (a restored deep-link, or the blueprint landingPage / configured
+  // landingPath on a cold boot), so it is the best target for the first
+  // navigation. Only fall back to the worker's pre-bootstrap landing-page
+  // hint when no explicit path was requested ("/"), so we don't kick the
+  // first PHP request at a default root that bootstrap will only redirect
+  // away from. This first navigation also triggers bootstrap.
+  const initialPath =
+    requestedPath && requestedPath !== "/"
+      ? requestedPath
+      : workerReadyMessage?.initialPath || config.landingPath || requestedPath;
+  activePath = initialPath;
+  // The initial navigation is what triggers bootstrap, so the worker's
+  // "ready" message (carrying the authoritative post-bootstrap path) can
+  // only arrive afterwards — `frameNavigated` is therefore normally false
+  // here and the initial navigation runs. The guard is defensive: if
+  // "ready" somehow already fired and navigated, skip a redundant nav.
+  if (!frameNavigated) {
     navigateFrame(scopeId, selection.runtimeId, activePath);
   }
   setRemoteProgress("Loading Moodle…", 0.98);

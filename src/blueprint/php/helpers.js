@@ -8,13 +8,24 @@
 // script file, so __DIR__ does not resolve to the Moodle directory.
 const MOODLE_ROOT = "/www/moodle";
 
+// A valid PHP property-name identifier. Used to gate customField keys that are
+// interpolated UNQUOTED as a property name (`$moduleInfo->NAME = ...`).
+// escapePhp only neutralizes single-quoted-string context, not identifier
+// context, so a key like `x=1;system("id");$y` would inject PHP. Any key that
+// does not match this pattern is skipped before interpolation.
+const VALID_PHP_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// Escape a value for interpolation into a SINGLE-QUOTED PHP literal.
+// In a single-quoted PHP string only the backslash and the single quote are
+// special; every other character (including newline and CR) is stored
+// verbatim, so we must NOT convert "\n"/"\r" to the literal sequences \n/\r —
+// doing so corrupts multi-line blueprint text (course summaries, intros).
+// Null bytes have no single-quote escape, so we strip them outright.
 export function escapePhp(value) {
   return String(value)
+    .replaceAll("\0", "")
     .replaceAll("\\", "\\\\")
-    .replaceAll("'", "\\'")
-    .replaceAll("\0", "\\0")
-    .replaceAll("\n", "\\n")
-    .replaceAll("\r", "\\r");
+    .replaceAll("'", "\\'");
 }
 
 const CLI_HEADER = `<?php
@@ -499,11 +510,15 @@ function phpAddGenericModule(
   customFields = {},
 ) {
   const customLines = Object.entries(customFields)
+    // The key is interpolated as a PHP property name (not a string literal), so
+    // escapePhp cannot make a malicious key safe. Skip any key that is not a
+    // plain PHP identifier to prevent code injection through customField names.
+    .filter(([k]) => VALID_PHP_IDENTIFIER.test(k))
     .map(([k, v]) => {
       if (typeof v === "number" || typeof v === "boolean") {
-        return `$moduleInfo->${escapePhp(k)} = ${typeof v === "boolean" ? (v ? 1 : 0) : v};`;
+        return `$moduleInfo->${k} = ${typeof v === "boolean" ? (v ? 1 : 0) : v};`;
       }
-      return `$moduleInfo->${escapePhp(k)} = '${escapePhp(String(v))}';`;
+      return `$moduleInfo->${k} = '${escapePhp(String(v))}';`;
     })
     .join("\n");
 

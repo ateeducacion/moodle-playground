@@ -60,4 +60,44 @@ describe("ResourceRegistry", () => {
     const text = await registry.resolveText("@file");
     assert.strictEqual(text, content);
   });
+
+  it("resolves data-url resources with a charset parameter and base64", async () => {
+    const content = "Hi";
+    const b64 = Buffer.from(content).toString("base64");
+    const registry = new ResourceRegistry({
+      file: { "data-url": `data:text/plain;charset=utf-8;base64,${b64}` },
+    });
+    const text = await registry.resolveText("@file");
+    assert.strictEqual(text, content);
+  });
+
+  it("resolves data-url resources with a charset parameter without base64", async () => {
+    const content = "{}";
+    const encoded = encodeURIComponent(content);
+    const registry = new ResourceRegistry({
+      file: { "data-url": `data:application/json;charset=utf-8,${encoded}` },
+    });
+    const text = await registry.resolveText("@file");
+    assert.strictEqual(text, content);
+  });
+
+  it("resolves data-url resources without a media type", async () => {
+    const content = "plain payload";
+    const encoded = encodeURIComponent(content);
+    const registry = new ResourceRegistry({
+      file: { "data-url": `data:,${encoded}` },
+    });
+    const text = await registry.resolveText("@file");
+    assert.strictEqual(text, content);
+  });
+
+  it("throws on malformed data: URL with no comma", async () => {
+    const registry = new ResourceRegistry({
+      file: { "data-url": "data:text/plain;base64" },
+    });
+    await assert.rejects(
+      () => registry.resolve("@file"),
+      /Malformed data: URL/,
+    );
+  });
 });

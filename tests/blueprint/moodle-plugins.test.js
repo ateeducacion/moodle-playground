@@ -348,6 +348,138 @@ describe("ZIP download strategy", () => {
   });
 });
 
+describe("pluginName path-traversal is rejected before any file write", () => {
+  const pluginHandler = getStepHandler("installMoodlePlugin");
+  const themeHandler = getStepHandler("installTheme");
+
+  function createPhpMock() {
+    const writes = [];
+    const mkdirs = [];
+    const runCalls = [];
+    const rawPhp = {
+      mkdirTree(path) {
+        mkdirs.push(path);
+      },
+      writeFile(path, data) {
+        writes.push([path, data]);
+      },
+    };
+    return {
+      writes,
+      mkdirs,
+      runCalls,
+      php: {
+        _php: rawPhp,
+        async run(code) {
+          runCalls.push(code);
+          return { text: '{"ok":true}', errors: "" };
+        },
+      },
+    };
+  }
+
+  const traversalNames = ["../../admin/cli", "..", "../x", "a/../b"];
+
+  for (const evilName of traversalNames) {
+    it(`installMoodlePlugin rejects pluginName '${evilName}' with no fetch/write`, async () => {
+      const originalFetch = globalThis.fetch;
+      let fetchCount = 0;
+      globalThis.fetch = async () => {
+        fetchCount++;
+        return new Response(decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64), {
+          status: 200,
+          headers: { "content-type": "application/zip" },
+        });
+      };
+      const { php, writes, mkdirs, runCalls } = createPhpMock();
+
+      try {
+        await assert.rejects(
+          () =>
+            pluginHandler(
+              {
+                pluginType: "mod",
+                pluginName: evilName,
+                url: "https://example.com/plugin.zip",
+              },
+              { php },
+            ),
+          /invalid plugin name/i,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      // Validation must happen before resolvePluginDir builds a poisoned target
+      // and before any download, extraction, or upgrade.
+      assert.strictEqual(fetchCount, 0, "must not download a ZIP");
+      assert.strictEqual(writes.length, 0, "must not write any files");
+      assert.strictEqual(mkdirs.length, 0, "must not create any directories");
+      assert.strictEqual(runCalls.length, 0, "must not run any PHP");
+    });
+
+    it(`installTheme rejects pluginName '${evilName}' with no fetch/write`, async () => {
+      const originalFetch = globalThis.fetch;
+      let fetchCount = 0;
+      globalThis.fetch = async () => {
+        fetchCount++;
+        return new Response(decodeBase64Bytes(SAMPLE_THEME_ZIP_BASE64), {
+          status: 200,
+          headers: { "content-type": "application/zip" },
+        });
+      };
+      const { php, writes, mkdirs, runCalls } = createPhpMock();
+
+      try {
+        await assert.rejects(
+          () =>
+            themeHandler(
+              {
+                pluginName: evilName,
+                url: "https://example.com/theme.zip",
+              },
+              { php },
+            ),
+          /invalid plugin name/i,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      assert.strictEqual(fetchCount, 0, "must not download a ZIP");
+      assert.strictEqual(writes.length, 0, "must not write any files");
+      assert.strictEqual(mkdirs.length, 0, "must not create any directories");
+      assert.strictEqual(runCalls.length, 0, "must not run any PHP");
+    });
+  }
+
+  it("auto-detected valid names still install (happy path unaffected)", async () => {
+    const originalFetch = globalThis.fetch;
+    const { php, writes } = createPhpMock();
+    globalThis.fetch = async () =>
+      new Response(decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64), {
+        status: 200,
+        headers: { "content-type": "application/zip" },
+      });
+
+    try {
+      await pluginHandler(
+        {
+          url: "https://github.com/brickfield/moodle-mod_board/archive/refs/heads/main.zip",
+        },
+        { php },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.deepEqual(writes.map(([path]) => path).sort(), [
+      "/www/moodle/mod/board/classes/example.php",
+      "/www/moodle/mod/board/version.php",
+    ]);
+  });
+});
+
 describe("proxy helpers", () => {
   it("detects GitHub ZIP URLs that should be proxied", () => {
     assert.equal(

@@ -58,7 +58,7 @@ export function parseBlueprint(input) {
 }
 
 function parseDataUrl(dataUrl) {
-  const match = dataUrl.match(/^data:([^;,]*?)?(;base64)?,(.*)$/su);
+  const match = dataUrl.match(/^data:([^,]*?)(;base64)?,(.*)$/su);
   if (!match) {
     throw new Error("Malformed data: URL.");
   }

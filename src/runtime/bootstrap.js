@@ -2040,6 +2040,20 @@ async function runProvisioningCheck(php, webRoot) {
   }
 }
 
+/**
+ * Each install stage script emits a language-independent `stage:<id>:ok`
+ * marker via plain echo (see createInstallRunnerPhp, `echo 'stage:' . $stage
+ * . ':ok'`) only when the stage runs to completion. A failed stage aborts via
+ * cli_error()/die() or an uncaught Throwable BEFORE that marker is printed,
+ * yet the WASM CGI request still returns HTTP 200 — so the marker's presence,
+ * not the HTTP status, is the authoritative success signal. We must NOT rely
+ * on the localized `cliinstallfinished` string ("Installation completed
+ * successfully." in English): it varies per install language.
+ */
+function stageSuccessMarker(stageId) {
+  return `stage:${stageId}:ok`;
+}
+
 async function runCliProvisioning(php, publish, webRoot) {
   const stages = [
     { id: "core", label: "Installing Moodle core schema." },
@@ -2049,6 +2063,7 @@ async function runCliProvisioning(php, publish, webRoot) {
   ];
 
   const outputs = [];
+  const missingStages = [];
   for (const [index, stage] of stages.entries()) {
     const stageStart = performance.now();
     publish(stage.label, 0.89 + index * 0.01);
@@ -2061,13 +2076,17 @@ async function runCliProvisioning(php, publish, webRoot) {
     const stageMs = Math.round(performance.now() - stageStart);
     publish(`${stage.label} [${stageMs}ms]`, 0.89 + (index + 0.5) * 0.01);
     outputs.push({ stage: stage.id, output });
+    if (!output.includes(stageSuccessMarker(stage.id))) {
+      missingStages.push(stage.id);
+    }
   }
 
   return {
     output: outputs
       .map((entry) => `# ${entry.stage}\n${entry.output}`)
       .join("\n"),
-    errorOutput: "",
+    missingStages,
+    succeeded: missingStages.length === 0,
   };
 }
 
@@ -2478,21 +2497,32 @@ export async function bootstrapMoodle({
     );
   } else if (hasSavedInstallState) {
     publish("Checking whether Moodle is already installed.", 0.87);
-    installState = await runProvisioningCheck(php, webRoot);
-    if (installState.error) {
+    // A non-JSON / failed provisioning check must NOT abort the whole boot:
+    // fall through to snapshot load / fresh CLI install, exactly like the
+    // structurally identical no-marker branch below.
+    try {
+      installState = await runProvisioningCheck(php, webRoot);
+      if (installState.error) {
+        publish(
+          `Provisioning check failed: ${installState.error.type}: ${installState.error.message}`,
+          0.88,
+        );
+      } else if (installState.installed) {
+        publish("Moodle installation detected from the config table.", 0.885);
+        await writeJsonFile(php, installStatePath, {
+          ...manifestState,
+          dbName,
+          installed: true,
+          updatedAt: nowIso(),
+        });
+        installMarkerMatches = true;
+      }
+    } catch {
+      installState = null;
       publish(
-        `Provisioning check failed: ${installState.error.type}: ${installState.error.message}`,
+        "Provisioning check failed — will proceed with fresh install.",
         0.88,
       );
-    } else if (installState.installed) {
-      publish("Moodle installation detected from the config table.", 0.885);
-      await writeJsonFile(php, installStatePath, {
-        ...manifestState,
-        dbName,
-        installed: true,
-        updatedAt: nowIso(),
-      });
-      installMarkerMatches = true;
     }
   } else {
     publish(
@@ -2554,20 +2584,24 @@ export async function bootstrapMoodle({
         publish,
         webRoot,
       );
-      if (provisioningResult.errorOutput.trim()) {
-        publish(
-          `CLI installer stderr: ${provisioningResult.errorOutput.slice(0, 400)}`,
-          0.9,
+      // A failed CLI install (cli_error/Throwable) still returns HTTP 200 from
+      // the WASM CGI runtime, so the per-stage `stage:<id>:ok` markers — not the
+      // HTTP status — tell us whether each stage completed. If any marker is
+      // missing the install is broken; throw WITHOUT writing the install marker
+      // so we never persist {installed:true} over a half-built database.
+      if (!provisioningResult.succeeded) {
+        // Surface any fatal-looking lines from the real stdout to make the
+        // failure diagnosable (this heuristic only enriches the message — the
+        // missing-marker check above is what actually decides failure).
+        const fatalMatch = provisioningResult.output.match(
+          /^.*(?:fatal error|exception|cli_error|throwable|unable to|failed).*$/imu,
         );
-      }
-      if (
-        /fatal error|warning|exception|error/iu.test(
-          provisioningResult.errorOutput,
-        ) &&
-        !/cliinstallfinished/iu.test(provisioningResult.output)
-      ) {
+        const detail = fatalMatch
+          ? fatalMatch[0].trim()
+          : "no fatal line found";
         throw new Error(
-          `Moodle CLI provisioning failed: ${provisioningResult.errorOutput || provisioningResult.output}`,
+          `Moodle CLI provisioning failed (incomplete stages: ${provisioningResult.missingStages.join(", ")}; ${detail}). ` +
+            `Output: ${provisioningResult.output.slice(-1200)}`,
         );
       }
       await writeJsonFile(php, installStatePath, {

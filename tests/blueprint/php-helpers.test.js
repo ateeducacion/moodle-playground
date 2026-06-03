@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  escapePhp,
   phpAddModule,
   phpCreateCategory,
   phpCreateCourse,
@@ -68,6 +69,54 @@ describe("PHP helpers: escaping", () => {
   it("escapes backslashes", () => {
     const script = phpCreateCategory({ name: "path\\to\\cat" });
     assert.ok(script.includes("path\\\\to\\\\cat"));
+  });
+});
+
+describe("PHP helpers: escapePhp (single-quoted context)", () => {
+  it("escapes backslash and single quote only", () => {
+    assert.strictEqual(escapePhp("a'b"), "a\\'b");
+    assert.strictEqual(escapePhp("a\\b"), "a\\\\b");
+  });
+
+  it("escapes a backslash before a quote correctly (no double-escape)", () => {
+    // Input is a single backslash followed by a single quote: \'
+    // Expected output: backslash escaped (\\) then quote escaped (\') => \\\'
+    assert.strictEqual(escapePhp("\\'"), "\\\\\\'");
+  });
+
+  it("preserves real newlines verbatim (does NOT emit literal \\n)", () => {
+    const out = escapePhp("line1\nline2");
+    // The output must contain an actual newline character, not a backslash-n.
+    assert.ok(out.includes("\n"), "newline must be preserved");
+    assert.ok(!out.includes("\\n"), "must not emit literal backslash-n");
+    assert.strictEqual(out, "line1\nline2");
+  });
+
+  it("preserves carriage returns verbatim (does NOT emit literal \\r)", () => {
+    const out = escapePhp("a\r\nb");
+    assert.ok(out.includes("\r"), "CR must be preserved");
+    assert.ok(!out.includes("\\r"), "must not emit literal backslash-r");
+    assert.strictEqual(out, "a\r\nb");
+  });
+
+  it("strips null bytes rather than emitting literal \\0", () => {
+    const out = escapePhp("a\0b");
+    assert.strictEqual(out, "ab");
+    assert.ok(!out.includes("\0"));
+    assert.ok(!out.includes("\\0"));
+  });
+});
+
+describe("PHP helpers: multi-line blueprint text", () => {
+  it("keeps multi-line course summaries intact (no \\n corruption)", () => {
+    const script = phpCreateCourse({
+      fullname: "Course",
+      shortname: "C1",
+      summary: "Line one\nLine two\nLine three",
+    });
+    // The summary literal must carry real newlines, not the two-char \n.
+    assert.ok(script.includes("Line one\nLine two\nLine three"));
+    assert.ok(!script.includes("Line one\\nLine two"));
   });
 });
 
@@ -300,5 +349,60 @@ describe("PHP helpers: addModule", () => {
     // Should only have one require
     const requireCount = (script.match(/require\(/g) || []).length;
     assert.strictEqual(requireCount, 1);
+  });
+
+  it("emits valid customField keys as PHP properties", () => {
+    const script = phpAddModule({
+      module: "exeweb",
+      course: "C1",
+      section: 1,
+      name: "Test",
+      exeorigin: "online",
+      revision: 3,
+      _flag: true,
+    });
+    assert.ok(script.includes("$moduleInfo->exeorigin = 'online';"));
+    assert.ok(script.includes("$moduleInfo->revision = 3;"));
+    assert.ok(script.includes("$moduleInfo->_flag = 1;"));
+  });
+
+  it("skips a malicious customField key (PHP injection via identifier)", () => {
+    const evilKey = 'x=1;system("id");$y';
+    const script = phpAddModule({
+      module: "exeweb",
+      course: "C1",
+      section: 1,
+      name: "Test",
+      [evilKey]: "payload",
+      revision: 7,
+    });
+    // The injected statement must not appear anywhere in the generated PHP.
+    assert.ok(
+      !script.includes('system("id")'),
+      "must not interpolate an injected statement",
+    );
+    assert.ok(!script.includes(evilKey), "must not emit the raw evil key");
+    assert.ok(!script.includes("payload"), "must not emit the skipped value");
+    // A legitimate sibling key is still emitted.
+    assert.ok(script.includes("$moduleInfo->revision = 7;"));
+  });
+
+  it("skips customField keys with dashes, dots, or spaces", () => {
+    const script = phpAddModule({
+      module: "exeweb",
+      course: "C1",
+      section: 1,
+      name: "Test",
+      "bad-key": "v1",
+      "bad.key": "v2",
+      "bad key": "v3",
+      "9leading": "v4",
+      good_key: "v5",
+    });
+    assert.ok(!script.includes("v1"));
+    assert.ok(!script.includes("v2"));
+    assert.ok(!script.includes("v3"));
+    assert.ok(!script.includes("v4"));
+    assert.ok(script.includes("$moduleInfo->good_key = 'v5';"));
   });
 });
