@@ -36,7 +36,7 @@ export default {
 
     // Legacy generic proxy mode
     if (params.has("url")) {
-      return handleGenericProxy(params.get("url"), request, env);
+      return handleGenericProxy(params.get("url"), request);
     }
 
     // GitHub proxy mode
@@ -131,19 +131,38 @@ async function handleGitHubProxy(params, env) {
   // No branch specified – resolve the default branch via the API
   const defaultBranch = await getDefaultBranch(repo, env);
 
-  if (!defaultBranch) {
-    return jsonResponse(
-      {
-        error:
-          "Could not determine the default branch. Check that the repo exists and is public.",
-      },
-      502,
+  if (defaultBranch) {
+    return proxyGitHubZip(
+      `${GITHUB_BASE}/${repo}/archive/refs/heads/${defaultBranch}.zip`,
     );
   }
 
-  return proxyGitHubZip(
-    `${GITHUB_BASE}/${repo}/archive/refs/heads/${defaultBranch}.zip`,
-  );
+  // The API could not resolve the default branch (rate-limited, or the
+  // GITHUB_TOKEN is blocked for this repo by an org fine-grained-PAT policy).
+  // Fall back to the conventional branch names instead of failing outright.
+  return proxyFirstAvailableZip([
+    `${GITHUB_BASE}/${repo}/archive/refs/heads/main.zip`,
+    `${GITHUB_BASE}/${repo}/archive/refs/heads/master.zip`,
+  ]);
+}
+
+// Proxies the first candidate archive URL that resolves successfully, returning
+// the last failing response if none do. Used as a no-API fallback for
+// default-branch resolution.
+async function proxyFirstAvailableZip(urls) {
+  let lastResponse = null;
+
+  for (const url of urls) {
+    const response = await proxyGitHubZip(url);
+
+    if (response.status < 400) {
+      return response;
+    }
+
+    lastResponse = response;
+  }
+
+  return lastResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,40 +242,48 @@ async function handlePullRequest(repo, prNumber, env) {
 // ---------------------------------------------------------------------------
 
 async function handleReleaseAsset(repo, tag, assetName, env, request = null) {
+  // A release asset's browser_download_url is deterministic:
+  //   https://github.com/{repo}/releases/download/{tag}/{assetName}
+  // and 302s to the asset CDN with no API call. We query the API first only to
+  // surface a helpful "available_assets" list on a genuine typo — but we must
+  // NOT hard-depend on it. The API can be rate-limited, or the worker's
+  // GITHUB_TOKEN can be blocked for the repo (e.g. an org fine-grained-PAT
+  // policy 404s a public repo), which would otherwise turn every legitimate
+  // download into a 502 JSON body.
+  const directUrl = `${GITHUB_BASE}/${repo}/releases/download/${encodeURIComponent(
+    tag,
+  )}/${encodeURIComponent(assetName)}`;
+
   const apiUrl = `${GITHUB_API}/repos/${repo}/releases/tags/${tag}`;
   const data = await githubApiRequest(apiUrl, env);
 
-  if (!data?.assets) {
-    return jsonResponse(
-      {
-        error: `Could not find release "${tag}".`,
-        upstream_status: 404,
-        upstream_status_text: "Not Found",
-      },
-      502,
+  // API reachable: validate the asset name and use its canonical download URL.
+  if (data?.assets) {
+    const asset = data.assets.find(
+      (a) => a.name.toLowerCase() === assetName.toLowerCase(),
     );
+
+    if (!asset) {
+      const available = data.assets.map((a) => a.name);
+
+      return jsonResponse(
+        {
+          error: `Asset "${assetName}" not found in release "${tag}".`,
+          available_assets: available,
+        },
+        404,
+      );
+    }
+
+    return proxyGitHubZip(asset.browser_download_url, {
+      request,
+      downloadFilename: asset.name,
+    });
   }
 
-  const asset = data.assets.find(
-    (a) => a.name.toLowerCase() === assetName.toLowerCase(),
-  );
-
-  if (!asset) {
-    const available = data.assets.map((a) => a.name);
-
-    return jsonResponse(
-      {
-        error: `Asset "${assetName}" not found in release "${tag}".`,
-        available_assets: available,
-      },
-      404,
-    );
-  }
-
-  return proxyGitHubZip(asset.browser_download_url, {
-    request,
-    downloadFilename: asset.name,
-  });
+  // API unavailable/blocked: fall back to the deterministic direct URL so the
+  // download still works without any api.github.com call.
+  return proxyGitHubZip(directUrl, { request, downloadFilename: assetName });
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +500,7 @@ async function proxyGitHubZip(
 // Legacy generic proxy mode
 // ---------------------------------------------------------------------------
 
-async function handleGenericProxy(targetUrl, request, env) {
+async function handleGenericProxy(targetUrl, request) {
   let parsedUrl;
 
   try {
@@ -501,11 +528,7 @@ async function handleGenericProxy(targetUrl, request, env) {
     );
   }
 
-  const translatedGitHubResponse = await maybeHandleDirectGitHubUrl(
-    parsedUrl,
-    env,
-    request,
-  );
+  const translatedGitHubResponse = await maybeHandleDirectGitHubUrl(parsedUrl);
   if (translatedGitHubResponse) {
     return translatedGitHubResponse;
   }
@@ -878,7 +901,7 @@ function extractGoogleDriveFileId(url) {
   return url.searchParams.get("id");
 }
 
-async function maybeHandleDirectGitHubUrl(url, env, request) {
+function maybeHandleDirectGitHubUrl(url) {
   const repoMatch = matchGitHubRepoPath(url.pathname);
   if (!repoMatch) {
     return null;
@@ -894,20 +917,13 @@ async function maybeHandleDirectGitHubUrl(url, env, request) {
     return handleAtomFeed(repo, "tags");
   }
 
-  const releaseAssetMatch = suffix.match(
-    /^\/releases\/download\/([^/]+)\/([^/]+)$/u,
-  );
-  if (releaseAssetMatch) {
-    const [, tag, assetName] = releaseAssetMatch;
-    return handleReleaseAsset(
-      repo,
-      decodeURIComponent(tag),
-      decodeURIComponent(assetName),
-      env,
-      request,
-    );
-  }
-
+  // NOTE: We deliberately do NOT intercept /releases/download/{tag}/{asset}
+  // URLs here. Routing them through handleReleaseAsset() means an api.github.com
+  // call to resolve the asset, which fails (returns null -> 502 JSON) whenever
+  // the API is rate-limited or the worker's GITHUB_TOKEN is blocked for the repo
+  // (e.g. an org's fine-grained-PAT policy 404s a public repo). A complete
+  // release-download URL is already an allowlisted github.com host that 302s to
+  // the asset CDN, so we let handleGenericProxy fetch it directly — no API call.
   return null;
 }
 

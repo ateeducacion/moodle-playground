@@ -43,34 +43,19 @@ describe("github-proxy-worker generic ?url= mode", () => {
     assert.equal(await response.text(), "<feed />");
   });
 
-  it("routes direct GitHub release asset URLs through the GitHub API asset resolver", async () => {
+  it("proxies direct GitHub release-asset URLs without calling the GitHub API", async () => {
+    // Regression: a complete /releases/download/{tag}/{asset} URL must be
+    // proxied directly (302 -> CDN), NOT rerouted through api.github.com — the
+    // API call fails (502 JSON) whenever it is rate-limited or the worker's
+    // GITHUB_TOKEN is blocked for the repo, which broke editor installs.
     const calls = [];
     global.fetch = async (url, init = {}) => {
-      calls.push({ url, init });
-      if (
-        String(url) ===
-        "https://api.github.com/repos/exelearning/exelearning/releases/tags/v4.0.0"
-      ) {
-        return new Response(
-          JSON.stringify({
-            assets: [
-              {
-                name: "exelearning-static-v4.0.0.zip",
-                browser_download_url:
-                  "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip",
-              },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      }
+      const u = String(url);
+      calls.push({ url: u, init });
 
       if (
-        String(url) ===
-        "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip"
+        u ===
+        "https://github.com/exelearning/exelearning/releases/download/v4.0.0/exelearning-static-v4.0.0.zip"
       ) {
         return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
           status: 206,
@@ -78,7 +63,7 @@ describe("github-proxy-worker generic ?url= mode", () => {
         });
       }
 
-      throw new Error(`unexpected url ${url}`);
+      throw new Error(`unexpected url ${u}`);
     };
 
     const response = await worker.fetch(
@@ -90,16 +75,15 @@ describe("github-proxy-worker generic ?url= mode", () => {
     );
 
     assert.equal(response.status, 206);
+    // Exactly one upstream fetch — and it is NOT an api.github.com call.
+    assert.equal(calls.length, 1);
     assert.equal(
       calls[0].url,
-      "https://api.github.com/repos/exelearning/exelearning/releases/tags/v4.0.0",
+      "https://github.com/exelearning/exelearning/releases/download/v4.0.0/exelearning-static-v4.0.0.zip",
     );
-    assert.equal(
-      calls[1].url,
-      "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip",
-    );
-    assert.equal(calls[1].init.headers.get("Range"), "bytes=0-3");
-    assert.equal(calls[1].init.headers.get("Cache-Control"), "no-cache");
+    assert.ok(!calls.some((c) => c.url.startsWith("https://api.github.com/")));
+    assert.equal(calls[0].init.headers.get("Range"), "bytes=0-3");
+    assert.equal(calls[0].init.headers.get("Cache-Control"), "no-cache");
     assert.equal(
       response.headers.get("Content-Disposition"),
       'attachment; filename="exelearning-static-v4.0.0.zip"',
@@ -110,32 +94,11 @@ describe("github-proxy-worker generic ?url= mode", () => {
     );
   });
 
-  it("includes upstream status details when the final asset fetch fails", async () => {
+  it("returns upstream status details when a direct release-asset fetch fails", async () => {
     global.fetch = async (url) => {
       if (
         String(url) ===
-        "https://api.github.com/repos/exelearning/exelearning/releases/tags/v4.0.0"
-      ) {
-        return new Response(
-          JSON.stringify({
-            assets: [
-              {
-                name: "exelearning-static-v4.0.0.zip",
-                browser_download_url:
-                  "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip",
-              },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      }
-
-      if (
-        String(url) ===
-        "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip"
+        "https://github.com/exelearning/exelearning/releases/download/v4.0.0/exelearning-static-v4.0.0.zip"
       ) {
         return new Response("upstream bad gateway", {
           status: 502,
@@ -159,10 +122,6 @@ describe("github-proxy-worker generic ?url= mode", () => {
     assert.equal(body.error, "Upstream server returned an error.");
     assert.equal(body.status, 502);
     assert.equal(body.statusText, "Bad Gateway");
-    assert.equal(
-      body.upstream_url,
-      "https://release-assets.githubusercontent.com/exelearning-static-v4.0.0.zip",
-    );
   });
 
   it("forwards Range headers for generic raw GitHub resource downloads", async () => {
@@ -648,6 +607,139 @@ describe("github-proxy-worker redirect validation (SSRF)", () => {
     assert.deepEqual(
       Array.from(new Uint8Array(await response.arrayBuffer())),
       [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("falls back to the direct download URL when the release API is blocked (?repo=&release=&asset=)", async () => {
+    // The release API 404s (e.g. an org fine-grained-PAT policy blocks the
+    // token for a public repo). The asset must still download via the
+    // deterministic /releases/download/{tag}/{asset} URL.
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (
+        u === "https://api.github.com/repos/owner/repo/releases/tags/v1.0.0"
+      ) {
+        return new Response(JSON.stringify({ message: "Not Found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (
+        u ===
+        "https://github.com/owner/repo/releases/download/v1.0.0/plugin.zip"
+      ) {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=v1.0.0&asset=plugin.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      calls.some(
+        (c) =>
+          c.url ===
+          "https://github.com/owner/repo/releases/download/v1.0.0/plugin.zip",
+      ),
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("falls back to main when the default-branch API call is blocked (?repo=)", async () => {
+    const calls = [];
+    global.fetch = async (url) => {
+      const u = String(url);
+      calls.push(u);
+
+      if (u === "https://api.github.com/repos/owner/repo") {
+        return new Response(JSON.stringify({ message: "Not Found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (u === "https://github.com/owner/repo/archive/refs/heads/main.zip") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo"),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      calls.includes(
+        "https://github.com/owner/repo/archive/refs/heads/main.zip",
+      ),
+    );
+  });
+
+  it("falls back to master when main is absent and the default-branch API is blocked", async () => {
+    const calls = [];
+    global.fetch = async (url) => {
+      const u = String(url);
+      calls.push(u);
+
+      if (u === "https://api.github.com/repos/owner/repo") {
+        return new Response("rate limited", { status: 403 });
+      }
+
+      if (u === "https://github.com/owner/repo/archive/refs/heads/main.zip") {
+        return new Response("no main branch", {
+          status: 404,
+          statusText: "Not Found",
+        });
+      }
+
+      if (u === "https://github.com/owner/repo/archive/refs/heads/master.zip") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo"),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      calls.includes(
+        "https://github.com/owner/repo/archive/refs/heads/main.zip",
+      ),
+    );
+    assert.ok(
+      calls.includes(
+        "https://github.com/owner/repo/archive/refs/heads/master.zip",
+      ),
     );
   });
 
