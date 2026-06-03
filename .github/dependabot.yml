@@ -9,6 +9,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Group all @php-wasm/* packages into a single PR. They are always
+    # released together with the same version, so separate PRs would race
+    # against each other and produce inconsistent lockfile states.
+    groups:
+      php-wasm:
+        patterns:
+          - "@php-wasm/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
