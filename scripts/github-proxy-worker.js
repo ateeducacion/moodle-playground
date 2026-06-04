@@ -4,8 +4,9 @@
 //
 // 1. Generic proxy mode (legacy): ?url={full_url}
 //    Proxies supported direct URLs with CORS headers. This includes ZIP downloads,
-//    GitHub-hosted text/binary resources, FacturaScripts plugin pages, and
-//    omeka.org / dev.omeka.org resources (plugin/module pages and downloads).
+//    GitHub-hosted text/binary resources, FacturaScripts plugin pages,
+//    omeka.org / dev.omeka.org resources (plugin/module pages and downloads), and
+//    Nextcloud / ownCloud public share links (/s/{token}[/download]) on any host.
 //
 // 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&atom=...]
 //    Builds the correct GitHub URL from semantic parameters and proxies the response.
@@ -539,10 +540,20 @@ async function handleGenericProxy(targetUrl, request) {
     // Re-validate every redirect hop against the same generic-proxy allowlist
     // (and SSRF guard) that authorized the initial URL, so an allowlisted host
     // cannot 302 us into an internal or unsupported target.
+    //
+    // Nextcloud/ownCloud shares are the exception: GET /s/{token}/download
+    // 303-redirects to a signed DAV URL on the SAME host (e.g.
+    // /public.php/dav/files/{token}/), which does not match the public-share
+    // path shape. Authorize redirects that stay on the original share's host
+    // instead. The SSRF guard still runs for every hop.
+    const isAuthorizedRedirect = isNextcloudShareUrl(parsedUrl)
+      ? (candidate) => candidate.hostname === parsedUrl.hostname
+      : isSupportedGenericProxyUrl;
+
     const upstream = await fetchWithValidatedRedirects(
       parsedUrl.toString(),
       { method: "GET", headers: upstreamHeaders },
-      isSupportedGenericProxyUrl,
+      isAuthorizedRedirect,
     );
 
     if (!upstream.ok) {
@@ -656,6 +667,7 @@ function isSupportedGenericProxyUrl(url) {
     isFacturaScriptsPluginPage(url) ||
     isGitHubDirectProxyUrl(url) ||
     isGoogleDriveDirectFileUrl(url) ||
+    isNextcloudShareUrl(url) ||
     isOmekaOrgResourceUrl(url) ||
     isGitLabResourceUrl(url) ||
     isJsDelivrResourceUrl(url)
@@ -859,7 +871,26 @@ function isGoogleDriveDirectFileUrl(url) {
   return false;
 }
 
+// Nextcloud / ownCloud public share links live on arbitrary self-hosted
+// domains, so they cannot be matched by a fixed host allowlist. Authorize them
+// instead by their well-known public-share path shape:
+//   /s/{token}                  (share page)
+//   /s/{token}/download         (direct download; what eXeViewer requests)
+//   /index.php/s/{token}[/download]   (pretty-URLs-disabled instances)
+// The SSRF guard (isPrivateOrLocalHost) is still enforced for every host and
+// redirect hop, so this is not an open proxy into internal infrastructure.
+const NEXTCLOUD_SHARE_PATH =
+  /^(?:\/index\.php)?\/s\/[A-Za-z0-9._-]+(?:\/download)?\/?$/u;
+
+function isNextcloudShareUrl(url) {
+  return NEXTCLOUD_SHARE_PATH.test(url.pathname);
+}
+
 function normalizeSupportedGenericProxyUrl(url) {
+  if (isNextcloudShareUrl(url)) {
+    return normalizeNextcloudShareUrl(url);
+  }
+
   if (!isGoogleDriveDirectFileUrl(url)) {
     return url;
   }
@@ -888,6 +919,21 @@ function normalizeSupportedGenericProxyUrl(url) {
 
   normalized.searchParams.set("id", fileId);
   normalized.searchParams.set("export", "download");
+
+  return normalized;
+}
+
+// Rewrite a bare Nextcloud/ownCloud share page (/s/{token}) to its direct
+// download endpoint (/s/{token}/download). A URL that already targets /download
+// (or carries a path/files query selecting a file inside a folder share) is
+// returned unchanged.
+function normalizeNextcloudShareUrl(url) {
+  if (url.pathname.replace(/\/$/u, "").endsWith("/download")) {
+    return url;
+  }
+
+  const normalized = new URL(url.toString());
+  normalized.pathname = `${normalized.pathname.replace(/\/$/u, "")}/download`;
 
   return normalized;
 }
@@ -1367,8 +1413,9 @@ function landingPageHtml(origin) {
         <span class="method">GET</span>
         <span class="endpoint-name">URL Proxy</span>
       </div>
-      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, Google Drive, or omeka.org / dev.omeka.org URLs with CORS headers.</div>
+      <div class="endpoint-desc">Proxy supported ZIP, GitHub resource, Google Drive, Nextcloud / ownCloud share, or omeka.org / dev.omeka.org URLs with CORS headers.</div>
       <div class="endpoint-desc">Drive accepts direct <code>/uc?id=...</code> links and shared <code>/file/d/{id}/view</code> links.</div>
+      <div class="endpoint-desc">Nextcloud / ownCloud accepts public share links <code>/s/{token}</code> and <code>/s/{token}/download</code> on any host.</div>
       <div class="url-box">${base}/?url=<span class="param">{full_url}</span></div>
     </div>
 

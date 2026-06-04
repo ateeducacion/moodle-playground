@@ -838,3 +838,196 @@ describe("github-proxy-worker isPrivateOrLocalHost extras", () => {
     }
   });
 });
+
+describe("github-proxy-worker Nextcloud / ownCloud public shares", () => {
+  it("proxies a /s/{token}/download URL on an arbitrary host", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": 'attachment; filename="content.elpx"',
+        },
+      });
+    };
+
+    const target = "https://cloud.example.org/s/aB3xToken9/download";
+    const response = await worker.fetch(
+      new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, target);
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      'attachment; filename="content.elpx"',
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("normalizes a bare /s/{token} share page to /s/{token}/download", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/s/aB3xToken9",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].url,
+      "https://cloud.example.org/s/aB3xToken9/download",
+    );
+  });
+
+  it("follows the same-host 303 redirect to the public DAV endpoint", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (u === "https://cloud.example.org/s/aB3xToken9/download") {
+        return new Response(null, {
+          status: 303,
+          headers: {
+            Location:
+              "https://cloud.example.org/public.php/dav/files/aB3xToken9/?accept=zip",
+          },
+        });
+      }
+
+      if (
+        u ===
+        "https://cloud.example.org/public.php/dav/files/aB3xToken9/?accept=zip"
+      ) {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].init.redirect, "manual");
+    assert.equal(
+      calls[1].url,
+      "https://cloud.example.org/public.php/dav/files/aB3xToken9/?accept=zip",
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("blocks a Nextcloud share redirect that leaves the original host", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 303,
+        headers: { Location: "https://evil.example/payload" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("blocks a Nextcloud share that redirects into an internal IP", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 303,
+        headers: { Location: "http://169.254.169.254/latest/meta-data/" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("does not authorize non-share paths on an arbitrary host", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/remote.php/dav/files/admin/secret.zip",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+  });
+
+  it("rejects a Nextcloud-shaped path on a private host (SSRF guard)", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "http://192.168.1.10/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+  });
+});
