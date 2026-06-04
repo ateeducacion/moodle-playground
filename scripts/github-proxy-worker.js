@@ -553,8 +553,9 @@ async function handleGenericProxy(targetUrl, request) {
     const isAuthorizedRedirect = isNextcloudShareUrl(parsedUrl)
       ? (candidate) => candidate.hostname === parsedUrl.hostname
       : isDropboxShareUrl(parsedUrl)
-      ? (candidate) => isSupportedGenericProxyUrl(candidate) || isDropboxCdnUrl(candidate)
-      : isSupportedGenericProxyUrl;
+        ? (candidate) =>
+            isSupportedGenericProxyUrl(candidate) || isDropboxCdnUrl(candidate)
+        : isSupportedGenericProxyUrl;
 
     const upstream = await fetchWithValidatedRedirects(
       parsedUrl.toString(),

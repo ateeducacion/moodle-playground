@@ -1054,9 +1054,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
         });
       }
 
-      if (
-        u === "https://dl.dropboxusercontent.com/cd/0/get/abc/content.elpx"
-      ) {
+      if (u === "https://dl.dropboxusercontent.com/cd/0/get/abc/content.elpx") {
         return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
           status: 200,
           headers: {
@@ -1069,8 +1067,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
       throw new Error(`unexpected url ${u}`);
     };
 
-    const target =
-      "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1";
+    const target = "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1";
     const response = await worker.fetch(
       new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
       {},
