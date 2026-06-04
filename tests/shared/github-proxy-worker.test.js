@@ -1034,16 +1034,17 @@ describe("github-proxy-worker Nextcloud / ownCloud public shares", () => {
 
 describe("github-proxy-worker Dropbox shared links", () => {
   // The matcher is path-based (isDropboxShareUrl tests url.pathname only), so the
-  // worker accepts whichever force-download query param the client appends —
-  // eXeViewer sends `?download=1`, the legacy convention is `?dl=1`. Both proxy
-  // identically and 302 to *.dropboxusercontent.com.
+  // worker proxies the URL regardless of its query. The client appends `?dl=1`,
+  // which is the only param Dropbox honors to 302 a share link to the
+  // *.dropboxusercontent.com CDN (verified live; `?download=1` and `?dl=0` both
+  // return the HTML preview page instead of the file).
   it("proxies a legacy /s/{hash}/{file} share and follows the CDN redirect", async () => {
     const calls = [];
     global.fetch = async (url, init = {}) => {
       const u = String(url);
       calls.push({ url: u, init });
 
-      if (u === "https://www.dropbox.com/s/aB3xHash9/content.elpx?download=1") {
+      if (u === "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1") {
         return new Response(null, {
           status: 302,
           headers: {
@@ -1069,7 +1070,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
     };
 
     const target =
-      "https://www.dropbox.com/s/aB3xHash9/content.elpx?download=1";
+      "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1";
     const response = await worker.fetch(
       new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
       {},
@@ -1113,7 +1114,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
     };
 
     const target =
-      "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k3y123&st=t0k3n&download=1";
+      "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k3y123&st=t0k3n&dl=1";
     const response = await worker.fetch(
       new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
       {},
@@ -1145,7 +1146,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
     const response = await worker.fetch(
       new Request(
         `https://proxy.example/?url=${encodeURIComponent(
-          "https://www.dropbox.com/s/aB3xHash9/content.elpx?download=1",
+          "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1",
         )}`,
       ),
       {},
@@ -1168,7 +1169,7 @@ describe("github-proxy-worker Dropbox shared links", () => {
     const response = await worker.fetch(
       new Request(
         `https://proxy.example/?url=${encodeURIComponent(
-          "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k&download=1",
+          "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k&dl=1",
         )}`,
       ),
       {},
