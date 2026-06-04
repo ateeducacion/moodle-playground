@@ -879,7 +879,8 @@ function isGoogleDriveDirectFileUrl(url) {
 //   /index.php/s/{token}[/download]   (pretty-URLs-disabled instances)
 // The SSRF guard (isPrivateOrLocalHost) is still enforced for every host and
 // redirect hop, so this is not an open proxy into internal infrastructure.
-const NEXTCLOUD_SHARE_PATH = /^(?:\/index\.php)?\/s\/[A-Za-z0-9._-]+(?:\/download)?\/?$/u;
+const NEXTCLOUD_SHARE_PATH =
+  /^(?:\/index\.php)?\/s\/[A-Za-z0-9._-]+(?:\/download)?\/?$/u;
 
 function isNextcloudShareUrl(url) {
   return NEXTCLOUD_SHARE_PATH.test(url.pathname);

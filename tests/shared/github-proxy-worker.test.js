@@ -894,7 +894,10 @@ describe("github-proxy-worker Nextcloud / ownCloud public shares", () => {
 
     assert.equal(response.status, 200);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://cloud.example.org/s/aB3xToken9/download");
+    assert.equal(
+      calls[0].url,
+      "https://cloud.example.org/s/aB3xToken9/download",
+    );
   });
 
   it("follows the same-host 303 redirect to the public DAV endpoint", async () => {
