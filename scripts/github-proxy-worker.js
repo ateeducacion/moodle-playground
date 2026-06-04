@@ -546,9 +546,16 @@ async function handleGenericProxy(targetUrl, request) {
     // /public.php/dav/files/{token}/), which does not match the public-share
     // path shape. Authorize redirects that stay on the original share's host
     // instead. The SSRF guard still runs for every hop.
+    //
+    // Dropbox shares redirect from www.dropbox.com to dl.dropboxusercontent.com
+    // (the CDN serving the actual file). Authorize that CDN host as a redirect
+    // target while still running the SSRF guard.
     const isAuthorizedRedirect = isNextcloudShareUrl(parsedUrl)
       ? (candidate) => candidate.hostname === parsedUrl.hostname
-      : isSupportedGenericProxyUrl;
+      : isDropboxShareUrl(parsedUrl)
+        ? (candidate) =>
+            isSupportedGenericProxyUrl(candidate) || isDropboxCdnUrl(candidate)
+        : isSupportedGenericProxyUrl;
 
     const upstream = await fetchWithValidatedRedirects(
       parsedUrl.toString(),
@@ -668,6 +675,7 @@ function isSupportedGenericProxyUrl(url) {
     isGitHubDirectProxyUrl(url) ||
     isGoogleDriveDirectFileUrl(url) ||
     isNextcloudShareUrl(url) ||
+    isDropboxShareUrl(url) ||
     isOmekaOrgResourceUrl(url) ||
     isGitLabResourceUrl(url) ||
     isJsDelivrResourceUrl(url)
@@ -1049,6 +1057,24 @@ function isFacturaScriptsPluginPage(url) {
     url.hostname.toLowerCase() === "facturascripts.com" &&
     /^\/plugins\/[^/]+\/?$/u.test(url.pathname)
   );
+}
+
+// Dropbox shared file links: /s/{hash}/{filename} (legacy) and
+// /scl/fi/{hash}/{filename} (newer secure format with rlkey+st params).
+// Both formats redirect to dl.dropboxusercontent.com for the actual download.
+function isDropboxShareUrl(url) {
+  const hostname = url.hostname.toLowerCase();
+  if (hostname !== "www.dropbox.com" && hostname !== "dropbox.com") {
+    return false;
+  }
+  return /^\/(?:s\/[A-Za-z0-9_-]+|scl\/fi\/[A-Za-z0-9_-]+)\//u.test(
+    url.pathname,
+  );
+}
+
+// Dropbox CDN — the redirect target after a successful share-link download.
+function isDropboxCdnUrl(url) {
+  return url.hostname.toLowerCase().endsWith(".dropboxusercontent.com");
 }
 
 function isOmekaOrgResourceUrl(url) {

@@ -1031,3 +1031,165 @@ describe("github-proxy-worker Nextcloud / ownCloud public shares", () => {
     assert.equal(response.status, 400);
   });
 });
+
+describe("github-proxy-worker Dropbox shared links", () => {
+  // The matcher is path-based (isDropboxShareUrl tests url.pathname only), so the
+  // worker proxies the URL regardless of its query. The client appends `?dl=1`,
+  // which is the only param Dropbox honors to 302 a share link to the
+  // *.dropboxusercontent.com CDN (verified live; `?download=1` and `?dl=0` both
+  // return the HTML preview page instead of the file).
+  it("proxies a legacy /s/{hash}/{file} share and follows the CDN redirect", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (u === "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1") {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              "https://dl.dropboxusercontent.com/cd/0/get/abc/content.elpx",
+          },
+        });
+      }
+
+      if (u === "https://dl.dropboxusercontent.com/cd/0/get/abc/content.elpx") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": 'attachment; filename="content.elpx"',
+          },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const target = "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1";
+    const response = await worker.fetch(
+      new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, target);
+    assert.equal(calls[0].init.redirect, "manual");
+    assert.equal(
+      calls[1].url,
+      "https://dl.dropboxusercontent.com/cd/0/get/abc/content.elpx",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("proxies a newer /scl/fi/{hash}/{file} share with rlkey+st params", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+
+      if (u.startsWith("https://www.dropbox.com/scl/fi/")) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              "https://uc1234.dl.dropboxusercontent.com/cd/0/get/xyz/course.zip",
+          },
+        });
+      }
+
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const target =
+      "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k3y123&st=t0k3n&dl=1";
+    const response = await worker.fetch(
+      new Request(`https://proxy.example/?url=${encodeURIComponent(target)}`),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, target);
+    assert.equal(
+      calls[1].url,
+      "https://uc1234.dl.dropboxusercontent.com/cd/0/get/xyz/course.zip",
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("blocks a Dropbox share redirect that leaves the Dropbox hosts", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://evil.example/payload" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://www.dropbox.com/s/aB3xHash9/content.elpx?dl=1",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("blocks a Dropbox share that redirects into an internal IP", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "http://169.254.169.254/latest/meta-data/" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://www.dropbox.com/scl/fi/aB3xHash9/course.zip?rlkey=k&dl=1",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("does not authorize non-share Dropbox paths (e.g. /home)", async () => {
+    global.fetch = async () => {
+      throw new Error("should not fetch upstream");
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://www.dropbox.com/home/secret.zip",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+  });
+});
