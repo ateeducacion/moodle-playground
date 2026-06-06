@@ -63,6 +63,15 @@ describe("resolver: context constants (REPO/REF) from URL", () => {
     assert.equal(bp.constants.REF, "branchx");
   });
 
+  it("derives REF from the explicit raw refs/heads/<branch> shape (not 'refs')", async () => {
+    const bpurl =
+      "https://raw.githubusercontent.com/ateeducacion/mod_exelearning/refs/heads/main/blueprint.json";
+    const href = inlineHref(`&blueprint-url=${encodeURIComponent(bpurl)}`);
+    const bp = await resolveBlueprint({ scopeId: "t", location: { href } });
+    assert.equal(bp.constants.REPO, "ateeducacion/mod_exelearning");
+    assert.equal(bp.constants.REF, "main");
+  });
+
   it("leaves authored constants untouched when no context is present", async () => {
     const bp = await resolveBlueprint({
       scopeId: "t",

@@ -169,10 +169,21 @@ function deriveContextConstants(loc, blueprintUrlParam) {
           bu.searchParams.get("release"),
       );
       if (!out.REPO && bu.hostname === "raw.githubusercontent.com") {
+        // raw URLs come in two shapes:
+        //   /{owner}/{repo}/{ref}/{path}
+        //   /{owner}/{repo}/refs/heads|tags/{ref}/{path}  (explicit form)
         const seg = bu.pathname.split("/").filter(Boolean);
         if (seg.length >= 3) {
           setRepo(`${seg[0]}/${seg[1]}`);
-          setRef(seg[2]);
+          if (
+            seg[2] === "refs" &&
+            (seg[3] === "heads" || seg[3] === "tags") &&
+            seg.length >= 5
+          ) {
+            setRef(seg[4]);
+          } else {
+            setRef(seg[2]);
+          }
         }
       }
     } catch {
