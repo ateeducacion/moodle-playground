@@ -20,6 +20,7 @@ const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL(
 // by URL path (stripping query params), so self.location.href may reflect
 // stale params from a previously cached response.
 let scopeId = workerUrl.searchParams.get("scope");
+let forceCleanBoot = workerUrl.searchParams.get("clean") === "1";
 let selection = resolveRuntimeSelection({
   runtimeId: workerUrl.searchParams.get("runtime"),
   phpVersion: workerUrl.searchParams.get("phpVersion"),
@@ -495,6 +496,8 @@ async function getRuntimeState() {
       appBaseUrl: appRootUrl,
       phpVersion,
       webRoot,
+      scopeId,
+      forceCleanBoot,
     });
 
     postShell({
@@ -784,6 +787,8 @@ function installMessageListener() {
     const params = event.data.runtimeParams;
     if (params) {
       if (params.scopeId !== undefined) scopeId = params.scopeId;
+      if (params.forceCleanBoot !== undefined)
+        forceCleanBoot = params.forceCleanBoot;
       selection = resolveRuntimeSelection({
         runtimeId: params.runtimeId,
         phpVersion: params.phpVersion,
