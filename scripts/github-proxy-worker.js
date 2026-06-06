@@ -8,14 +8,19 @@
 //    omeka.org / dev.omeka.org resources (plugin/module pages and downloads), and
 //    Nextcloud / ownCloud public share links (/s/{token}[/download]) on any host.
 //
-// 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&atom=...]
+// 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&atom=...][&path=...]
 //    Builds the correct GitHub URL from semantic parameters and proxies the response.
+//    With &path={file} it serves a single raw file at the given ref (default
+//    branch when no ref is given) with CORS — e.g. a blueprint.json living in
+//    the repo. The ref travels as a query param, so refs with slashes
+//    (feat/x) are handled losslessly.
 //
 // Environment variables (optional):
 //   GITHUB_TOKEN – A GitHub personal access token to raise API rate limits from 60 to 5000 req/hour.
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_BASE = "https://github.com";
+const GITHUB_RAW = "https://raw.githubusercontent.com";
 
 export default {
   async fetch(request, env) {
@@ -66,6 +71,7 @@ export default {
           commit: "?repo={owner/repo}&commit={sha}",
           release: "?repo={owner/repo}&release={tag}",
           asset: "?repo={owner/repo}&release={tag}&asset={filename}",
+          raw_file: "?repo={owner/repo}&path={path}[&branch={branch}]",
           atom_releases: "?repo={owner/repo}&atom=releases",
           atom_tags: "?repo={owner/repo}&atom=tags",
         },
@@ -84,6 +90,20 @@ async function handleGitHubProxy(params, env) {
 
   if (!repo?.includes("/")) {
     return jsonResponse({ error: "Invalid repo format. Use owner/repo." }, 400);
+  }
+
+  // Raw file at a ref (e.g. a blueprint.json checked into the repo), served
+  // with CORS. The ref is a query param, so refs with slashes work. Resolves
+  // the ref from branch/ref/commit/release, falling back to the default branch.
+  if (params.has("path")) {
+    const ref =
+      params.get("branch") ||
+      params.get("ref") ||
+      params.get("commit") ||
+      params.get("release") ||
+      (await getDefaultBranch(repo, env)) ||
+      "main";
+    return proxyRawFile(repo, ref, params.get("path"));
   }
 
   // Atom feeds
@@ -215,6 +235,62 @@ async function handleAtomFeed(repo, type) {
     }
     return jsonResponse(
       { error: "Failed to fetch Atom feed.", details: error.message },
+      502,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Raw file resolution
+// ---------------------------------------------------------------------------
+
+// Fetches a single raw file from raw.githubusercontent.com and returns it with
+// CORS headers. Used to serve a repo's blueprint.json (or any small text/JSON
+// asset) cross-origin to the browser playground without inlining it in the URL.
+async function proxyRawFile(repo, ref, rawPath) {
+  const path = String(rawPath).replace(/^\/+/, "");
+  const url = `${GITHUB_RAW}/${repo}/${ref}/${path}`;
+
+  try {
+    // raw.githubusercontent.com serves directly (no redirect in practice), but
+    // validate any redirect hop against the GitHub host allowlist just in case.
+    const upstream = await fetchWithValidatedRedirects(
+      url,
+      { method: "GET", headers: { "User-Agent": "github-proxy-worker" } },
+      (candidate) =>
+        candidate.hostname === "raw.githubusercontent.com" ||
+        isGitHubDirectProxyUrl(candidate),
+    );
+
+    if (!upstream.ok) {
+      return jsonResponse(
+        {
+          error: "Upstream server returned an error.",
+          status: upstream.status,
+          statusText: upstream.statusText,
+        },
+        upstream.status === 404 ? 404 : 502,
+      );
+    }
+
+    const headers = new Headers();
+
+    applyCorsHeaders(headers);
+    headers.set(
+      "Content-Type",
+      path.toLowerCase().endsWith(".json")
+        ? "application/json; charset=utf-8"
+        : upstream.headers.get("Content-Type") || "text/plain; charset=utf-8",
+    );
+    headers.set("Cache-Control", "public, max-age=60");
+
+    return new Response(upstream.body, { status: 200, headers });
+  } catch (error) {
+    if (error instanceof RedirectBlockedError) {
+      return redirectBlockedResponse(error);
+    }
+    return jsonResponse(
+      { error: "Failed to fetch raw file.", details: error.message },
       502,
     );
   }

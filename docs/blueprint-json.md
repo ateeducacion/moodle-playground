@@ -160,6 +160,50 @@ all string values in the blueprint before execution:
 }
 ```
 
+### Context constants (`{{REPO}}` / `{{REF}}`)
+
+When a blueprint is loaded through `?blueprint-url=`, the playground derives a
+few **context constants** from that URL and merges them *over* the blueprint's
+own `constants`. This lets a single committed `blueprint.json` install the
+plugin from whatever branch it is being previewed for — without hard-coding
+`main`:
+
+| Constant     | Value                                                        |
+| ------------ | ----------------------------------------------------------- |
+| `{{REPO}}`   | `owner/repo` the blueprint was fetched for                  |
+| `{{OWNER}}`  | the owner segment of `{{REPO}}`                             |
+| `{{REF}}` / `{{BRANCH}}` | the branch / tag / commit the blueprint was fetched at |
+
+They are derived, in increasing priority, from:
+
+1. the `?blueprint-url=` value's own query — the github-proxy form
+   `…/?repo={owner/repo}&branch={ref}&path=blueprint.json` (slash-safe, since
+   the ref is a query param);
+2. a `raw.githubusercontent.com/{owner}/{repo}/{ref}/…` `?blueprint-url=`;
+3. explicit `?repo=` / `?ref=` (or `?owner=` / `?branch=`) on the playground URL.
+
+Author your blueprint with safe defaults so direct opens still work, and let the
+context override them for previews:
+
+```json
+{
+  "constants": { "REPO": "ateeducacion/mod_exelearning", "REF": "main" },
+  "steps": [
+    {
+      "step": "installMoodlePlugin",
+      "pluginType": "mod",
+      "pluginName": "exelearning",
+      "url": "https://github.com/{{REPO}}/archive/refs/heads/{{REF}}.zip"
+    }
+  ]
+}
+```
+
+> The `?path=` mode of the github-proxy serves a single raw repo file (e.g. the
+> branch's `blueprint.json`) with CORS, so the preview link can stay short
+> (`?blueprint-url=` instead of a giant base64 `?blueprint=`):
+> `https://github-proxy.exelearning.dev/?repo={owner/repo}&branch={ref}&path=blueprint.json`.
+
 ## Resources
 
 Named resources can be defined once and referenced from steps using `@name`:

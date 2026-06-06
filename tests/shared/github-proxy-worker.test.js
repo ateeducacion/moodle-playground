@@ -1193,3 +1193,72 @@ describe("github-proxy-worker Dropbox shared links", () => {
     assert.equal(response.status, 400);
   });
 });
+
+describe("github-proxy-worker ?path= raw file mode", () => {
+  it("serves a raw repo file at a branch ref with CORS (slash-safe ref)", async () => {
+    const calls = [];
+    global.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      return new Response('{"steps":[]}', {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&branch=feat/x&path=blueprint.json",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].url,
+      "https://raw.githubusercontent.com/owner/repo/feat/x/blueprint.json",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.match(response.headers.get("Content-Type"), /application\/json/i);
+    assert.equal(await response.text(), '{"steps":[]}');
+  });
+
+  it("strips leading slashes from the path", async () => {
+    let captured;
+    global.fetch = async (url) => {
+      captured = String(url);
+      return new Response("x", {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    };
+
+    await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&branch=main&path=/a/b.json",
+      ),
+      {},
+    );
+
+    assert.equal(
+      captured,
+      "https://raw.githubusercontent.com/owner/repo/main/a/b.json",
+    );
+  });
+
+  it("returns 404 when the raw file is missing", async () => {
+    global.fetch = async () =>
+      new Response("Not Found", { status: 404, statusText: "Not Found" });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&branch=main&path=missing.json",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.error, "Upstream server returned an error.");
+  });
+});
