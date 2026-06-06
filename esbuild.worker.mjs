@@ -3,8 +3,41 @@
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { build } from "esbuild";
+import { ALL_PHP_VERSIONS as MOODLE_PHP_VERSIONS } from "./src/shared/version-resolver.js";
 
 const require = createRequire(import.meta.url);
+
+// Only bundle the PHP runtime versions Moodle actually supports. @php-wasm/web's
+// loadWebRuntime() switch dynamically imports every @php-wasm/web-X-Y package,
+// so esbuild can't tree-shake and would emit all 8 versions' .wasm (~798 MB)
+// into dist/ — though the browser only downloads the one version a session
+// selects. Keep the versions any deployed Moodle branch can run (the resolver's
+// ALL_PHP_VERSIONS) and stub the rest so their assets are never emitted (a
+// deploy/CI/disk reduction; loadWebRuntime behavior for kept versions is
+// unchanged). NOTE: keep-set comes from version-resolver, not playground.config
+// (which only lists the default runtime), so branch/?php= overrides keep working.
+const ALL_PHP_VERSIONS = ["5-2", "7-4", "8-0", "8-1", "8-2", "8-3", "8-4", "8-5"];
+const keepVersions = MOODLE_PHP_VERSIONS.map((v) => v.replace(".", "-"));
+const dropVersions = ALL_PHP_VERSIONS.filter((v) => !keepVersions.includes(v));
+const stripUnusedPhpVersions = {
+  name: "strip-unused-php-versions",
+  setup(b) {
+    if (dropVersions.length === 0) return;
+    const filter = new RegExp(
+      `@php-wasm/(?:web|node)-(?:${dropVersions.join("|")})(?:/|$)`,
+    );
+    b.onResolve({ filter }, (args) => ({
+      path: args.path,
+      namespace: "phpver-stub",
+    }));
+    b.onLoad({ filter: /.*/, namespace: "phpver-stub" }, (args) => ({
+      loader: "js",
+      contents:
+        `export function getPHPLoaderModule(){throw new Error("PHP runtime not bundled in this build: ${args.path}");}\n` +
+        `export function getIntlExtensionPath(){throw new Error("PHP intl not bundled in this build: ${args.path}");}\n`,
+    }));
+  },
+};
 
 // @php-wasm/web 3.1.22+ references the ICU data file via the source-layout
 // path `../intl/shared/icu.dat`, but the published tarball ships the file at
@@ -40,7 +73,7 @@ await Promise.all([
     banner: {
       js: `const __APP_ROOT__ = new URL("../", import.meta.url).href;`,
     },
-    plugins: [phpWasmIcuDataPlugin],
+    plugins: [phpWasmIcuDataPlugin, stripUnusedPhpVersions],
     loader: {
       ".wasm": "file",
       ".so": "file",
@@ -70,7 +103,11 @@ await Promise.all([
     define: {
       "process.env.NODE_ENV": '"production"',
     },
-  }).then(() => console.log("Built dist/php-worker.bundle.js")),
+  }).then(() =>
+    console.log(
+      `Built dist/php-worker.bundle.js (bundled PHP runtimes: ${keepVersions.join(", ")})`,
+    ),
+  ),
 
   // Bundle the Service Worker as an IIFE (classic script).
   // Firefox does not support ES module Service Workers (type: "module" + import
