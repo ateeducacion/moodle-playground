@@ -1,9 +1,8 @@
 import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
 import {
-  extractZipEntries,
+  buildCoreExtractScript,
   fetchBundleWithCache,
-  writeEntriesToPhp,
 } from "../../lib/moodle-loader.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
@@ -1885,10 +1884,34 @@ async function prepareMoodleRuntime({
 
   const tMount = performance.now();
   publish("Writing Moodle bundle into MEMFS.", 0.58);
-  const entries = extractZipEntries(archive.bytes);
-  writeEntriesToPhp(php, entries, MOODLE_ROOT, ({ ratio, path }) => {
-    publish(`Writing ${path}`, 0.58 + ratio * 0.2);
-  });
+  // Extract the core with PHP's native ZipArchive instead of decompressing the
+  // whole ~179 MB / ~29 000-file archive in JS. libzip inflates + writes one
+  // entry at a time (fast at any file count, ~one-entry peak), avoiding both the
+  // fflate `unzipSync` heap OOM and the per-entry DecompressionStream overhead
+  // of `decodeZip` (which made boot exceed the 150s readiness gate and regressed
+  // the Firefox e2e suite). Write the zip to MEMFS, run the extractor, then fail
+  // loud if ext/zip is missing or it errors — there is no JS fallback by design
+  // (ext/zip is confirmed present; Moodle already uses ZipArchive).
+  const tmpZip = `${TEMP_ROOT}/moodle-core.zip`;
+  const stage = `${TEMP_ROOT}/moodle-core-stage`;
+  await php.writeFile(tmpZip, archive.bytes);
+  // Drop the JS reference to the compressed buffer now that MEMFS has its own
+  // copy, so the GC can reclaim it while ZipArchive extracts.
+  archive.bytes = null;
+  const extractResult = await php.run(
+    buildCoreExtractScript(tmpZip, stage, MOODLE_ROOT),
+  );
+  const extractOut = (
+    extractResult.text ??
+    textDecoder.decode(extractResult.bytes || new Uint8Array())
+  ).trim();
+  if (!extractOut.startsWith("INSTALL_OK")) {
+    throw new Error(
+      `Moodle core extraction failed: ${extractOut.slice(0, 200)} ` +
+        "(PHP ext/zip is required to mount the core).",
+    );
+  }
+  publish("Published Moodle core into MEMFS.", 0.78);
   const mountMs = Math.round(performance.now() - tMount);
 
   const tComponentCache = performance.now();
