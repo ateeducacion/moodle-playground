@@ -672,6 +672,7 @@ async function bootstrapRemote() {
       phpCorsProxyUrl,
       debug,
       profile,
+      forceCleanBoot: cleanBoot,
     },
   });
   const workerReadyMessage = await workerReadyPromise;

@@ -86,7 +86,15 @@ export const __testing = {
  */
 export function createPhpRuntime(
   _runtime,
-  { appBaseUrl, phpVersion, webRoot, corsProxyUrl, phpCorsProxyUrl } = {},
+  {
+    appBaseUrl,
+    phpVersion,
+    webRoot,
+    corsProxyUrl,
+    phpCorsProxyUrl,
+    scopeId,
+    forceCleanBoot,
+  } = {},
 ) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   const resolvedCorsProxyUrl = resolveCorsProxyUrl(
@@ -130,6 +138,21 @@ export function createPhpRuntime(
         FS.mkdirTree(PERSIST_ROOT);
       } catch {
         /* exists */
+      }
+
+      // Restore persisted mutable data (/persist) before Moodle bootstraps, so
+      // the install gate finds the existing DB/marker and skips CLI provisioning.
+      // Keyed by scopeId (sessionStorage) → data survives reloads within the tab
+      // session. forceCleanBoot (reset / ?clean=1) wipes it instead.
+      if (scopeId) {
+        const { clearJournal, initFsPersistence } = await import(
+          "./fs-persistence.js"
+        );
+        if (forceCleanBoot) {
+          await clearJournal(scopeId);
+        } else {
+          await initFsPersistence(php, scopeId);
+        }
       }
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir

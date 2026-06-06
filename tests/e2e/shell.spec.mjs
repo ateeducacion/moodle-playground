@@ -39,6 +39,20 @@ test("loads the shell and boots the Moodle runtime", async ({
   expect(address.startsWith("/")).toBe(true);
 });
 
+test("persists mutable data to IndexedDB", async ({ page, playground }) => {
+  await playground.open();
+
+  // The persistence layer opens a "moodle-fs-journal:<scopeId>" IndexedDB and
+  // journals /persist (the SQLite DB + moodledata), so a reload within the tab
+  // session reuses the data instead of reinstalling. Its presence proves the
+  // persistence wiring is active.
+  const journaled = await page.evaluate(async () => {
+    const dbs = await indexedDB.databases();
+    return dbs.some((d) => d.name?.startsWith("moodle-fs-journal:"));
+  });
+  expect(journaled).toBe(true);
+});
+
 test("side panel opens and shows tabs", async ({ page, playground }) => {
   await playground.open();
 
