@@ -53,6 +53,62 @@ test("persists mutable data to IndexedDB", async ({ page, playground }) => {
   expect(journaled).toBe(true);
 });
 
+test("does not journal Moodle's derived caches (guards CompiledContainer regression)", async ({
+  page,
+  playground,
+}) => {
+  await playground.open();
+
+  // Caches under moodledata (cache/localcache/temp/muc) — including Moodle's
+  // compiled DI container — must NOT be persisted. Restoring a stale localcache
+  // on reload crashed boot with `Class "CompiledContainer" not found`; only real
+  // data (DB, filedir, config, sessions) is journaled and Moodle rebuilds caches.
+  // Wait past the 1500ms debounced flush so boot's writes are in IndexedDB.
+  await page.waitForTimeout(2500);
+
+  const journal = await page.evaluate(async () => {
+    const meta = (await indexedDB.databases()).find((d) =>
+      d.name?.startsWith("moodle-fs-journal:"),
+    );
+    if (!meta) return { error: "no journal db" };
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open(meta.name);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    const ops = await new Promise((res, rej) => {
+      const rq = db.transaction("ops", "readonly").objectStore("ops").getAll();
+      rq.onsuccess = () => res(rq.result || []);
+      rq.onerror = () => rej(rq.error);
+    });
+    db.close();
+    // Match on the op's *path* only (not a stringified op, whose file contents
+    // legitimately mention the cache dirs, e.g. config.php's $CFG->localcachedir).
+    const re = /\/persist\/moodledata\/(cache|localcache|temp|muc)(\/|$)/u;
+    const paths = ops
+      .map((op) => op?.path)
+      .filter((p) => typeof p === "string");
+    const offenders = paths.filter((p) => re.test(p));
+    return {
+      total: ops.length,
+      stringPaths: paths.length,
+      sampleKeys: ops[0] ? Object.keys(ops[0]) : [],
+      offenders: offenders.slice(0, 10),
+      offenderCount: offenders.length,
+    };
+  });
+
+  expect(journal.error).toBeUndefined();
+  // Positive control: real data (DB/config/filedir) is journaled with paths.
+  expect(journal.stringPaths).toBeGreaterThan(0);
+  // The fix: no cache/localcache/temp/muc paths are persisted, so a reload can't
+  // restore a stale compiled container.
+  expect(
+    journal.offenderCount,
+    `journaled cache paths: ${JSON.stringify(journal.offenders)} (op keys: ${JSON.stringify(journal.sampleKeys)})`,
+  ).toBe(0);
+});
+
 test("side panel opens and shows tabs", async ({ page, playground }) => {
   await playground.open();
 
