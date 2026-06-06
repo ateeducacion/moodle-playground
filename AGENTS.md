@@ -1,352 +1,475 @@
-# AGENTS.md — Moodle Playground debugging & dev guide
+<!--
+MAINTENANCE: Update this file when:
+- Adding/removing npm scripts in package.json or targets in Makefile
+- Changing the runtime flow (shell, remote host, service worker, php worker)
+- Modifying the Moodle bundle format, manifest schema, or storage model
+- Changing deployment assumptions for GitHub Pages or other static hosting
+- Adding new conventions for blueprints, extensions, or persistent state
+- Updating upstream project references (WordPress Playground, Omeka S Playground)
+- Adding or removing agent skills under .agents/skills/
+-->
 
-A practical guide for AI agents and humans working on **moodle-playground**, a
-browser-only Moodle that runs on PHP compiled to WebAssembly. It boots Moodle
-(4.4 → 5.2) entirely client-side: no server, no PHP host, no database server.
+# AGENTS.md
 
-This is the most mature of the four sibling PHP-WASM playgrounds
-(nextcloud / **moodle** / omeka / facturascripts). They share the same shell +
-worker + service-worker architecture, the same `@php-wasm/*` pins, Biome lint,
-and a `make test/lint/bundle` workflow. Moodle is the exception that commits
-`vendor/fflate.js` (see [Build & test](#build--test)).
+This file provides guidance to AI coding agents when working with code in this repository.
 
----
+## Project Overview
 
-## Overview / Architecture
+Moodle Playground runs a Moodle site entirely in the browser using WebAssembly.
+It follows the same product shape as `omeka-s-playground`:
 
-The runtime is split across a few cooperating layers. Reading them in this order
-makes the data flow clear:
+1. Shell UI: `index.html` and `src/shell/main.js`
+2. Runtime host: `remote.html` and `src/remote/main.js`
+3. Request routing: `sw.js` and `php-worker.js`
+4. PHP/Moodle runtime: `src/runtime/*` + generated assets under `assets/moodle/`
 
-| Layer | Files | Role |
-|-------|-------|------|
-| Shell UI | `index.html`, `src/shell/main.js` | The page at `/`. Address bar, runtime picker, blueprint editor, reset button. Owns the `scopeId` and renders the host iframe `#site-frame`. |
-| Remote host | `remote.html`, `src/remote/main.js` | Loaded inside `#site-frame`. Registers the service worker, spawns the PHP worker, and renders the real Moodle in a nested iframe `#remote-frame`. |
-| PHP worker | `php-worker.js` → bundled to `dist/php-worker.bundle.js` | Web Worker. Owns the PHP-WASM instance, runs the bootstrap/install, serves PHP requests. |
-| Service worker | `sw.js` → bundled to `sw.bundle.js` (at repo **root**, not `dist/`) | Intercepts scoped HTTP requests and routes them into the worker. Must live at root so its scope can cover `/playground/...`. |
-| Runtime | `src/runtime/*` | Boot logic: `bootstrap.js` (install/upgrade orchestration + inline PHP), `php-loader.js` (PHP instance + FS setup), `config-template.js` (generates Moodle `config.php` and `php.ini`), `php-compat.js` (request/response adapter), `manifest.js`, `crash-recovery.js`, `fs-persistence.js`. |
-| Shared | `src/shared/*` | `storage.js` (scopeId + sessionStorage), `paths.js` (scoped URL builders), `protocol.js` (BroadcastChannel names), `version-resolver.js` (runtime id parsing), `config.js`. |
-| Blueprint | `src/blueprint/` | Modular, blueprint-driven provisioning. `index.js`, `executor.js`, `parser.js`, `resolver.js`, `schema.js`, and `steps/*` (one handler per step type: `moodle-install`, `moodle-users`, `moodle-courses`, `moodle-modules`, `moodle-plugins`, …). |
-| Loader | `lib/moodle-loader.js` | Fetches the prebuilt Moodle core ZIP (with cache) and extracts it into MEMFS. |
+The Moodle core is extracted from a prebuilt ZIP bundle into Emscripten MEMFS (in-memory)
+at boot. All files — core and mutable state — live in writable MEMFS. The runtime is fully
+ephemeral — all state is lost when the browser tab closes or the page is reloaded.
 
-The Moodle core is extracted from a prebuilt ZIP into Emscripten **MEMFS**
-(in-memory) at boot. Everything — core code *and* mutable data — lives in MEMFS;
-the runtime then journals just the mutable data to IndexedDB (see
-[Persistence](#persistence-model)).
+## Related Projects and Upstream References
 
-Worker bundling is done by esbuild (`esbuild.worker.mjs`), which produces both
-`dist/php-worker.bundle.js` and `sw.bundle.js`. The `@php-wasm/*` packages are
-pinned at `^3.1.36`.
+This project builds on WordPress Playground (`@php-wasm/*`) for the PHP WASM runtime and
+Omeka S Playground for the shell/remote/sw/worker architecture pattern. Before inventing a
+solution, check if either upstream already solved the same problem.
 
----
+For full details: @.agents/references/upstream-projects.md
 
-## Running locally
+## Specialist Agent Skills
 
-```sh
-make serve            # PORT=8080 npm run serve   (http-server . -p 8080 -c-1)
+This project includes domain-expert agent skills under `.agents/skills/`. Each skill
+provides deep context for a specific area of the codebase. Activate the appropriate
+skill when working in its domain — the skill file contains API references, checklists,
+known pitfalls, and conventions that are not repeated elsewhere in this document.
+
+| Skill | Directory | When to use |
+|-------|-----------|-------------|
+| **Moodle Internals** | `@.agents/skills/moodle-internals/SKILL.md` | Moodle APIs, plugin system, database schema, install/upgrade lifecycle, config settings, course structure, user management, enrollment, MUC caching, SQLite compatibility, patch layout, bootstrap fragile areas |
+| **WP Playground & php-wasm** | `@.agents/skills/wp-playground-php-wasm/SKILL.md` | `@php-wasm/web` and `@php-wasm/universal` APIs, PHP instance lifecycle, `php.run()` execution model, filesystem operations, `setPhpIniEntries()`, request/response conversion, `php-compat.js` adapter, outbound PHP networking, php.ini configuration |
+| **WASM & Browser Runtime** | `@.agents/skills/wasm-browser-runtime/SKILL.md` | WASM crashes and memory limits, Emscripten MEMFS, service worker routing and caching, Web Worker communication, crash recovery, GitHub Pages subpath deployment, browser storage constraints, Firefox SW bundling |
+| **Blueprint Provisioning** | `@.agents/skills/blueprint-provisioning/SKILL.md` | Blueprint JSON format, step handlers, executor engine, resource resolution, PHP code generation, plugin/theme installation, constant substitution, adding new step types |
+| **Unit Testing** | `@.agents/skills/unit-testing/SKILL.md` | Writing and reviewing unit tests with `node:test`, mocking `php.run()` and MEMFS, testing PHP code generators, service worker helpers, runtime utilities, test organization conventions |
+| **E2E Testing (Playwright)** | `@.agents/skills/e2e-playwright/SKILL.md` | Browser-based end-to-end tests with Playwright, WASM boot waiting strategies, iframe navigation, blueprint execution verification, shell UI interaction, debugging flaky tests |
+
+### Additional references
+
+| Reference | Location | Content |
+|-----------|----------|---------|
+| **Testing & CI/CD** | `@.agents/references/testing-and-ci.md` | Test suite inventories, CI/CD pipeline, Biome linting, Firefox compatibility, manual validation |
+| **Upstream Projects** | `@.agents/references/upstream-projects.md` | WordPress Playground and Omeka S Playground details, when to consult each |
+
+### Skill activation guidelines
+
+1. **Read the skill file** when entering its domain — it contains the authoritative
+   reference for conventions and known issues in that area.
+2. **Cross-reference skills** when a change spans domains. For example, adding a new
+   blueprint step that installs a plugin touches both `blueprint-provisioning` and
+   `moodle-internals` (plugin type system, upgrade lifecycle).
+3. **Follow the checklists** at the end of each skill file before submitting changes.
+4. **Do not duplicate** skill content in this file — AGENTS.md provides the architectural
+   overview; skills provide the deep domain knowledge.
+
+## Build System
+
+This project uses npm, esbuild, and a small Makefile workflow.
+
+### Requirements
+
+- Node.js 18+
+- npm
+- Python 3
+- Git
+- PHP 8.3 with `pdo_sqlite` for `make up-local`
+
+### Common Commands
+
+```bash
+npm install
+npm run build:worker
+npm run bundle
+
+make prepare
+make prepare-dev
+make prepare-dev-pretty
+make prepare-all
+make bundle
+make bundle-all
+make bundle-all-pretty
+make serve
+make up
+make up-local
 ```
 
-Before serving, the esbuild worker bundle must exist:
+`make up-local` starts a native `php -S` Moodle using the patched checkout in
+`.cache/moodle/<branch>`. It respects `BRANCH=...` and isolates local SQLite state per branch
+under `.cache/local/<branch>/`, so switching between `MOODLE_500_STABLE` and `main` does not
+reuse the same database or `moodledata`. For `main`, the script serves the `public/` docroot
+automatically.
 
-```sh
-make build-worker     # npm run build:worker → dist/php-worker.bundle.js + sw.bundle.js
-make bundle           # builds ONE Moodle core ZIP (BRANCH=MOODLE_500_STABLE by default) — heavy, needs PHP 8.3
+### Generated Assets
+
+- `assets/moodle/`: runtime bundle files (`.zip`, snapshot, manifests)
+- `assets/moodle/snapshot/`: pre-built install snapshot (`install.sq3`)
+- `assets/manifests/`: generated bundle manifests
+- `dist/`: esbuild output (php-worker bundle, WASM files, ICU data)
+
+Do not hand-edit generated bundle artifacts unless the task is specifically about the build output.
+
+### Worker Bundling
+
+The PHP worker (`php-worker.js`) is bundled with esbuild into `dist/php-worker.bundle.js`.
+This bundles all runtime dependencies (`@php-wasm/web`, `@php-wasm/universal`, shared modules)
+into a single ESM file that can be loaded as a Web Worker. WASM and ICU data files are
+copied to `dist/` with content hashes and loaded at runtime.
+
+Run `npm run build:worker` (or `make build-worker`) to rebuild after changes.
+
+## Architecture
+
+### Runtime Flow
+
+```text
+index.html
+  -> src/shell/main.js
+     -> remote.html
+        -> src/remote/main.js
+           -> sw.js
+              -> dist/php-worker.bundle.js
+                 -> src/runtime/php-loader.js (@php-wasm/web)
+                 -> src/runtime/php-compat.js (compatibility layer)
+                 -> src/runtime/bootstrap.js
 ```
 
-Convenience targets:
+### PHP Runtime
 
-```sh
-make prepare          # deps + build-version + build-worker  (fast loop; worker only)
-make prepare-dev      # prepare + one Moodle branch bundle
-make up               # deps + build-version + build-worker + all 6 branch bundles + serve
-make up-local         # builds a bundle then runs scripts/setup-local.sh (real PHP backend on $LOCAL_PORT)
+The PHP runtime is provided by WordPress Playground's `@php-wasm/web` and `@php-wasm/universal`
+packages. Key files:
+
+- `src/runtime/php-loader.js` — Creates PHP instances via `loadWebRuntime()` and `new PHP()`
+- `src/runtime/php-compat.js` — Compatibility wrapper (request/response conversion,
+  analyzePath emulation, Emscripten module access)
+
+The PHP 8.3 WASM binary includes all extensions built-in:
+`sqlite3`, `pdo_sqlite`, `dom`, `simplexml`, `xml`, `mbstring`, `openssl`, `intl`,
+`iconv`, `zlib`, `zip`, `phar`, `curl`, `gd`, `fileinfo`, `xmlreader`, `xmlwriter`.
+
+**Note:** `sodium` is NOT available in the WASM binary. The OpenSSL fallback patch in
+`patches/shared/lib/classes/encryption.php` handles all encryption needs.
+
+### Outbound HTTPS From PHP
+
+Uses WordPress Playground's `tcpOverFetch` bridge. For full details see the
+WP Playground & php-wasm skill. Key constraints unique to this repo:
+
+- The generated CA must avoid explicit `keyUsage`, `nsCertType`, and SAN IP extensions
+  (upstream ASN.1 encoder mis-encodes them — PR #1926-style CA profile).
+- `addonProxyUrl` is for browser-side ZIP downloads. `phpCorsProxyUrl` is for runtime PHP
+  networking fallback. Do not conflate the two.
+- After any change in `src/runtime/php-loader.js`, `php-worker.js`, or other worker imports,
+  run `npm run build:worker`.
+
+### Responsibilities
+
+- `index.html` / `src/shell/main.js`
+  - Toolbar, URL bar, iframe host, blueprint import, runtime logs
+- `remote.html` / `src/remote/main.js`
+  - Registers the service worker and hosts the scoped playground iframe
+- `sw.js`
+  - Intercepts same-origin requests
+  - Maps static vs scoped/runtime requests
+  - Rewrites redirects and HTML links for GitHub Pages subpaths
+- `php-worker.js` (bundled into `dist/php-worker.bundle.js`)
+  - Owns the PHP runtime instance for a scope
+  - Boots Moodle and serves HTTP requests through the bridge
+- `src/runtime/bootstrap.js`
+  - Extracts the Moodle ZIP bundle into writable MEMFS
+  - Writes `config.php` and runtime helper scripts
+  - Applies runtime patches to Moodle PHP sources
+  - Loads a pre-built install snapshot (or falls back to full CLI install)
+  - Executes blueprint steps (courses, users, plugins, etc.)
+- `src/runtime/crash-recovery.js`
+  - Detects fatal WASM errors (OOM, file descriptor exhaustion)
+  - Snapshots the DB, plugin files, and user uploads before runtime destruction
+  - Restores state onto a fresh runtime after crash
+  - Replays safe (GET/HEAD) requests automatically
+
+## Storage Model
+
+The runtime is **fully ephemeral**. All mutable state lives in Emscripten's MEMFS
+(JavaScript heap memory). Nothing is persisted to OPFS, IndexedDB, or any other
+durable browser storage during normal operation. Closing the tab destroys all state.
+
+Current layout:
+
+- Moodle core: extracted from ZIP bundle into `/www/moodle` (writable MEMFS)
+- Mutable data: `/persist/moodledata` (MEMFS — the `/persist` name is legacy, not durable)
+- SQLite database: `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (MEMFS file)
+- Config and install markers: `/persist/config` (MEMFS)
+- Temp files and sessions: `/tmp/moodle` (MEMFS)
+
+**Why not `:memory:` SQLite?** Each `php.run()` call resets PHP state and closes all PDO
+connections. A `:memory:` database would be empty on the next request. The MEMFS file
+persists across PHP script executions within the same worker session.
+
+Avoid reintroducing boot-time file-by-file copies of the full Moodle core into persistent storage.
+Do not add OPFS, IndexedDB, or other persistence layers unless explicitly required.
+
+## Crash Recovery (PHP Runtime Restart)
+
+The PHP WASM runtime can crash mid-session due to resource exhaustion. For full recovery
+flow details, see the WASM & Browser Runtime skill. Key files:
+
+- `src/runtime/crash-recovery.js` — `isFatalWasmError()`, `createSnapshotManager()`
+- `php-worker.js` — `resetRuntime()`, `reRegisterPluginsAfterRestore()`
+
+Anti-loop guards: max 20 restarts/session, min 10 requests before restart, no POST replay.
+
+## SQLite Prototype Invariants
+
+Current database assumptions:
+
+- Moodle runs against the deprecated SQLite PDO driver
+- The SQLite database file lives in MEMFS (pure memory, no durable storage)
+- The DB file path is `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`
+- `config.php` is generated at boot and points at the MEMFS database file
+- SQLite pragmas are tuned for in-memory operation: `journal_mode=MEMORY`,
+  `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
+- A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) eliminates the
+  3-8s CLI install phase. If unavailable, the full CLI install runs as a fallback.
+
+When touching the migration/runtime path, preserve these invariants:
+
+1. Do not reintroduce PGlite as the active DB path
+2. Do not move the DB out of the writable MEMFS filesystem
+3. Do not copy the full Moodle core into persistent (OPFS/IndexedDB) storage
+4. Keep `$CFG->wwwroot` based on the real app base URL, not the scoped runtime path
+5. Keep the default scope stable unless there is a deliberate migration plan
+6. Do not add OPFS/IndexedDB persistence for the database — the runtime is ephemeral by design
+7. CACHE_DISABLE_ALL is false (MUC enabled). Cache store plugin defaults are seeded in
+   the install snapshot, config normalizer, and install runner to prevent admin redirect loops
+
+Important files for this prototype:
+
+- `src/runtime/config-template.js`, `lib/config-template.js`
+- `src/runtime/bootstrap.js`, `src/runtime/php-loader.js`, `src/runtime/php-compat.js`
+- `src/runtime/crash-recovery.js`
+- `sw.js`, `src/remote/main.js`, `php-worker.js`, `lib/moodle-loader.js`
+- `scripts/patch-moodle-source.sh`, `scripts/generate-install-snapshot.sh`
+- `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
+- `patches/shared/lib/ddl/sqlite_sql_generator.php`
+- `patches/shared/lib/classes/encryption.php`
+
+Prototype-specific defaults currently matter during first boot:
+
+- `rememberusername` is intentionally disabled by default
+- several Moodle config values are seeded manually during bootstrap
+- `sodium` is NOT available in the WASM binary; the OpenSSL fallback patch handles encryption
+- Debug defaults to disabled (`$CFG->debug = 0`) but is configurable via blueprint `runtime.debug`
+  (0=NONE, 5=MINIMAL, 15=NORMAL, 32767=DEVELOPER) and `runtime.debugdisplay` (0 or 1),
+  or via the Settings dialog in the playground UI
+- For browser/runtime debugging, prefer opening the app with `?debug=true` first.
+- `CACHE_DISABLE_ALL = false` (MUC enabled — cache store defaults are seeded at build and boot time)
+- JS, template, and language string caches are enabled for navigation performance
+- PHP `display_errors` is off by default; configurable via `runtime.debugdisplay` in blueprint
+
+If you change any of the above behavior, update:
+
+- `docs/sqlite-wasm-migration-notes.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/KNOWN-ISSUES.md`
+
+## GitHub Pages and Base Path Handling
+
+This project is expected to run under a subpath such as `/moodle-playground`.
+
+When modifying `sw.js`, preserve all three behaviors:
+
+1. App base path handling for static hosting in a subdirectory
+2. Scoped runtime routing under `/playground/<scope>/<runtime>/...`
+3. HTML response rewriting for Moodle-generated links and forms
+
+Moodle, like Omeka, may emit HTML-escaped URLs. If navigation works on first load but breaks after clicking inside the site, inspect the HTML response body first.
+
+### Base path propagation chain
+
+The URL base path must be consistent across the entire stack:
+
+1. `esbuild.worker.mjs` injects `__APP_ROOT__` = `new URL("../", import.meta.url).href`
+2. `php-worker.js` passes it as `appRootUrl` → `bootstrapMoodle({ appBaseUrl })`
+3. `bootstrap.js`: `buildPublicBase(appBaseUrl)` → `$CFG->wwwroot` in `config.php`
+4. `php-loader.js`: `absoluteUrl = appBaseUrl` → passed to `wrapPhpInstance()`
+5. `php-compat.js`: extracts `urlBasePath` → prepended to `SCRIPT_NAME`, `PHP_SELF`, `REQUEST_URI`
+
+If any link in this chain is broken, redirects on subpath deployments will loop.
+
+## Moodle URL Construction Internals
+
+Understanding how Moodle constructs URLs is critical for this project because we control
+the `$_SERVER` variables that Moodle reads.
+
+**Key mechanism** (`lib/setuplib.php`, `setup_get_remote_url()`):
+- `$hostandport` = scheme + host extracted from `$CFG->wwwroot` (path is IGNORED)
+- `$FULLSCRIPT` = `$hostandport` + `$_SERVER['SCRIPT_NAME']`
+- `$FULLME` = `$hostandport` + `$_SERVER['REQUEST_URI']`
+
+This means `$_SERVER['SCRIPT_NAME']` must carry the full URL path including any subpath
+prefix (e.g., `/moodle-playground/admin/index.php`, not just `/admin/index.php`).
+
+**Where URLs flow through the system**:
+1. Browser requests `/moodle-playground/playground/main/php83-cgi/admin/index.php`
+2. `sw.js` strips the scoped prefix → requestPath = `/admin/index.php`
+3. `php-compat.js` receives the stripped path and must re-add the URL base path to `$_SERVER`
+4. PHP generates redirect Location headers using `$FULLME` or `$CFG->wwwroot` + path
+5. `sw.js` rewrites Location headers to add the scoped prefix back
+
+On localhost (`http://localhost:8080`), the URL base path is empty, so this is invisible.
+On GitHub Pages (`https://host/moodle-playground`), the base path is `/moodle-playground`.
+
+## Blueprints
+
+Blueprints are step-based JSON files that describe the desired state of a playground
+instance. For full format, step types, PHP code generation, and resource system details,
+see the Blueprint Provisioning skill.
+
+Key design decisions:
+- `installMoodle` is a declarative marker — the actual install runs in `bootstrap.js`
+- Provisioning steps use `php.run()` with `CLI_SCRIPT` mode (except `login` which uses HTTP)
+- Blueprint step execution runs between config normalization (0.918) and auto-login (0.95)
+
+When changing blueprint semantics, update the schema, step handlers, docs, and tests.
+
+## Testing, Linting, and Formatting
+
+### Quick reference
+
+```bash
+make test      # Run all unit tests (286+ tests across 63 suites)
+make test-e2e  # Run Playwright browser tests (shell, boot, blueprints)
+make lint      # Run Biome linter on src/, tests/, scripts/
+make format    # Auto-fix lint and formatting issues
 ```
 
-### CRITICAL gotcha: never use a privileged port
+For full test suite inventories, CI/CD pipeline, and browser compatibility details:
+@.agents/references/testing-and-ci.md
 
-`http-server` binds the port directly. A port **< 1024** fails with `EACCES` in
-this environment. Always use a high port (the default `8080` is fine):
+## Architecture Decision Records (ADRs)
 
-```sh
-make serve PORT=8080      # good
-make serve PORT=80        # EACCES — do not do this
+Every significant technical decision must be documented as an Architecture Decision Record.
+ADRs capture the context, options considered, rationale, consequences, and review criteria
+so that future contributors (human or AI) understand **why** a choice was made — not just what.
+
+### Rules
+
+1. **When to write an ADR**: Any change that introduces a new pattern, modifies the request
+   pipeline, changes the storage model, adds a dependency, or alters build/deployment behavior.
+   When in doubt, write one — a short ADR is better than no ADR.
+2. **Template**: Always start from `.agents/templates/adr-template.md`. Do not invent a new format.
+3. **Location**: `docs/decisions/NNNN-kebab-case-title.md`, numbered sequentially.
+4. **Language**: English.
+5. **Status values**: `Proposed`, `Accepted`, `Rejected`, `Obsolete`, `Superseded by ADR-NNNN`.
+6. **Cross-reference**: When an ADR supersedes another, update the old ADR's status.
+7. **Link from code**: When code implements an ADR, add a brief comment referencing it
+   (e.g., `// See docs/decisions/0001-sw-level-scoped-static-asset-caching.md`).
+
+### Current ADRs
+
+| ADR | Topic | Status |
+|-----|-------|--------|
+| [0001](docs/decisions/0001-sw-level-scoped-static-asset-caching.md) | SW-level caching for scoped static assets | Accepted |
+| [0002](docs/decisions/0002-plugin-auto-detection-from-github-urls.md) | Plugin type & name auto-detection from GitHub URLs | Accepted |
+| [0003](docs/decisions/0003-direct-db-inserts-for-course-modules.md) | Direct DB inserts for course modules (WASM SQLite compat) | Accepted |
+| [0004](docs/decisions/0004-opcache-tuning-and-runtime-ux-defaults.md) | OPcache tuning and runtime UX defaults | Accepted |
+| [0005](docs/decisions/0005-resilient-blueprint-step-execution.md) | Resilient blueprint step execution with graceful errors | Accepted |
+
+## Debugging
+
+### By hand (in the browser)
+
+Serve the app locally and drive it like a user:
+
+```bash
+make serve            # PORT=$(PORT) npm run serve → http-server . -p ${PORT:-8080}
+# Use a high port (default 8080); a privileged port (<1024) fails with EACCES.
+# Then open http://localhost:8080/
 ```
 
-`make bundle` requires PHP 8.3 on the host (`make check-php` auto-detects the
-Homebrew `php@8.3` binary). Without it, bundling fails fast with a clear message.
+**Scoped routing layers.** The shell is served at `/` (`index.html` →
+`src/shell/main.js`). It hosts `#site-frame` = `remote.html?scope=<scope>&runtime=<runtime>`
+(`src/remote/main.js`), which in turn hosts a nested `#remote-frame` pointing at
+`/playground/<scope>/<runtime>/…` — a path the Service Worker (`sw.js`) intercepts
+and serves from the PHP worker. `<runtime>` is the runtime id from
+`playground.config.json` (e.g. `php83-moodle50`). `<scope>` is a sessionStorage-based
+id (`getOrCreateScopeId` in `src/shared/storage.js`); it lives only within the tab
+session, so persistence is scoped to "this tab, until it closes".
 
----
+**Readiness.** Boot is slow (WASM + Moodle). The shell is ready once
+`#address-input` is **enabled** (and `#current-runtime-label` is no longer `-`).
+Poll for it rather than assuming a fixed delay.
 
-## Scoped URL routing
+**Admin credentials:** `admin` / `password` (from `playground.config.json`).
 
-There are three nested documents. Verify by booting and inspecting the iframe
-tree:
-
-```
-/                                            ← shell (index.html, #site-frame)
-└─ remote.html?scope=<scopeId>&runtime=<runtimeId>&path=<path>   ← #site-frame src (host)
-   └─ /playground/<scopeId>/<runtimeId>/<path>   ← #remote-frame src (the real Moodle)
-```
-
-- The shell builds the host URL with `resolveRemoteUrl()` (`src/shared/paths.js`)
-  and sets it as `#site-frame.src` = `remote.html?scope=…&runtime=…&path=…`.
-- `src/remote/main.js` then navigates the nested `#remote-frame` to the real
-  scoped path via `buildScopedSitePath()`:
-  `/playground/<scopeId>/<runtimeId>/<path>`.
-- The service worker intercepts requests under that scoped prefix and dispatches
-  them to the PHP worker.
-
-**Runtime id format** is `php<MM>-<moodleBranch>`, e.g. the default runtime is
-`php83-moodle50` (PHP 8.3 + Moodle 5.0). It is parsed by `parseRuntimeId()` in
-`src/shared/version-resolver.js` (a legacy `php83-cgi` form is also handled).
-
-**scopeId format** is `tab-<uuid>` (`crypto.randomUUID`), generated by
-`createScopeId()` in `src/shared/storage.js`.
-
----
-
-## Boot & readiness
-
-Booting is **slow** — it compiles/extracts Moodle core into MEMFS and runs (or
-restores) a full install. Moodle is the slowest of the four siblings; a cold
-boot can take **tens of seconds**. Always poll for readiness; never assume the
-page is up after a fixed delay.
-
-Readiness signals (the same ones the e2e suite waits on, see
-`tests/e2e/helpers.mjs`):
-
-1. **Shell ready** — `#address-input` becomes **enabled** and the runtime label
-   (`#current-runtime-label`) is populated. This happens after the worker posts
-   its `worker-ready` message.
-2. **Frame booted** — `#site-frame`'s `src` contains `scope=`.
-3. **Moodle content** — the nested `#remote-frame` shows real Moodle markup and
-   the remote boot overlay (`.remote-boot__card`) is hidden.
-
-The boot pipeline (high level): remote registers the SW → waits for SW control →
-spawns the PHP worker with `?scope=&runtime=…` → posts `configure-blueprint`
-with `runtimeParams` → worker boots PHP, restores `/persist`, runs the install
-gate, then navigates `#remote-frame`.
-
----
-
-## Persistence model
-
-Mutable Moodle state under `/persist` is journaled to **IndexedDB** via
-`@php-wasm/fs-journal`, implemented in `src/runtime/fs-persistence.js` and wired
-from `src/runtime/php-loader.js`. This is the "Wave 4" persistence shared with
-the nextcloud / facturascripts siblings.
-
-- **Keyed by `scopeId`.** `scopeId` is **sessionStorage**-based
-  (`moodle-playground:active` in `src/shared/storage.js`). That means
-  **within-session durability**: state survives reloads *in the same tab*, but is
-  lost when the tab closes (a new tab gets a fresh `scopeId`).
-- **IndexedDB db name:** `moodle-fs-journal:<scopeId>`
-  (`PERSIST_DB_PREFIX = "moodle-fs-journal"` in `fs-persistence.js`). Ops are
-  stored in the `ops` object store.
-- On boot, `initFsPersistence(php, scopeId)` replays the saved journal onto the
-  fresh MEMFS *before* Moodle bootstraps, so the install gate finds the restored
-  DB and skips provisioning. New `/persist` writes are journaled back (debounced
-  ~1.5s). SQLite temp files (`*.sqlite-journal|-wal|-shm`) are skipped.
-- **Reset / clean boot.** The `#reset-button`, or appending `?clean=1` to the
-  remote URL, forces a clean boot. The shell sets `pendingCleanBoot` →
-  appends `clean=1` → `src/remote/main.js` threads `forceCleanBoot` through
-  `runtimeParams` into the worker → `php-loader.js` calls
-  `clearJournal(scopeId)` instead of replaying.
-
-### THE KEY LESSON: persist DATA, not caches
-
-`config-template.js` sets `MOODLEDATA_ROOT = "/persist/moodledata"`. That means
-Moodle's caches also resolve under `/persist`:
-
-```php
-$CFG->dataroot      = '/persist/moodledata';
-$CFG->cachedir      = '/persist/moodledata/cache';
-$CFG->localcachedir = '/persist/moodledata/localcache';
-$CFG->tempdir       = '/persist/moodledata/temp';
-// + muc under /persist/moodledata/muc
-```
-
-These caches **must NOT be journaled**. `fs-persistence.js` excludes them from
-**both** journaling and replay with:
+**Inspecting persistence.** Mutable Moodle state is journaled to IndexedDB via
+`@php-wasm/fs-journal` (`src/runtime/fs-persistence.js`). The database name is
+`moodle-fs-journal:<scope>` and the operations live in the `ops` object store.
+To dump the journal from the page console:
 
 ```js
-const EPHEMERAL_RE =
-  /^\/persist\/moodledata\/(cache|localcache|temp|muc)(\/|$)/;
-```
-
-**Why this matters (the CompiledContainer bug):** Moodle's `localcache` holds the
-compiled DI container, written via a temp-file + `rename`. That rename pattern
-does **not** survive the journal round-trip, so restoring a stale `localcache`
-into a fresh runtime left Moodle referencing a compiled container whose file was
-missing — surfacing as **`Class "CompiledContainer" not found`** on reload after
-creating content. The boot-time cache purge
-(`remove_dir($CFG->cachedir...)` / `localcachedir` / `tempdir` / `muc` in the
-`core` install stage of `src/runtime/bootstrap.js`) only runs during a fresh
-install, **not** on a persisted reload. So the fix is to never persist the
-caches in the first place and let Moodle rebuild them every boot.
-
-**What actually persists:** only real data — the SQLite database
-(`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`), `filedir`, `config`
-(`/persist/config/...`), and sessions. Everything cache-like is rebuilt on each
-boot.
-
-### Install gate & admin
-
-The worker writes an **install marker** at
-`/persist/config/moodle-playground-install-<scope>-<runtime>.json` and a DB at
-`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (see `buildDatabaseName`
-/ `buildInstallStatePath` in `bootstrap.js`). On reboot, `installStateMatches()`
-checks the marker (runtime id, bundle version, release, sha256, dbName,
-`installed === true`); if it matches, it **skips the install/CLI provisioning**
-("Using persisted install marker"). Otherwise it falls back to a provisioning
-check ("database already installed"), then a prebuilt install snapshot, then a
-full CLI install.
-
-Admin credentials (from `playground.config.json` and the default blueprint
-`assets/blueprints/default.blueprint.json`):
-
-```
-username: admin
-password: password
-```
-
-The playground keeps an admin session after boot (`autologin` aside, the
-finalize/login step sets the admin user).
-
----
-
-## Debugging recipes
-
-Run these from the **page console** (the shell document at `/`). For the
-journaled DB you can run them in the shell or remote context — IndexedDB is
-per-origin.
-
-**List all IndexedDB databases (find your journal):**
-
-```js
-await indexedDB.databases();
-// look for { name: "moodle-fs-journal:tab-<uuid>", version: 1 }
-```
-
-**Read the journal ops for the current session:**
-
-```js
-const scope = sessionStorage.getItem("moodle-playground:active");
+// Find the journal DB for the active scope, then read its ops.
+const dbInfo = (await indexedDB.databases())
+  .find((d) => d.name?.startsWith("moodle-fs-journal:"));
 const db = await new Promise((res, rej) => {
-  const r = indexedDB.open(`moodle-fs-journal:${scope}`, 1);
-  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  const r = indexedDB.open(dbInfo.name);
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
 });
 const ops = await new Promise((res, rej) => {
-  const tx = db.transaction("ops", "readonly").objectStore("ops").getAll();
-  tx.onsuccess = () => res(tx.result); tx.onerror = () => rej(tx.error);
+  const r = db.transaction("ops", "readonly").objectStore("ops").getAll();
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
 });
-console.table(ops.map(o => ({ type: o.opType ?? o.type, path: o.path })));
+console.log(ops.length, ops);
 ```
 
-**Confirm caches are NOT being journaled** (should print `[]`):
+**IMPORTANT — what does and does not persist.** Only real data persists across a
+reload within the session: the SQLite DB
+(`/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`), `moodledata/filedir`,
+config, and sessions. Moodle's derived caches under
+`/persist/moodledata/{cache,localcache,temp,muc}` are **intentionally NOT
+journaled** (the `EPHEMERAL_RE` exclusion in `fs-persistence.js`) — Moodle rebuilds
+them on each boot. Persisting them once caused `Class "CompiledContainer" not found`
+on reload, because a restored compiled DI container referenced a file that did not
+survive the journal round-trip. Do not "fix" persistence by journaling the caches.
 
-```js
-ops.filter(o => /^\/persist\/moodledata\/(cache|localcache|temp|muc)/.test(o.path));
+**Resetting.** Click `#reset-button` ("Reset Playground") in the shell. It forces a
+clean boot, which calls `clearJournal(scopeId)` in `src/runtime/php-loader.js`
+(also reachable via `?clean=1`), wiping the IndexedDB journal so the next boot
+runs a fresh CLI install.
+
+### With the e2e suite (Playwright)
+
+End-to-end tests live in `tests/e2e/*.spec.mjs` and run on chromium + firefox:
+
+```bash
+make test-e2e         # npm run test:e2e → playwright test (both browsers)
+make test-e2e-chrome  # npx playwright test --project=chromium
+make test-e2e-firefox # npx playwright test --project=firefox
 ```
 
-**Wipe the current session's persisted data and reboot clean:**
+- `shell.spec.mjs` covers shell boot and the persistence round-trip (asserts a
+  `moodle-fs-journal:<scope>` IndexedDB exists after boot).
+- `admin-flows.spec.mjs` drives the real Moodle UI (creating a course and a user,
+  then opening an admin page) through the nested iframe. It is **skipped in CI**
+  (`test.skip(!!process.env.CI, …)`) because nested-iframe interaction is flaky
+  under CI resource contention — run it locally.
 
-```js
-const scope = sessionStorage.getItem("moodle-playground:active");
-indexedDB.deleteDatabase(`moodle-fs-journal:${scope}`);
-location.search = "?clean=1";   // or just click "Reset Playground"
-```
+Useful helpers in `tests/e2e/helpers.mjs`:
 
-**Inspect the active scope / runtime / saved state:**
+- `waitForShellReady(page)` — waits until the runtime label is resolved and
+  `#address-input` is enabled.
+- `navigateWithinPlayground(page, path)` — types `path` into `#address-input`,
+  presses Enter, and waits for the Moodle frame to render the new page.
 
-```js
-sessionStorage.getItem("moodle-playground:active");                  // scopeId
-JSON.parse(sessionStorage.getItem(`moodle-playground:${scope}:state`)); // { runtimeId, path }
-```
-
-**Reproduce the CompiledContainer failure mode:** boot, create a course/content,
-reload the *same tab*. If a regression re-introduces cache journaling you'll see
-`Class "CompiledContainer" not found` instead of the dashboard.
-
-**Boot is hanging?** Watch the remote boot overlay status (`#remote-status`) and
-the shell log panel (`#log-panel`). The worker emits `[playground] core:*`
-progress lines during install. Enable Moodle debug output by appending
-`?debug=...` to the URL (threaded into `config.php` `debugdisplay`).
-
----
-
-## Build & test
-
-```sh
-make lint     # npx @biomejs/biome check   — also auto-wraps long lines
-make format   # biome check --fix
-make test     # node --test tests/**/*.test.js   (~460 unit tests)
-make test-e2e # Playwright (chromium + firefox)
-```
-
-- **Biome formatting:** lint auto-wraps long lines and enforces its own style.
-  When editing, match the wrapping Biome produces or `make lint` will reformat
-  it. Run `make format` before committing.
-- **Worker bundle:** a source change in `php-worker.js` or anything it imports
-  (`src/runtime/*`, `src/shared/*`, `src/blueprint/*`, `lib/*`) only reaches the
-  browser after `make build-worker`. **Verify a change landed by grepping the
-  bundle:**
-
-  ```sh
-  make build-worker
-  grep -c "CompiledContainer" dist/php-worker.bundle.js
-  ```
-
-- **`make bundle` is heavy:** it builds the Moodle core ZIP per branch via
-  `scripts/build-moodle-bundle.sh` and needs PHP 8.3. `bundle-all` builds all six
-  branches: `MOODLE_404_STABLE`, `MOODLE_405_STABLE`, `MOODLE_500_STABLE`,
-  `MOODLE_501_STABLE`, `MOODLE_502_STABLE`, `main`.
-- **Gitignored build output:** `dist/`, `sw.bundle.js(.map)`, `assets/moodle/`,
-  `assets/manifests/*.json`, and `vendor/` are ignored. **Exception:**
-  `vendor/fflate.js` and `vendor/fflate-browser.js` are force-committed (Moodle
-  is the only sibling that vendors fflate this way) — don't delete them thinking
-  they're build artifacts.
-
----
-
-## CI gotchas
-
-CI is a single workflow, `.github/workflows/ci.yml`, triggered on push/PR to
-`main`. Jobs: `lint-and-test` (syntax + `make test` + `make lint`, no PHP) →
-`build` (all 6 branch bundles + docs site) → `e2e` (Playwright matrix) →
-`deploy-pages` (push to main) / `deploy-preview` (PRs) / `cleanup-preview` (PR
-close).
-
-- **NEVER `git add -A`.** This repo carries local `.claude/` (and `.omc/`)
-  artifacts in the working tree. Stage explicit files only:
-  `git add AGENTS.md`.
-- **Least-privilege permissions.** The workflow declares top-level
-  `permissions:` and a job should not be granted more than `contents: read`
-  unless it genuinely needs write (Pages/PR-comment jobs do). If you add a
-  read-only analysis job (e.g. CodeQL), give it `permissions: contents: read`.
-- **E2E is Playwright** with a CI matrix of **chromium + firefox** (2 workers
-  each). **Firefox is the slow one** and the usual source of flakiness — budget
-  for it and prefer the readiness polls in `tests/e2e/helpers.mjs` over fixed
-  waits.
-- **Netlify PR preview.** The `build` job uploads a `site-build` artifact; the
-  `deploy-preview` job downloads it to `dist-site/` and publishes to Netlify with
-  alias `pr-<N>`, reachable at
-  `https://pr-<N>--moodle-playground.netlify.app`. The preview is torn down by
-  `cleanup-preview` when the PR closes.
-
----
-
-## Quick file map
-
-| Need to change… | Look in |
-|-----------------|---------|
-| Shell UI / address bar / reset | `index.html`, `src/shell/main.js` |
-| Host iframe / SW + worker spawn / clean-boot threading | `remote.html`, `src/remote/main.js` |
-| Scoped URL building / runtime id parsing | `src/shared/paths.js`, `src/shared/version-resolver.js` |
-| PHP instance, MEMFS setup, journal wiring | `src/runtime/php-loader.js` |
-| Install/upgrade orchestration + inline PHP | `src/runtime/bootstrap.js` |
-| Generated `config.php` / `php.ini` / cache paths | `src/runtime/config-template.js` |
-| IndexedDB journaling + the cache-exclusion rule | `src/runtime/fs-persistence.js` |
-| Request/response adapter | `src/runtime/php-compat.js` |
-| Provisioning steps (courses, users, plugins…) | `src/blueprint/steps/*` |
-| Service-worker routing | `sw.js` |
-| Boot readiness helpers (use these in tests) | `tests/e2e/helpers.mjs` |
+**Gotcha — don't run sibling playgrounds' e2e concurrently.** `reuseExistingServer`
+is enabled outside CI (`playwright.config.mjs`), so two playground checkouts started
+at the same time can share a dev-server port and cross-contaminate each other's app.
+Run each sibling playground's e2e suite on its own.
