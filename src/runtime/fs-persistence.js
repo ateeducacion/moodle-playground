@@ -17,6 +17,21 @@ const DB_VERSION = 1;
 const STORE_NAME = "ops";
 const FLUSH_DELAY_MS = 1500;
 
+// Derived caches under moodledata are disposable — Moodle regenerates them on
+// demand (the component cache, the compiled DI "CompiledContainer", MUC, temp).
+// Persisting them is not just wasteful: replaying a restored localcache into a
+// fresh runtime can leave Moodle referencing a compiled container whose file
+// didn't survive the journal round-trip (it is written via a temp-file + rename),
+// surfacing as `Class "CompiledContainer" not found` on reload after creating
+// content. Only real data — the SQLite DB, filedir, config, sessions — must
+// persist; let Moodle rebuild the caches each boot.
+const EPHEMERAL_RE =
+  /^\/persist\/moodledata\/(cache|localcache|temp|muc)(\/|$)/;
+
+function isEphemeralPath(path) {
+  return EPHEMERAL_RE.test(path || "");
+}
+
 async function openDb(name) {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(name, DB_VERSION);
@@ -125,11 +140,17 @@ export async function initFsPersistence(rawPhp, scopeId) {
   // SQLite temp files: they are created and deleted within a single transaction
   // and cause hydration failures if journaled.
   journalFSEvents(rawPhp, "/persist", (op) => {
-    if (/\.(sqlite-journal|sqlite-wal|sqlite-shm)$/.test(op.path || "")) return;
+    const path = op.path || "";
+    if (/\.(sqlite-journal|sqlite-wal|sqlite-shm)$/.test(path)) return;
+    if (isEphemeralPath(path)) return;
     pendingPersistOps.push(op);
     scheduleFlush();
   });
 
-  const savedPersistOps = await loadOps(persistDb);
+  // Drop any cache ops a pre-fix session may have already journaled, so an old
+  // journal can't restore a stale compiled container on this reload.
+  const savedPersistOps = (await loadOps(persistDb)).filter(
+    (op) => !isEphemeralPath(op.path),
+  );
   replayResilient(rawPhp, savedPersistOps);
 }
