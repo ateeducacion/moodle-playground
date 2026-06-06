@@ -82,6 +82,28 @@ export async function clearJournal(scopeId) {
 }
 
 /**
+ * Replay the journal, tolerating ops that can't be applied to a fresh FS so a
+ * single bad op never bricks the reload (e.g. an unlink of a file whose create
+ * wasn't journaled). Fast path replays the whole batch; on failure, replay
+ * op-by-op and skip the ones that throw — a failed unlink just means the file is
+ * already gone, which is the intended end state.
+ */
+function replayResilient(rawPhp, ops) {
+  if (!ops || ops.length === 0) return;
+  try {
+    replayFSJournal(rawPhp, ops);
+  } catch {
+    for (const op of ops) {
+      try {
+        replayFSJournal(rawPhp, [op]);
+      } catch {
+        // Skip un-appliable op.
+      }
+    }
+  }
+}
+
+/**
  * Replay the persisted /persist journal onto the fresh PHP instance, then start
  * journaling new changes back to IndexedDB (debounced). Must run before Moodle
  * bootstraps so the install gate finds the restored database.
@@ -109,7 +131,5 @@ export async function initFsPersistence(rawPhp, scopeId) {
   });
 
   const savedPersistOps = await loadOps(persistDb);
-  if (savedPersistOps.length > 0) {
-    replayFSJournal(rawPhp, savedPersistOps);
-  }
+  replayResilient(rawPhp, savedPersistOps);
 }
