@@ -1895,7 +1895,9 @@ async function prepareMoodleRuntime({
   const tmpZip = `${TEMP_ROOT}/moodle-core.zip`;
   const stage = `${TEMP_ROOT}/moodle-core-stage`;
   await php.writeFile(tmpZip, archive.bytes);
-  // archive.bytes is no longer needed; PHP reads the zip from MEMFS.
+  // Drop the JS reference to the compressed buffer now that MEMFS has its own
+  // copy, so the GC can reclaim it while ZipArchive extracts.
+  archive.bytes = null;
   const extractResult = await php.run(
     buildCoreExtractScript(tmpZip, stage, MOODLE_ROOT),
   );
