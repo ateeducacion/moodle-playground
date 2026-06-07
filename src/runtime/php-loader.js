@@ -148,11 +148,15 @@ export function createPhpRuntime(
         const { clearJournal, initFsPersistence } = await import(
           "./fs-persistence.js"
         );
+        // On a clean boot (reset / blueprint change), wipe the old journal first;
+        // then ALWAYS start journaling — replaying whatever remains (nothing,
+        // after a wipe) and recording new writes — so the fresh env is persisted
+        // and a later reload of the same blueprint reuses it instead of
+        // reinstalling.
         if (forceCleanBoot) {
           await clearJournal(scopeId);
-        } else {
-          await initFsPersistence(php, scopeId);
         }
+        await initFsPersistence(php, scopeId);
       }
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
