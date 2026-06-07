@@ -26,7 +26,7 @@ concurrency:
 env:
   CLOUDFLARE_ACCOUNT_ID: 8cdbd0eb9712b3a9a3e9b860fd87ed6c
   CLOUDFLARE_PAGES_PROJECT: moodle-playground
-  PREVIEW_BUTTON_IMG: https://raw.githubusercontent.com/ateeducacion/action-moodle-playground-pr-preview/refs/heads/main/assets/playground-preview-button.svg
+  PREVIEW_BUTTON_IMG: https://raw.githubusercontent.com/ateeducacion/moodle-playground/main/assets/playground-preview-button.svg
 
 jobs:
   # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
