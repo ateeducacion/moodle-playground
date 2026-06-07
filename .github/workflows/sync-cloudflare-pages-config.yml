@@ -1,0 +1,22 @@
+name: Sync Cloudflare Pages Config
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Pages build config
+        env:
+          CLOUDFLARE_ACCOUNT_ID: 8cdbd0eb9712b3a9a3e9b860fd87ed6c
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: moodle-playground
+        run: |
+          curl -sS -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"build_config":{"build_command":"./scripts/build-cloudflare-pages.sh","destination_dir":"dist-site"}}'
