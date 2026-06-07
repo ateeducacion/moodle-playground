@@ -158,8 +158,11 @@ jobs:
           out=$(npx --yes wrangler@4 pages deploy _site \
             --project-name="$CLOUDFLARE_PAGES_PROJECT" \
             --branch="$HEAD_REF" --commit-dirty=true 2>&1 | tee /dev/stderr)
-          url=$(printf '%s\n' "$out" | grep -oE "https://[a-z0-9-]+\.${CLOUDFLARE_PAGES_PROJECT}\.pages\.dev" | head -n1)
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          proj="$CLOUDFLARE_PAGES_PROJECT"
+          urls=$(printf '%s\n' "$out" | grep -oE "https://[a-z0-9-]+\.${proj}\.pages\.dev" | sort -u)
+          deploy_url=$(printf '%s\n' "$urls" | grep -E "https://[0-9a-f]{8}\.${proj}\." | head -n1)
+          alias_url=$(printf '%s\n' "$urls" | grep -vE "https://[0-9a-f]{8}\.${proj}\." | head -n1)
+          { echo "deploy_url=$deploy_url"; echo "alias_url=$alias_url"; } >> "$GITHUB_OUTPUT"
 
       - name: Comment preview URL on PR
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -168,15 +171,25 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.head_ref }}
-          PREVIEW_URL: ${{ steps.cf_preview.outputs.url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEPLOY_URL: ${{ steps.cf_preview.outputs.deploy_url }}
+          ALIAS_URL: ${{ steps.cf_preview.outputs.alias_url }}
         run: |
           MARKER='<!-- cf-preview -->'
-          if [ -n "$PREVIEW_URL" ]; then
-            BODY=$(printf '%s\n### Cloudflare Pages preview\n<a href="%s" target="_blank" rel="noopener noreferrer"><img src="%s" alt="Try on the Playground" height="51"></a>\n\nBranch `%s` · <%s>' \
-              "$MARKER" "$PREVIEW_URL" "$PREVIEW_BUTTON_IMG" "$HEAD_REF" "$PREVIEW_URL")
+          LOGO='https://user-images.githubusercontent.com/23264/106598434-9e719e00-654f-11eb-9e59-6167043cfa01.png'
+          SHA7=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
+          ALIAS="$ALIAS_URL"
+          if [ -z "$ALIAS" ]; then
+            slug=$(printf '%s' "$HEAD_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-28 | sed -E 's/-+$//')
+            ALIAS="https://${slug}.${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
+          fi
+          DEPLOY="${DEPLOY_URL:-$ALIAS}"
+          if [ -n "$DEPLOY_URL" ] || [ -n "$ALIAS_URL" ]; then
+            BODY=$(printf '%s\n## Deploying %s with &nbsp;<img alt="Cloudflare Pages" src="%s" width="16">&nbsp; Cloudflare Pages\n\n<a href="%s" target="_blank" rel="noopener noreferrer"><img src="%s" alt="Try on the Playground" height="51"></a>\n\n|  |  |\n| :-- | :-- |\n| **Latest commit** | `%s` |\n| **Preview URL (branch)** | %s |\n| **Deployment URL (commit)** | %s |' \
+              "$MARKER" "$CLOUDFLARE_PAGES_PROJECT" "$LOGO" "$ALIAS" "$PREVIEW_BUTTON_IMG" "$SHA7" "$ALIAS" "$DEPLOY")
           else
-            BODY=$(printf '%s\n### Cloudflare Pages preview\n⚠️ Preview deploy failed — see the workflow logs.\n\nBranch `%s`' \
-              "$MARKER" "$HEAD_REF")
+            BODY=$(printf '%s\n## Deploying %s with Cloudflare Pages\n\n⚠️ Preview deploy failed — see the workflow logs.\n\nBranch `%s`' \
+              "$MARKER" "$CLOUDFLARE_PAGES_PROJECT" "$HEAD_REF")
           fi
           CID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
             --jq "map(select(.body|startswith(\"$MARKER\")))|.[0].id // empty")
