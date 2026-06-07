@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: cloudflare-pages-cleanup-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -45,3 +46,21 @@ jobs:
       - name: Skip cleanup without Cloudflare token
         if: env.HAS_CLOUDFLARE_API_TOKEN != 'true'
         run: echo "CLOUDFLARE_API_TOKEN is not configured; skipping cleanup."
+
+      # When the PR closes, the preview deployment is deleted above — also remove
+      # the sticky preview comment so it does not linger pointing at a dead URL.
+      - name: Remove preview comment on close
+        if: github.event_name == 'pull_request' && github.event.action == 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER='<!-- cf-preview -->'
+          CID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq "map(select(.body|startswith(\"$MARKER\")))|.[0].id // empty")
+          if [ -n "$CID" ]; then
+            gh api -X DELETE "repos/$REPO/issues/comments/$CID" >/dev/null && echo "Removed preview comment $CID"
+          else
+            echo "No preview comment to remove."
+          fi
