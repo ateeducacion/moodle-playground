@@ -18,18 +18,22 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    env:
+      HAS_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install Wrangler
+        if: env.HAS_CLOUDFLARE_API_TOKEN == 'true'
         run: npm install --no-save wrangler@latest
 
       - name: Clean stale Cloudflare Pages deployments
+        if: env.HAS_CLOUDFLARE_API_TOKEN == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: 8cdbd0eb9712b3a9a3e9b860fd87ed6c
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,3 +41,7 @@ jobs:
           CLOUDFLARE_PAGES_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
           CLOUDFLARE_PAGES_DELETE_BRANCH_ALL: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
         run: node scripts/cleanup-cloudflare-pages.mjs
+
+      - name: Skip cleanup without Cloudflare token
+        if: env.HAS_CLOUDFLARE_API_TOKEN != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN is not configured; skipping cleanup."

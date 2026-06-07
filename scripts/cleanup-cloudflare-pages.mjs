@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 
 const projectName = process.env.CLOUDFLARE_PAGES_PROJECT;
 const targetBranch = process.env.CLOUDFLARE_PAGES_BRANCH || "";
-const deleteBranchAll = process.env.CLOUDFLARE_PAGES_DELETE_BRANCH_ALL === "true";
+const deleteBranchAll =
+  process.env.CLOUDFLARE_PAGES_DELETE_BRANCH_ALL === "true";
 const dryRun = process.env.CLOUDFLARE_PAGES_CLEANUP_DRY_RUN === "true";
 
 if (!projectName) {
@@ -28,7 +29,14 @@ function wrangler(args, options = {}) {
 }
 
 const deployments = JSON.parse(
-  wrangler(["pages", "deployment", "list", "--project-name", projectName, "--json"]),
+  wrangler([
+    "pages",
+    "deployment",
+    "list",
+    "--project-name",
+    projectName,
+    "--json",
+  ]),
 );
 
 const seen = new Set();
@@ -53,7 +61,9 @@ for (const deployment of deployments) {
 }
 
 if (deletions.length === 0) {
-  console.log(`No stale Cloudflare Pages deployments found for ${projectName}.`);
+  console.log(
+    `No stale Cloudflare Pages deployments found for ${projectName}.`,
+  );
   process.exit(0);
 }
 
