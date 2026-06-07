@@ -79,11 +79,23 @@ async function clearDb(name) {
   db.close();
 }
 
+// Collapse the raw journal ops, THEN hydrate only the survivors — the canonical
+// fs-journal order (WordPress Playground's hydrate-fs-writes middleware does
+// `hydrateUpdateFileOps(php, normalizeFilesystemOperations(ops))`). Hydrating the
+// raw, un-collapsed list reads every write's content into memory: a heavy install
+// rewrites the multi-MB SQLite DB hundreds of times within one flush window, so
+// hydrating each one OOMs ("Array buffer allocation failed"). Normalizing first
+// collapses the repeated same-path writes (and folds write-temp + rename) so each
+// changed file is read exactly once.
+export async function collapseAndHydrate(rawPhp, ops) {
+  return hydrateUpdateFileOps(rawPhp, normalizeFilesystemOperations(ops));
+}
+
 async function flushOps(rawPhp, db, pendingOps) {
   if (pendingOps.length === 0) return;
   const ops = pendingOps.splice(0);
   try {
-    const hydrated = await hydrateUpdateFileOps(rawPhp, ops);
+    const hydrated = await collapseAndHydrate(rawPhp, ops);
     const current = await loadOps(db);
     const merged = normalizeFilesystemOperations([...current, ...hydrated]);
     await replaceOps(db, merged);
