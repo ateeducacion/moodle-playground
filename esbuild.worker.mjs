@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { build } from "esbuild";
 import { ALL_PHP_VERSIONS as MOODLE_PHP_VERSIONS } from "./src/shared/version-resolver.js";
+
+const require = createRequire(import.meta.url);
 
 // Only bundle the PHP runtime versions Moodle actually supports. @php-wasm/web's
 // loadWebRuntime() switch dynamically imports every @php-wasm/web-X-Y package,
@@ -35,15 +39,20 @@ const stripUnusedPhpVersions = {
   },
 };
 
-const ICU_DATA_URL =
-  "https://unpkg.com/@php-wasm/web@3.1.36/shared/icu.dat";
+const phpWasmWebPackage = JSON.parse(
+  readFileSync(require.resolve("@php-wasm/web/package.json"), "utf8"),
+);
+const ICU_DATA_URL = `https://unpkg.com/@php-wasm/web@${phpWasmWebPackage.version}/shared/icu.dat`;
 const phpWasmIcuDataPlugin = {
   name: "php-wasm-icu-data",
   setup(b) {
-    b.onResolve({ filter: /(^|\/)(?:intl\/shared|shared)\/icu\.dat$/ }, () => ({
-      path: "external-icu-data-url",
-      namespace: "external-icu-data-url",
-    }));
+    b.onResolve(
+      { filter: /(^|\/)(?:intl\/shared|shared)\/icu\.dat$/ },
+      () => ({
+        path: "external-icu-data-url",
+        namespace: "external-icu-data-url",
+      }),
+    );
     b.onLoad({ filter: /.*/, namespace: "external-icu-data-url" }, () => ({
       loader: "js",
       contents: `export default ${JSON.stringify(ICU_DATA_URL)};`,
