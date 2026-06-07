@@ -23,6 +23,10 @@ concurrency:
   group: ci-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+env:
+  CLOUDFLARE_ACCOUNT_ID: 8cdbd0eb9712b3a9a3e9b860fd87ed6c
+  CLOUDFLARE_PAGES_PROJECT: moodle-playground
+
 jobs:
   # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
   lint-and-test:
@@ -124,6 +128,10 @@ jobs:
           rsync -a --delete site/ _site/docs/
           rm -rf site
           touch _site/.nojekyll
+          # Split oversized core bundles (>25 MiB) into parts so the site can be
+          # served from Cloudflare Pages (25 MiB/file cap). The loader reassembles
+          # them; e2e below serves this same _site, exercising the chunked path.
+          node scripts/chunk-bundles.mjs _site
 
       - name: Upload site artifact
         uses: actions/upload-artifact@v7
@@ -137,6 +145,40 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+
+      # ── Cloudflare Pages preview (same-repo PRs) ──
+      - name: Deploy to Cloudflare Pages (PR preview)
+        id: cf_preview
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          out=$(npx --yes wrangler@4 pages deploy _site \
+            --project-name="$CLOUDFLARE_PAGES_PROJECT" \
+            --branch="$HEAD_REF" --commit-dirty=true 2>&1 | tee /dev/stderr)
+          url=$(printf '%s\n' "$out" | grep -oE "https://[a-z0-9-]+\.${CLOUDFLARE_PAGES_PROJECT}\.pages\.dev" | head -n1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview URL on PR
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+          PREVIEW_URL: ${{ steps.cf_preview.outputs.url }}
+        run: |
+          MARKER='<!-- cf-preview -->'
+          BODY=$(printf '%s\n🚀 **Cloudflare Pages preview**: %s\nBranch `%s`' \
+            "$MARKER" "${PREVIEW_URL:-deploy failed — see workflow logs}" "$HEAD_REF")
+          CID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq "map(select(.body|startswith(\"$MARKER\")))|.[0].id // empty")
+          if [ -n "$CID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$CID" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$BODY" >/dev/null
+          fi
 
   # ── E2E: Chromium + Firefox ──
   e2e:
@@ -197,3 +239,24 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+  # ── Deploy to Cloudflare Pages (production, push to main; gated on e2e) ──
+  deploy-cloudflare:
+    if: github.event_name == 'push'
+    needs: [lint-and-test, build, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Download site artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: site-build
+          path: _site
+
+      - name: Deploy to Cloudflare Pages (production)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 pages deploy _site --project-name="$CLOUDFLARE_PAGES_PROJECT" --branch=main --commit-dirty=true
