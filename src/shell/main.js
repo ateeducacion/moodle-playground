@@ -5,7 +5,7 @@ import {
   validateBlueprint,
 } from "../blueprint/index.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
-import { resolveRemoteUrl } from "../shared/paths.js";
+import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
 import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
 import {
@@ -550,6 +550,18 @@ async function main() {
     defaultBlueprintUrl: config.defaultBlueprintUrl,
   });
   updateBlueprintTextarea();
+
+  // Reset the persisted env when the blueprint changed since the last boot in
+  // this tab: a different blueprint must install fresh, not replay the previous
+  // env (which the install gate would otherwise reuse). Reloading the same
+  // blueprint keeps the data; a different tab is already clean (per-tab scopeId).
+  const blueprintKey = blueprintSourceKey(window.location.href);
+  const blueprintStoreKey = `blueprint-source:${scopeId}`;
+  const previousBlueprintKey = window.sessionStorage.getItem(blueprintStoreKey);
+  if (previousBlueprintKey !== null && previousBlueprintKey !== blueprintKey) {
+    pendingCleanBoot = true;
+  }
+  window.sessionStorage.setItem(blueprintStoreKey, blueprintKey);
 
   // Resolve versions from URL params > blueprint > defaults
   const urlParams = parseQueryParams(window.location);
