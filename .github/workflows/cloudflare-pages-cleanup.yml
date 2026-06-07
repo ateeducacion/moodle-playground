@@ -1,0 +1,39 @@
+name: Cloudflare Pages Cleanup
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+    types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-cleanup-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@latest
+
+      - name: Clean stale Cloudflare Pages deployments
+        env:
+          CLOUDFLARE_ACCOUNT_ID: 8cdbd0eb9712b3a9a3e9b860fd87ed6c
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: moodle-playground
+          CLOUDFLARE_PAGES_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          CLOUDFLARE_PAGES_DELETE_BRANCH_ALL: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
+        run: node scripts/cleanup-cloudflare-pages.mjs
