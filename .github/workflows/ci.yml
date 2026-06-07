@@ -107,36 +107,36 @@ jobs:
 
       - name: Assemble site artifact
         run: |
-          rm -rf dist-site site
-          mkdir -p dist-site/docs
-          rsync -a ./ ./dist-site/ \
+          rm -rf _site site
+          mkdir -p _site/docs
+          rsync -a ./ ./_site/ \
             --exclude ".git/" \
             --exclude ".github/" \
             --exclude ".venv/" \
             --exclude ".cache/" \
-            --exclude "dist-site/" \
+            --exclude "_site/" \
             --exclude "docs/" \
             --exclude "node_modules/" \
             --exclude "site/" \
             --exclude "tests/" \
             --exclude "patches/"
           zensical build --clean
-          rsync -a --delete site/ dist-site/docs/
+          rsync -a --delete site/ _site/docs/
           rm -rf site
-          touch dist-site/.nojekyll
+          touch _site/.nojekyll
 
       - name: Upload site artifact
         uses: actions/upload-artifact@v7
         with:
           name: site-build
-          path: dist-site/
+          path: _site/
           retention-days: 1
 
       - name: Upload Pages artifact
         if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: dist-site
+          path: _site
 
   # ── E2E: Chromium + Firefox ──
   e2e:
@@ -168,13 +168,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: site-build
-          path: dist-site
+          path: _site
 
       - name: Run Playwright e2e tests (${{ matrix.browser }})
         run: npx playwright test --project=${{ matrix.browser }}
         env:
           CI: "true"
-          PLAYWRIGHT_WEB_ROOT: dist-site
+          PLAYWRIGHT_WEB_ROOT: _site
           PLAYWRIGHT_EXTERNAL_SERVER: "0"
           PLAYWRIGHT_WORKERS: ${{ matrix.workers }}
 

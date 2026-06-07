@@ -19,4 +19,4 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data '{"build_config":{"build_command":"./scripts/build-cloudflare-pages.sh","destination_dir":"dist-site"}}'
+            --data '{"build_config":{"build_command":"./scripts/build-cloudflare-pages.sh","destination_dir":"_site"}}'
