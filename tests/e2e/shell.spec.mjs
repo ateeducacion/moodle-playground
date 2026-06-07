@@ -124,9 +124,9 @@ test("side panel opens and shows tabs", async ({ page, playground }) => {
   );
   await expect(page.locator("#side-panel")).not.toHaveClass(/is-collapsed/);
 
-  await expect(page.locator("#current-moodle-label")).not.toHaveText("-");
-  await expect(page.locator("#current-php-label")).not.toHaveText("-");
-  await expect(page.locator("#current-runtime-label")).not.toHaveText("-");
+  await expect(page.locator("#info-moodle-version")).toBeVisible();
+  await expect(page.locator("#info-php-version")).toBeVisible();
+  await expect(page.locator("#runtime-id-value")).not.toHaveText("-");
 });
 
 test("logs tab displays runtime log entries", async ({ page, playground }) => {
@@ -155,22 +155,48 @@ test("blueprint tab shows the active blueprint JSON", async ({
   expect(blueprintText).toContain('"installMoodle"');
 });
 
-test("settings popover opens and shows version selectors", async ({
+test("info panel hosts the version config with a dirty-state apply", async ({
   page,
   playground,
 }) => {
   await playground.open();
 
-  await page.locator("#settings-button").click();
-  await expect(page.locator("#settings-popover")).toHaveClass(/is-open/);
+  // The floating settings popover and gear button are gone — the version config
+  // now lives in the Info panel (single source of truth).
+  await expect(page.locator("#settings-button")).toHaveCount(0);
+  await expect(page.locator("#settings-popover")).toHaveCount(0);
+
+  await page.locator("#panel-toggle-button").click();
 
   const moodleOptions = await page
-    .locator("#settings-moodle-version option")
+    .locator("#info-moodle-version option")
     .count();
   expect(moodleOptions).toBeGreaterThan(0);
-
-  const phpOptions = await page.locator("#settings-php-version option").count();
+  const phpOptions = await page.locator("#info-php-version option").count();
   expect(phpOptions).toBeGreaterThan(0);
+
+  // Clean state: no Apply button and no destructive warning.
+  await expect(page.locator("#config-apply")).toBeHidden();
+  await expect(page.locator("#config-warning")).toBeHidden();
+
+  // Changing a version reveals the Apply button + the warning. Reselecting the
+  // original value clears the dirty state (no Discard button needed).
+  const current = await page.locator("#info-moodle-version").inputValue();
+  const other = await page
+    .locator("#info-moodle-version option")
+    .evaluateAll(
+      (opts, cur) => opts.find((o) => o.value !== cur)?.value,
+      current,
+    );
+  if (other) {
+    await page.locator("#info-moodle-version").selectOption(other);
+    await expect(page.locator("#config-apply")).toBeVisible();
+    await expect(page.locator("#config-warning")).toBeVisible();
+
+    await page.locator("#info-moodle-version").selectOption(current);
+    await expect(page.locator("#config-apply")).toBeHidden();
+    await expect(page.locator("#config-warning")).toBeHidden();
+  }
 });
 
 // ---------------------------------------------------------------------------

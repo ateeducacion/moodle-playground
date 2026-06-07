@@ -88,8 +88,7 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
           addressInput instanceof HTMLInputElement
             ? addressInput.disabled
             : null,
-        runtimeLabel: document.querySelector("#current-runtime-label")
-          ?.textContent,
+        runtimeLabel: document.querySelector("#runtime-id-value")?.textContent,
         logPanel: document.querySelector("#log-panel")?.textContent || "",
         siteFrameSrc:
           document.querySelector("#site-frame")?.getAttribute("src") || null,
@@ -193,7 +192,7 @@ export async function openPlayground(page) {
  * Use for tests that only interact with the shell, not Moodle content inside the iframe.
  */
 export async function waitForShellReady(page) {
-  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
+  await expect(page.locator("#runtime-id-value")).not.toHaveText("-", {
     timeout: readyTimeoutMs,
   });
   await expect(page.locator("#address-input")).toBeEnabled({
@@ -202,7 +201,7 @@ export async function waitForShellReady(page) {
 }
 
 async function waitForRuntimeSelectionReady(page, timeout = readyTimeoutMs) {
-  await expect(page.locator("#current-runtime-label")).not.toHaveText("-", {
+  await expect(page.locator("#runtime-id-value")).not.toHaveText("-", {
     timeout,
   });
 }

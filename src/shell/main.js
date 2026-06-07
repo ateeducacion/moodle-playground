@@ -45,16 +45,13 @@ const els = {
   home: document.querySelector("#home-button"),
   refresh: document.querySelector("#refresh-button"),
   reset: document.querySelector("#reset-button"),
-  settingsButton: document.querySelector("#settings-button"),
-  settingsPopover: document.querySelector("#settings-popover"),
-  settingsOverlay: document.querySelector("#settings-overlay"),
-  settingsMoodleVersion: document.querySelector("#settings-moodle-version"),
-  settingsPhpVersion: document.querySelector("#settings-php-version"),
-  settingsApply: document.querySelector("#settings-apply"),
-  settingsCancel: document.querySelector("#settings-cancel"),
-  currentMoodleLabel: document.querySelector("#current-moodle-label"),
-  currentPhpLabel: document.querySelector("#current-php-label"),
-  currentRuntimeLabel: document.querySelector("#current-runtime-label"),
+  infoMoodleVersion: document.querySelector("#info-moodle-version"),
+  infoPhpVersion: document.querySelector("#info-php-version"),
+  configStatus: document.querySelector("#config-status"),
+  configWarning: document.querySelector("#config-warning"),
+  configApply: document.querySelector("#config-apply"),
+  runtimeIdChip: document.querySelector("#runtime-id-chip"),
+  runtimeIdValue: document.querySelector("#runtime-id-value"),
   infoPanel: document.querySelector("#info-panel"),
   infoTab: document.querySelector("#info-tab"),
   sidePanel: document.querySelector("#side-panel"),
@@ -451,105 +448,92 @@ function bindServiceWorkerMessages() {
   });
 }
 
-function populateSettingsModal() {
-  if (!els.settingsMoodleVersion || !els.settingsPhpVersion) {
+function populateConfigSelects() {
+  if (!els.infoMoodleVersion || !els.infoPhpVersion) {
     return;
   }
 
   // Populate Moodle version dropdown
-  els.settingsMoodleVersion.innerHTML = "";
+  els.infoMoodleVersion.innerHTML = "";
   for (const branch of MOODLE_BRANCHES) {
     const option = document.createElement("option");
     option.value = branch.branch;
     option.textContent = branch.label;
-    els.settingsMoodleVersion.append(option);
+    els.infoMoodleVersion.append(option);
   }
-  els.settingsMoodleVersion.value = currentMoodleBranch;
+  els.infoMoodleVersion.value = currentMoodleBranch;
 
   // Populate PHP version dropdown based on selected Moodle branch
   updatePhpVersionDropdown(currentMoodleBranch);
-  els.settingsPhpVersion.value = currentPhpVersion;
+  els.infoPhpVersion.value = currentPhpVersion;
 }
 
 function updatePhpVersionDropdown(branch) {
-  if (!els.settingsPhpVersion) {
+  if (!els.infoPhpVersion) {
     return;
   }
 
   const compatibleVersions = getCompatiblePhpVersions(branch);
-  const previousValue = els.settingsPhpVersion.value;
-  els.settingsPhpVersion.innerHTML = "";
+  const previousValue = els.infoPhpVersion.value;
+  els.infoPhpVersion.innerHTML = "";
   for (const version of compatibleVersions) {
     const option = document.createElement("option");
     option.value = version;
     option.textContent = `PHP ${version}`;
-    els.settingsPhpVersion.append(option);
+    els.infoPhpVersion.append(option);
   }
 
   // Keep current selection if still compatible, otherwise fall back
   if (compatibleVersions.includes(previousValue)) {
-    els.settingsPhpVersion.value = previousValue;
+    els.infoPhpVersion.value = previousValue;
   } else if (compatibleVersions.includes(DEFAULT_PHP_VERSION)) {
-    els.settingsPhpVersion.value = DEFAULT_PHP_VERSION;
+    els.infoPhpVersion.value = DEFAULT_PHP_VERSION;
   } else {
-    els.settingsPhpVersion.value = compatibleVersions[0];
+    els.infoPhpVersion.value = compatibleVersions[0];
   }
 }
 
-function updateCurrentVersionLabels() {
-  const branchInfo = MOODLE_BRANCHES.find(
-    (b) => b.branch === currentMoodleBranch,
-  );
-  if (els.currentMoodleLabel) {
-    els.currentMoodleLabel.textContent = branchInfo
-      ? branchInfo.label
-      : currentMoodleBranch;
-  }
-  if (els.currentPhpLabel) {
-    els.currentPhpLabel.textContent = `PHP ${currentPhpVersion}`;
-  }
-  if (els.currentRuntimeLabel) {
-    els.currentRuntimeLabel.textContent = currentRuntimeId;
-  }
-}
-
-function openSettingsPopover() {
-  if (!els.settingsPopover) {
+// Reflect the applied runtime in the Info panel: when the selected versions
+// differ from what is actually running the config is "dirty". Changing a version
+// is destructive (it resets the site), so the Apply button stays inert and the
+// warning stays hidden until the selection actually differs.
+function refreshDirtyState() {
+  if (!els.infoMoodleVersion || !els.infoPhpVersion) {
     return;
   }
-  populateSettingsModal();
-  els.settingsPopover.classList.add("is-open");
-  els.settingsOverlay.classList.add("is-open");
-  els.settingsOverlay.setAttribute("aria-hidden", "false");
-  els.settingsButton.setAttribute("aria-expanded", "true");
-  // Focus the first select for keyboard users
-  const firstInput = els.settingsPopover.querySelector("select");
-  if (firstInput) {
-    firstInput.focus();
+  const dirty =
+    els.infoMoodleVersion.value !== currentMoodleBranch ||
+    els.infoPhpVersion.value !== currentPhpVersion;
+
+  if (els.configStatus) {
+    els.configStatus.className = dirty ? "dirty-note" : "status-pill";
+    els.configStatus.innerHTML = dirty
+      ? '<span class="dot"></span>Unsaved'
+      : '<span class="dot"></span>Running';
   }
+  // Changing a version is destructive; the Apply button and warning only appear
+  // once the selection differs from what is running. To revert, reselect the
+  // original version — the dirty state clears itself.
+  els.configWarning?.classList.toggle("is-hidden", !dirty);
+  els.configApply?.classList.toggle("is-hidden", !dirty);
 }
 
-function closeSettingsPopover() {
-  if (!els.settingsPopover) {
-    return;
+function updateConfigState() {
+  if (els.runtimeIdValue) {
+    els.runtimeIdValue.textContent = currentRuntimeId;
   }
-  els.settingsPopover.classList.remove("is-open");
-  els.settingsOverlay.classList.remove("is-open");
-  els.settingsOverlay.setAttribute("aria-hidden", "true");
-  els.settingsButton.setAttribute("aria-expanded", "false");
-  els.settingsButton.focus();
+  refreshDirtyState();
 }
 
-function applySettingsAndReset() {
-  const newBranch = els.settingsMoodleVersion?.value;
-  const newPhp = els.settingsPhpVersion?.value;
-  closeSettingsPopover();
+function applyConfigAndReset() {
+  const newBranch = els.infoMoodleVersion?.value;
+  const newPhp = els.infoPhpVersion?.value;
 
   if (newBranch === currentMoodleBranch && newPhp === currentPhpVersion) {
     return;
   }
 
-  // Update URL params and reload
+  // Update URL params and reload — a fresh runtime + scope for the new versions.
   const url = new URL(window.location.href);
   url.searchParams.set("php", newPhp);
   const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === newBranch);
@@ -602,43 +586,36 @@ async function main() {
       : previous?.path || preferredPath;
   els.address.value = currentPath;
 
-  updateCurrentVersionLabels();
+  populateConfigSelects();
+  updateConfigState();
 
-  // Settings popover event listeners
-  if (els.settingsButton) {
-    els.settingsButton.addEventListener("click", () => {
-      const isOpen = els.settingsPopover?.classList.contains("is-open");
-      if (isOpen) {
-        closeSettingsPopover();
-      } else {
-        openSettingsPopover();
+  // Configuration (Info panel) event listeners
+  if (els.infoMoodleVersion) {
+    els.infoMoodleVersion.addEventListener("change", () => {
+      updatePhpVersionDropdown(els.infoMoodleVersion.value);
+      refreshDirtyState();
+    });
+  }
+  if (els.infoPhpVersion) {
+    els.infoPhpVersion.addEventListener("change", refreshDirtyState);
+  }
+  if (els.configApply) {
+    els.configApply.addEventListener("click", applyConfigAndReset);
+  }
+  if (els.runtimeIdChip) {
+    els.runtimeIdChip.addEventListener("click", () => {
+      navigator.clipboard?.writeText(currentRuntimeId || "");
+      const label = els.runtimeIdValue;
+      if (!label) {
+        return;
       }
+      const original = label.textContent;
+      label.textContent = "✓ copied";
+      setTimeout(() => {
+        label.textContent = original;
+      }, 1400);
     });
   }
-  if (els.settingsOverlay) {
-    els.settingsOverlay.addEventListener("click", closeSettingsPopover);
-  }
-  if (els.settingsCancel) {
-    els.settingsCancel.addEventListener("click", closeSettingsPopover);
-  }
-  if (els.settingsApply) {
-    els.settingsApply.addEventListener("click", applySettingsAndReset);
-  }
-  if (els.settingsMoodleVersion) {
-    els.settingsMoodleVersion.addEventListener("change", () => {
-      updatePhpVersionDropdown(els.settingsMoodleVersion.value);
-    });
-  }
-
-  // Close popover on Escape
-  document.addEventListener("keydown", (event) => {
-    if (
-      event.key === "Escape" &&
-      els.settingsPopover?.classList.contains("is-open")
-    ) {
-      closeSettingsPopover();
-    }
-  });
 
   bindShellChannel();
   bindServiceWorkerMessages();
