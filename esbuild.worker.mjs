@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { build } from "esbuild";
 import { ALL_PHP_VERSIONS as MOODLE_PHP_VERSIONS } from "./src/shared/version-resolver.js";
@@ -59,6 +59,8 @@ const phpWasmIcuDataPlugin = {
     }));
   },
 };
+
+rmSync("dist", { force: true, recursive: true });
 
 await Promise.all([
   // Bundle the PHP worker (Web Worker — uses @php-wasm dependencies)
