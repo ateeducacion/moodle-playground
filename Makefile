@@ -34,7 +34,7 @@ build-version:
 	npm run build:version
 
 build-worker:
-	npm run build:worker
+	npm run build-worker
 
 # Fast prepare for local iteration: install deps and rebuild the worker bundle only.
 prepare: deps build-version build-worker
