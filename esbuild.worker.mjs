@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
+import { readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
 import { build } from "esbuild";
 import { ALL_PHP_VERSIONS as MOODLE_PHP_VERSIONS } from "./src/shared/version-resolver.js";
 
@@ -39,20 +39,28 @@ const stripUnusedPhpVersions = {
   },
 };
 
-// @php-wasm/web 3.1.22+ references the ICU data file via the source-layout
-// path `../intl/shared/icu.dat`, but the published tarball ships the file at
-// `./shared/icu.dat` (no sibling `intl` package exists on npm). Without a
-// resolver hook, esbuild fails with "Could not resolve ../intl/shared/icu.dat"
-// when bundling the worker. See WordPress/wordpress-playground#2776.
-const phpWasmWebDir = dirname(require.resolve("@php-wasm/web/package.json"));
+const phpWasmWebPackage = JSON.parse(
+  readFileSync(require.resolve("@php-wasm/web/package.json"), "utf8"),
+);
+const ICU_DATA_URL = `https://unpkg.com/@php-wasm/web@${phpWasmWebPackage.version}/shared/icu.dat`;
 const phpWasmIcuDataPlugin = {
   name: "php-wasm-icu-data",
   setup(b) {
-    b.onResolve({ filter: /(^|\/)intl\/shared\/icu\.dat$/ }, () => ({
-      path: `${phpWasmWebDir}/shared/icu.dat`,
+    b.onResolve(
+      { filter: /(^|\/)(?:intl\/shared|shared)\/icu\.dat$/ },
+      () => ({
+        path: "external-icu-data-url",
+        namespace: "external-icu-data-url",
+      }),
+    );
+    b.onLoad({ filter: /.*/, namespace: "external-icu-data-url" }, () => ({
+      loader: "js",
+      contents: `export default ${JSON.stringify(ICU_DATA_URL)};`,
     }));
   },
 };
+
+rmSync("dist", { force: true, recursive: true });
 
 await Promise.all([
   // Bundle the PHP worker (Web Worker — uses @php-wasm dependencies)
