@@ -4,6 +4,12 @@
   <img src=".github/screenshot.png" alt="Moodle Playground" width="600">
 </p>
 
+<p align="center">
+  <a href="https://moodle-playground.pages.dev/" target="_blank" rel="noopener noreferrer">
+    <img src="assets/playground-preview-button.svg" alt="Try on Moodle Playground" width="224">
+  </a>
+</p>
+
 [Live demo](https://moodle-playground.com/) · [Documentation](https://moodle-playground.com/docs/) · [Blueprints](https://moodle-playground.com/docs/blueprint-json/)
 
 > Run a full Moodle site in the browser — no server required.
