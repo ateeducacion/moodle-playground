@@ -4,7 +4,7 @@
 
 ```bash
 npm install          # Install dependencies
-npm run build:worker # Bundle the PHP worker
+npm run build-worker # Bundle the PHP worker
 npm run bundle       # Full bundle (ZIP + snapshot)
 
 make prepare         # Install deps and build the worker only
@@ -36,7 +36,7 @@ The local PHP binary must have `pdo_sqlite` enabled.
 
 The PHP worker (`php-worker.js`) is bundled with esbuild into `dist/php-worker.bundle.js`. This bundles all runtime dependencies into a single ESM file loaded as a Web Worker. WASM and ICU data files are copied to `dist/` with content hashes.
 
-Run `npm run build:worker` after changes to any runtime file.
+Run `npm run build-worker` after changes to any runtime file.
 
 ## Generated assets
 

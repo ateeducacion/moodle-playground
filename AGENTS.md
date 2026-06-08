@@ -85,7 +85,7 @@ This project uses npm, esbuild, and a small Makefile workflow.
 
 ```bash
 npm install
-npm run build:worker
+npm run build-worker
 npm run bundle
 
 make prepare
@@ -122,7 +122,19 @@ This bundles all runtime dependencies (`@php-wasm/web`, `@php-wasm/universal`, s
 into a single ESM file that can be loaded as a Web Worker. WASM and ICU data files are
 copied to `dist/` with content hashes and loaded at runtime.
 
-Run `npm run build:worker` (or `make build-worker`) to rebuild after changes.
+Run `npm run build-worker` (or `make build-worker`) to rebuild after changes.
+
+**The blueprint engine is bundled into this worker too.** The step registry
+(`src/blueprint/steps/index.js`), step handlers, and PHP generators
+(`src/blueprint/php/helpers.js`) all execute inside the bundled worker, not in the shell's
+main thread. So after editing **anything under `src/blueprint/**`** you must rebuild the
+worker for the change to take effect at runtime — otherwise the running app keeps using the
+stale bundle and a brand-new step fails with `Unknown step type: <name>`. `make test`
+exercises the source directly and will pass, so it does **not** catch a missing rebuild;
+only running the app does. `dist/` is git-ignored and CI rebuilds it, so this matters for
+local dev/verification, not for the committed artifact. When verifying blueprint changes in
+the browser, also clear the Service Worker caches (it caches the old bundle) — the Reset
+Playground button or `?clean=1` alone does not refresh the worker bundle.
 
 ## Architecture
 
@@ -166,7 +178,7 @@ WP Playground & php-wasm skill. Key constraints unique to this repo:
 - `addonProxyUrl` is for browser-side ZIP downloads. `phpCorsProxyUrl` is for runtime PHP
   networking fallback. Do not conflate the two.
 - After any change in `src/runtime/php-loader.js`, `php-worker.js`, or other worker imports,
-  run `npm run build:worker`.
+  run `npm run build-worker`.
 
 ### Responsibilities
 
@@ -383,6 +395,7 @@ so that future contributors (human or AI) understand **why** a choice was made �
 | [0006](docs/decisions/0006-moodle-langpack-proxy-allowance.md) | Language pack install via the CORS proxy + Moodle's lang_installer | Accepted |
 | [0007](docs/decisions/0007-course-restore-step.md) | Course backup (.mbz) restore step (PHP streaming download + restore_controller) | Accepted |
 | [0008](docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
+| [0009](docs/decisions/0009-file-backed-config-settings-blueprint-steps.md) | File-backed Moodle config settings in blueprints (`setConfigFile` / `setConfigFiles`) | Accepted |
 
 ## Debugging
 

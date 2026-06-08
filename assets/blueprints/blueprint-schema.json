@@ -71,6 +71,8 @@
               "login",
               "setConfig",
               "setConfigs",
+              "setConfigFile",
+              "setConfigFiles",
               "setTheme",
               "setLandingPage",
               "createUser",

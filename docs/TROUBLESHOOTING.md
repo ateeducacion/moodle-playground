@@ -33,7 +33,7 @@ php -l patches/shared/lib/classes/encryption.php
 Bundle and runtime:
 
 ```bash
-npm run build:worker
+npm run build-worker
 npm run bundle
 ```
 

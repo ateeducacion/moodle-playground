@@ -24,6 +24,8 @@ describe("step registry", () => {
       "login",
       "setConfig",
       "setConfigs",
+      "setConfigFile",
+      "setConfigFiles",
       "setTheme",
       "setLandingPage",
       "createUser",
