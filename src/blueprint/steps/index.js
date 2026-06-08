@@ -7,6 +7,7 @@ import { registerMoodleInstallSteps } from "./moodle-install.js";
 import { registerMoodleLanguageSteps } from "./moodle-language.js";
 import { registerMoodleModuleSteps } from "./moodle-modules.js";
 import { registerMoodlePluginSteps } from "./moodle-plugins.js";
+import { registerMoodleRestoreSteps } from "./moodle-restore.js";
 import { registerMoodleUserSteps } from "./moodle-users.js";
 import { registerRequestSteps } from "./request.js";
 
@@ -36,4 +37,5 @@ registerMoodleCourseSteps(registerStep);
 registerMoodleEnrolSteps(registerStep);
 registerMoodleModuleSteps(registerStep);
 registerMoodleLanguageSteps(registerStep);
+registerMoodleRestoreSteps(registerStep);
 registerMoodlePluginSteps(registerStep);
