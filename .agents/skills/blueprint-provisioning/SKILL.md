@@ -150,6 +150,21 @@ Supported module types via `addModule`:
 - `scorm` — SCORM package (requires resource)
 - `h5pactivity` — H5P activity
 
+#### Roles, scales and cohorts
+| Step | Description |
+|------|-------------|
+| `importRolePreset` / `importRoles` | Import native Moodle role preset XML (`core_role_preset`); inline `xml`/`resource` or array of XML refs |
+| `createRole` / `createRoles` | JSON-native roles: `capabilities` map, `contextlevels`, `allow*` relationships, `resetToArchetype` |
+| `createScale` / `createScales` | Grading scales; `items` array or CSV; `createScales` also accepts the `moodle-scale-export` envelope |
+| `createCohort` / `createCohorts` | Site cohorts; idempotent on `idnumber`/`name`; optional `members` usernames |
+
+`steps/moodle-roles.js`, `moodle-scales.js`, `moodle-cohorts.js` consume the shared
+`steps/payload.js` resolver, so each batch step's payload may be an inline array, a `@resource`
+reference, an inline resource descriptor (`{ "url": … }`), or a raw JSON/XML string — the same
+resource system used by `writeFile`/`unzip`. Generators (`phpImportRolePresets`, `phpCreateRoles`,
+`phpCreateScales`, `phpCreateCohorts`) install a graceful exception handler and are idempotent. See
+`docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md`.
+
 #### Plugins and themes
 | Step | Description |
 |------|-------------|

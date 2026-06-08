@@ -88,6 +88,34 @@ with labels, assignments, and a URL resource across multiple units.
 
 ---
 
+## Roles, Scales & Cohorts
+
+**File:** `roles-scales-cohorts.blueprint.json`
+
+Provisions access-control and grading building blocks: imports a native Moodle
+role preset, defines a JSON role, creates grading scales (including from a
+scale-export envelope), and a cohort with members.
+
+```
+?blueprint-url=assets/blueprints/examples/roles-scales-cohorts.blueprint.json
+```
+
+**What it does:**
+
+- Creates two users and a demo course (DEMO101)
+- Imports a `coordinacion` role from preset XML (via a `@resource`)
+- Defines a JSON-native "Hidden-course viewer" role
+- Creates two site-wide scales and one course-scoped scale
+- Creates a "Staff 2026" cohort with `alice` and `bob` as members
+- Lands on the *Define roles* admin page
+
+!!! note
+    Roles, scales and cohorts can be defined inline or referenced from an
+    external JSON/XML (URL or `@resource`) — see the
+    [Blueprint Reference](blueprint-json.md#roles-scales-and-cohorts).
+
+---
+
 ## Plugin: eXeLearning (mod_exeweb)
 
 **File:** `plugin-exeweb.blueprint.json`

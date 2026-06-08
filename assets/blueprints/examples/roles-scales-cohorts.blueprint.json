@@ -1,0 +1,81 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/admin/roles/manage.php",
+  "constants": {
+    "ADMIN_USER": "admin"
+  },
+  "resources": {
+    "coordinacionRole": {
+      "literal": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<role>\n  <shortname>coordinacion</shortname>\n  <name>Coordinador</name>\n  <description>Course coordinator role</description>\n  <archetype>editingteacher</archetype>\n  <contextlevels>\n    <level>course</level>\n    <level>module</level>\n  </contextlevels>\n  <allowassign>\n    <shortname>teacher</shortname>\n    <shortname>student</shortname>\n  </allowassign>\n  <allowoverride></allowoverride>\n  <allowswitch></allowswitch>\n  <allowview>\n    <shortname>teacher</shortname>\n  </allowview>\n  <permissions>\n    <allow>moodle/course:manageactivities</allow>\n    <allow>moodle/course:update</allow>\n  </permissions>\n</role>\n"
+    }
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": { "siteName": "Roles, Scales & Cohorts Demo" }
+    },
+    {
+      "step": "createUsers",
+      "users": [
+        { "username": "alice", "firstname": "Alice", "lastname": "Coord" },
+        { "username": "bob", "firstname": "Bob", "lastname": "Teacher" }
+      ]
+    },
+    {
+      "step": "createCategory",
+      "name": "Demo Courses"
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Demo Course",
+      "shortname": "DEMO101",
+      "category": "Demo Courses"
+    },
+    {
+      "step": "importRoles",
+      "roles": ["@coordinacionRole"]
+    },
+    {
+      "step": "createRole",
+      "shortname": "guestviewer",
+      "name": "Hidden-course viewer",
+      "archetype": "student",
+      "contextlevels": ["coursecat", "course"],
+      "capabilities": {
+        "moodle/course:viewhiddencourses": "allow"
+      },
+      "allowView": ["editingteacher", "teacher"]
+    },
+    {
+      "step": "createScales",
+      "scales": {
+        "format": "moodle-scale-export",
+        "format_version": 1,
+        "scales": [
+          { "name": "Competency", "items": "Not competent yet, Competent" },
+          {
+            "name": "Connected and separate knowing",
+            "items": "Mostly separate knowing, Separate and connected, Mostly connected knowing"
+          }
+        ]
+      }
+    },
+    {
+      "step": "createScale",
+      "name": "Course rubric",
+      "items": ["Poor", "Fair", "Good", "Excellent"],
+      "course": "DEMO101"
+    },
+    {
+      "step": "createCohort",
+      "name": "Staff 2026",
+      "idnumber": "staff2026",
+      "description": "Teaching staff cohort",
+      "members": ["alice", "bob"]
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    }
+  ]
+}

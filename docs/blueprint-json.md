@@ -269,6 +269,15 @@ Named resources can be defined once and referenced from steps using `@name`:
 |------|-------------|
 | `enrolUser` / `enrolUsers` | Enrol users into courses with roles |
 
+### Roles, scales & cohorts
+
+| Step | Description |
+|------|-------------|
+| `importRolePreset` / `importRoles` | Import native Moodle role preset XML (inline or by URL/resource) |
+| `createRole` / `createRoles` | Define/customize roles from JSON (capabilities, context levels, relationships) |
+| `createScale` / `createScales` | Create grading scales (inline, or from a scale-export JSON) |
+| `createCohort` / `createCohorts` | Create site-level cohorts with optional members |
+
 ### Modules
 
 | Step | Description |
@@ -628,6 +637,157 @@ Provide exactly one **source** (precedence `url` > `path` > `data`):
 > the rest of the blueprint. Prefer smaller course backups, and host large `.mbz` files at a
 > CORS-accessible URL (e.g. GitHub raw) so they stream into the runtime instead of being buffered.
 
+## Roles, scales and cohorts
+
+These steps provision access control and grading building blocks. Each one can take its data
+**inline in the blueprint** or **by reference to an external JSON/XML** — there is no separate
+mechanism for "load from a URL": the steps consume the same [resource descriptors](#resources)
+(`url`, `base64`, `data-url`, `bundled`, `vfs`, `literal`) and `@name` references that
+`writeFile`/`unzip` already use. So any of these are valid for a batch step's payload:
+
+```jsonc
+"roles": [ { "shortname": "coordinacion" } ]      // inline array
+"roles": "@coordinacionRoles"                       // @name resource (declared in "resources")
+"roles": { "url": "https://host/roles.json" }       // inline resource descriptor (fetched + parsed)
+```
+
+All of these steps are **idempotent** and **non-fatal** (a failure is reported and the blueprint
+continues — see [ADR-0005](./decisions/0005-resilient-blueprint-step-execution.md)). They are
+documented in [ADR-0008](./decisions/0008-blueprint-roles-scales-cohorts-provisioning.md).
+
+### importRolePreset / importRoles
+
+Import **native Moodle role preset XML** — the `<role>` document produced by *Site administration
+→ Users → Permissions → Define roles → Export*. The XML is parsed by Moodle core itself
+(`core_role_preset`), so any role exported from any Moodle drops straight in, with its archetype,
+context levels, capabilities and `allowassign`/`allowoverride`/`allowswitch`/`allowview`
+relationships. Roles are matched by `shortname` (created or updated). Capabilities belonging to
+plugins that are not installed here are skipped.
+
+```json
+{ "step": "importRolePreset", "resource": "@coordinacionXml" }
+```
+
+```json
+{
+  "step": "importRoles",
+  "roles": [
+    "@coordinacionXml",
+    { "url": "https://example.com/student_vercursosocultos.xml" },
+    { "xml": "<role><shortname>tutor</shortname>…</role>" }
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `xml` | one of | Inline role preset XML string (single step `importRolePreset`) |
+| `resource` | one of | `@name` or resource descriptor resolving to role preset XML (single step) |
+| `roles` | yes (`importRoles`) | Array of XML references: `@name`, raw XML string, `{ "xml": … }`, or a resource descriptor |
+
+### createRole / createRoles
+
+Define or customize roles from a **JSON-native** description (good for readable, small roles).
+Idempotent on `shortname`.
+
+```json
+{
+  "step": "createRole",
+  "shortname": "coordinacion",
+  "name": "Coordinador",
+  "description": "Course coordinator",
+  "archetype": "editingteacher",
+  "resetToArchetype": true,
+  "contextlevels": ["course", "module"],
+  "capabilities": {
+    "moodle/course:manage": "allow",
+    "mod/quiz:addinstance": "prevent"
+  },
+  "allowAssign": ["teacher", "student"],
+  "allowView": ["teacher"]
+}
+```
+
+`createRoles` takes a `roles` array (inline, `@resource`, or URL descriptor — JSON).
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `shortname` | yes | Unique role shortname |
+| `name` | no | Display name (defaults to `shortname`) |
+| `description` | no | Role description |
+| `archetype` | no | One of `manager`, `coursecreator`, `editingteacher`, `teacher`, `student`, `guest`, `user`, `frontpage` |
+| `resetToArchetype` | no | When `true` (with an `archetype`), seed the role with the archetype's default capabilities before applying overrides |
+| `contextlevels` | no | Where the role can be assigned: names (`system`, `coursecat`, `course`, `module`, `block`, `user`) or numbers |
+| `capabilities` | no | Map of `capability → allow \| prevent \| prohibit \| inherit` (applied at the system context; capabilities of missing plugins are skipped) |
+| `allowAssign` / `allowOverride` / `allowSwitch` / `allowView` | no | Arrays of role shortnames defining the relationship tables |
+
+> **XML vs JSON for roles.** Use `importRoles` for real exports (hundreds of capabilities — let
+> Moodle parse them); use `createRole` to define a small custom role legibly inside the blueprint.
+
+### createScale / createScales
+
+Create or update grading scales. Idempotent on `(course, name)`.
+
+```json
+{
+  "step": "createScale",
+  "name": "Competency",
+  "items": ["Not competent yet", "Competent"],
+  "description": "Default competency scale",
+  "course": "CHEM101"
+}
+```
+
+`createScales` accepts an array, a `@resource`/URL, **and** the Moodle scale-export envelope
+(`{ "format": "moodle-scale-export", "scales": [ … ] }`), so an exported scale file works as-is:
+
+```json
+{ "step": "createScales", "scales": { "url": "https://example.com/moodle-standard-scales.json" } }
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Scale name |
+| `items` | yes | Scale options low→high, as an array or a comma-separated string (Moodle stores them comma-separated) |
+| `description` | no | Scale description (HTML) |
+| `course` | no | Course shortname to scope the scale to; omit for a **site-wide** standard scale (`courseid = 0`) |
+
+### createCohort / createCohorts
+
+Create or update site-level cohorts. Idempotent on `idnumber` (or `name` when no `idnumber`).
+
+```json
+{
+  "step": "createCohort",
+  "name": "Staff 2026",
+  "idnumber": "staff2026",
+  "description": "Teaching staff",
+  "members": ["alice", "bob"]
+}
+```
+
+`createCohorts` accepts a `cohorts` array (inline, `@resource`, or URL descriptor).
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Cohort name |
+| `idnumber` | no | Stable identifier used as the idempotency key |
+| `description` | no | Cohort description |
+| `visible` | no | `false` to hide the cohort (default `true`) |
+| `members` | no | Array of usernames to add to the cohort (users must already exist) |
+
+### Adding more "and the rest" (extension pattern)
+
+These three domains all follow the same small recipe, which you can repeat for other
+provisioning data (custom profile fields, competency frameworks, badges, …):
+
+1. Add a `php<Thing>()` generator in `src/blueprint/php/helpers.js` (CLI mode, escaped input,
+   graceful handler, JSON output — adapt an existing one).
+2. Add a `src/blueprint/steps/moodle-<thing>.js` handler that resolves its payload with
+   `resolveJsonPayload()` from `steps/payload.js` (this gives you inline / `@resource` / URL for
+   free) and calls the generator.
+3. Register it in `src/blueprint/steps/index.js`, add the names to `src/blueprint/schema.js` and
+   `assets/blueprints/blueprint-schema.json`, then document and test it.
 ## Naming Conventions
 
 - Step names use camelCase: `createUser`, `setConfig`, `addModule`
