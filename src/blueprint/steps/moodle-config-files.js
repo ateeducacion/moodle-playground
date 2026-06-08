@@ -107,7 +107,6 @@ async function handleSetConfigFiles(step, { php, resources }) {
     replace: step.replace !== false,
     setConfigValue: step.setConfigValue !== false,
     purgeCaches: step.purgeCaches === true,
-    userid: step.userid ?? null,
     files: fileSpecs,
   });
   const result = await php.run(code);

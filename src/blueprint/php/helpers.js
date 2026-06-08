@@ -330,7 +330,6 @@ export function phpSetConfigFiles(opts) {
     replace = true,
     setConfigValue = true,
     purgeCaches = false,
-    userid = null,
     files = [],
   } = opts;
 
