@@ -1,5 +1,6 @@
 import { registerFilesystemSteps } from "./filesystem.js";
 import { registerMoodleCategorySteps } from "./moodle-categories.js";
+import { registerMoodleCohortSteps } from "./moodle-cohorts.js";
 import { registerMoodleConfigSteps } from "./moodle-config.js";
 import { registerMoodleCourseSteps } from "./moodle-courses.js";
 import { registerMoodleEnrolSteps } from "./moodle-enrol.js";
@@ -7,6 +8,8 @@ import { registerMoodleInstallSteps } from "./moodle-install.js";
 import { registerMoodleLanguageSteps } from "./moodle-language.js";
 import { registerMoodleModuleSteps } from "./moodle-modules.js";
 import { registerMoodlePluginSteps } from "./moodle-plugins.js";
+import { registerMoodleRoleSteps } from "./moodle-roles.js";
+import { registerMoodleScaleSteps } from "./moodle-scales.js";
 import { registerMoodleUserSteps } from "./moodle-users.js";
 import { registerRequestSteps } from "./request.js";
 
@@ -37,3 +40,6 @@ registerMoodleEnrolSteps(registerStep);
 registerMoodleModuleSteps(registerStep);
 registerMoodleLanguageSteps(registerStep);
 registerMoodlePluginSteps(registerStep);
+registerMoodleRoleSteps(registerStep);
+registerMoodleScaleSteps(registerStep);
+registerMoodleCohortSteps(registerStep);

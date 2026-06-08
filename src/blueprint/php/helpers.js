@@ -625,3 +625,357 @@ $DB->update_record('user', $admin);
 echo json_encode(['ok' => true, 'changed' => true, 'user' => $admin->username]);
 `;
 }
+
+// ---------------------------------------------------------------------------
+// Roles, scales and cohorts
+// ---------------------------------------------------------------------------
+
+// Graceful fatal handler — turns an uncaught error into a JSON {"ok":false}
+// response + exit(0) so a failing provisioning step does not kill the WASM
+// process before the executor can read the result (see ADR-0005, mirrors
+// ADD_MODULE_SETUP). Used by the role/scale/cohort generators below.
+const GRACEFUL_HANDLER = `set_exception_handler(function($e) {
+    while (ob_get_level()) ob_end_clean();
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    exit(0);
+});`;
+
+// Map blueprint context-level names to Moodle CONTEXT_* numeric constants.
+// Values are resolved in JS so only integers are interpolated into PHP.
+const CONTEXT_LEVELS = {
+  system: 10,
+  user: 30,
+  coursecat: 40,
+  category: 40,
+  course: 50,
+  module: 70,
+  activity: 70,
+  block: 80,
+};
+
+// Map blueprint permission names to Moodle CAP_* numeric constants.
+const CAP_PERMISSIONS = {
+  inherit: 0,
+  allow: 1,
+  prevent: -1,
+  prohibit: -1000,
+};
+
+function normalizeContextLevels(levels) {
+  if (!Array.isArray(levels) || levels.length === 0) return [];
+  const out = [];
+  for (const lvl of levels) {
+    if (typeof lvl === "number" && Number.isInteger(lvl)) {
+      out.push(lvl);
+      continue;
+    }
+    const n = CONTEXT_LEVELS[String(lvl).toLowerCase()];
+    if (n !== undefined) out.push(n);
+  }
+  return out;
+}
+
+// Moodle stores scale items as a single comma-separated string (low to high).
+// Accept either an array or an already-joined string.
+export function normalizeScaleItems(items) {
+  const arr = Array.isArray(items) ? items : String(items ?? "").split(",");
+  return arr
+    .map((x) => String(x).trim())
+    .filter((x) => x !== "")
+    .join(", ");
+}
+
+// Import one or more native Moodle role presets (the <role> XML produced by
+// Site administration > Users > Permissions > Define roles > Export). Reuses
+// Moodle core's own parser (core_role_preset) so any exported role drops in.
+// Runs in two passes so inter-role allow* relationships resolve even when
+// several new roles reference each other. Idempotent on role shortname.
+// Adapted from the reference apply-role-presets.php but accepts XML strings
+// instead of file paths (no filesystem in WASM CLI mode).
+export function phpImportRolePresets(xmls) {
+  const xmlLiterals = xmls.map((xml) => `'${escapePhp(xml)}'`).join(",\n");
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+require_once($CFG->dirroot . '/admin/roles/classes/preset.php');
+require_once($CFG->libdir . '/accesslib.php');
+global $DB, $USER;
+$admin = get_admin();
+if ($admin) { $USER = $admin; }
+$systemcontext = context_system::instance();
+$xmls = [
+${xmlLiterals}
+];
+$presets = [];
+foreach ($xmls as $xml) {
+    if (trim($xml) === '' || !core_role_preset::is_valid_preset($xml)) {
+        throw new moodle_exception('Invalid Moodle role preset XML.');
+    }
+    $info = core_role_preset::parse_preset($xml);
+    if (!is_array($info) || empty($info['shortname'])) {
+        throw new moodle_exception('Role preset lacks a valid shortname.');
+    }
+    $presets[(string)$info['shortname']] = ['xml' => $xml, 'initial' => $info];
+}
+$roleids = [];
+// Pass 1: create or update every role record first.
+foreach ($presets as $shortname => $preset) {
+    $info = $preset['initial'];
+    $name = (string)($info['name'] ?? $shortname);
+    $description = (string)($info['description'] ?? '');
+    $archetype = (string)($info['archetype'] ?? '');
+    $role = $DB->get_record('role', ['shortname' => $shortname]);
+    if ($role) {
+        $role->name = $name;
+        $role->description = $description;
+        $role->archetype = $archetype;
+        $DB->update_record('role', $role);
+        $roleids[$shortname] = (int)$role->id;
+    } else {
+        $roleids[$shortname] = (int)create_role($name, $shortname, $description, $archetype);
+    }
+}
+// Pass 2: context levels, capabilities and inter-role relationships.
+$summary = [];
+foreach ($presets as $shortname => $preset) {
+    $info = core_role_preset::parse_preset($preset['xml']);
+    $roleid = $roleids[$shortname];
+    $contextlevels = array_values(array_map('intval', $info['contextlevels'] ?? []));
+    set_role_contextlevels($roleid, $contextlevels);
+    $DB->delete_records('role_capabilities', ['roleid' => $roleid, 'contextid' => $systemcontext->id]);
+    $applied = 0;
+    $skipped = 0;
+    foreach (($info['permissions'] ?? []) as $capability => $permission) {
+        $permission = (int)$permission;
+        if ($permission === CAP_INHERIT) { continue; }
+        // XML exports may reference capabilities from plugins absent here.
+        if (!get_capability_info((string)$capability, false)) { $skipped++; continue; }
+        assign_capability((string)$capability, $permission, $roleid, $systemcontext, true);
+        $applied++;
+    }
+    $relations = [
+        'allowassign'   => ['table' => 'role_allow_assign',   'field' => 'allowassign',   'helper' => 'core_role_set_assign_allowed'],
+        'allowoverride' => ['table' => 'role_allow_override', 'field' => 'allowoverride', 'helper' => 'core_role_set_override_allowed'],
+        'allowswitch'   => ['table' => 'role_allow_switch',   'field' => 'allowswitch',   'helper' => 'core_role_set_switch_allowed'],
+        'allowview'     => ['table' => 'role_allow_view',     'field' => 'allowview',     'helper' => 'core_role_set_view_allowed'],
+    ];
+    foreach ($relations as $key => $rel) {
+        $DB->delete_records($rel['table'], ['roleid' => $roleid]);
+        foreach (($info[$key] ?? []) as $target) {
+            $target = (int)$target;
+            if ($target === -1) { $target = $roleid; } // self-reference marker
+            if ($target <= 0 || !$DB->record_exists('role', ['id' => $target])) { continue; }
+            if (!$DB->record_exists($rel['table'], ['roleid' => $roleid, $rel['field'] => $target])) {
+                call_user_func($rel['helper'], $roleid, $target);
+            }
+        }
+    }
+    $summary[$shortname] = ['id' => $roleid, 'applied' => $applied, 'skipped' => $skipped];
+}
+accesslib_reset_role_cache();
+purge_all_caches();
+echo json_encode(['ok' => true, 'roles' => $summary]);
+`;
+}
+
+export function phpCreateRole(role) {
+  return phpCreateRoles([role]);
+}
+
+// Create or customize roles from a JSON-native definition. Idempotent on
+// shortname. Capabilities are a {capability: allow|prevent|prohibit|inherit}
+// map; context levels accept names (course, module, ...) or numbers; allow*
+// relationships reference other roles by shortname. Permission and context
+// values are resolved to integers in JS so only safe ints reach PHP.
+export function phpCreateRoles(roles) {
+  const createBlocks = roles.map((r) => {
+    const shortname = escapePhp(r.shortname);
+    const name = escapePhp(r.name || r.shortname);
+    const description = escapePhp(r.description || "");
+    const archetype = escapePhp(r.archetype || "");
+    return `
+$shortname = '${shortname}';
+$existing = $DB->get_record('role', ['shortname' => $shortname]);
+if ($existing) {
+    $existing->name = '${name}';
+    $existing->description = '${description}';
+    $existing->archetype = '${archetype}';
+    $DB->update_record('role', $existing);
+    $roleids['${shortname}'] = (int)$existing->id;
+} else {
+    $roleids['${shortname}'] = (int)create_role('${name}', $shortname, '${description}', '${archetype}');
+}`;
+  });
+
+  const applyBlocks = roles.map((r) => {
+    const shortname = escapePhp(r.shortname);
+    const lines = [`$roleid = $roleids['${shortname}'];`];
+    if (r.resetToArchetype && r.archetype) {
+      lines.push("reset_role_capabilities($roleid);");
+    }
+    const levels = normalizeContextLevels(r.contextlevels);
+    if (levels.length > 0) {
+      lines.push(`set_role_contextlevels($roleid, [${levels.join(", ")}]);`);
+    }
+    if (r.capabilities && typeof r.capabilities === "object") {
+      for (const [cap, perm] of Object.entries(r.capabilities)) {
+        const permInt = CAP_PERMISSIONS[String(perm).toLowerCase()];
+        if (permInt === undefined) continue;
+        lines.push(
+          `if (get_capability_info('${escapePhp(cap)}', false)) { assign_capability('${escapePhp(cap)}', ${permInt}, $roleid, $systemcontext->id, true); }`,
+        );
+      }
+    }
+    const rels = [
+      ["allowAssign", "core_role_set_assign_allowed"],
+      ["allowOverride", "core_role_set_override_allowed"],
+      ["allowSwitch", "core_role_set_switch_allowed"],
+      ["allowView", "core_role_set_view_allowed"],
+    ];
+    for (const [key, helper] of rels) {
+      const targets = Array.isArray(r[key]) ? r[key] : [];
+      for (const t of targets) {
+        lines.push(
+          `$tid = $DB->get_field('role', 'id', ['shortname' => '${escapePhp(t)}']); if ($tid) { ${helper}($roleid, (int)$tid); }`,
+        );
+      }
+    }
+    return lines.join("\n");
+  });
+
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+require_once($CFG->libdir . '/accesslib.php');
+global $DB, $USER;
+$admin = get_admin();
+if ($admin) { $USER = $admin; }
+$systemcontext = context_system::instance();
+$roleids = [];
+${createBlocks.join("\n")}
+${applyBlocks.join("\n")}
+accesslib_reset_role_cache();
+purge_all_caches();
+echo json_encode(['ok' => true, 'roles' => $roleids]);
+`;
+}
+
+export function phpCreateScale(scale) {
+  return phpCreateScales([scale]);
+}
+
+// Create or update grade scales. Idempotent on (courseid, name) via the
+// grade_scale class. A 'course' shortname scopes the scale to that course;
+// omitting it creates a site-wide ("standard") scale (courseid = 0).
+// Adapted from the reference apply-scales.php but accepts inline data.
+export function phpCreateScales(scales) {
+  const blocks = scales.map((s) => {
+    const name = escapePhp(s.name);
+    const items = escapePhp(normalizeScaleItems(s.items));
+    const description = escapePhp(s.description || "");
+    const courseLookup = s.course
+      ? `$c = $DB->get_record('course', ['shortname' => '${escapePhp(s.course)}'], 'id'); if ($c) { $courseid = (int)$c->id; }`
+      : "";
+    return `
+$name = '${name}';
+$items = '${items}';
+$courseid = 0;
+${courseLookup}
+$existing = $DB->get_record('scale', ['courseid' => $courseid, 'name' => $name]);
+if ($existing) {
+    $scale = new grade_scale(['id' => (int)$existing->id]);
+    $scale->courseid = $courseid;
+    $scale->userid = (int)$admin->id;
+    $scale->name = $name;
+    $scale->scale = $items;
+    $scale->description = '${description}';
+    $scale->descriptionformat = FORMAT_HTML;
+    $scale->update('playground_blueprint');
+    $results[] = ['name' => $name, 'id' => (int)$scale->id, 'action' => 'updated'];
+} else {
+    $scale = new grade_scale(null, false);
+    $scale->courseid = $courseid;
+    $scale->userid = (int)$admin->id;
+    $scale->name = $name;
+    $scale->scale = $items;
+    $scale->description = '${description}';
+    $scale->descriptionformat = FORMAT_HTML;
+    $sid = (int)$scale->insert('playground_blueprint');
+    $results[] = ['name' => $name, 'id' => $sid, 'action' => 'created'];
+}`;
+  });
+
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+require_once($CFG->libdir . '/grade/grade_scale.php');
+global $DB, $USER;
+$admin = get_admin();
+if ($admin) { $USER = $admin; }
+$results = [];
+${blocks.join("\n")}
+purge_all_caches();
+echo json_encode(['ok' => true, 'scales' => $results]);
+`;
+}
+
+export function phpCreateCohort(cohort) {
+  return phpCreateCohorts([cohort]);
+}
+
+// Create or update site-level cohorts. Idempotent on idnumber when provided,
+// otherwise on name (both at the system context). Optional 'members' is a list
+// of usernames added to the cohort.
+export function phpCreateCohorts(cohorts) {
+  const blocks = cohorts.map((c) => {
+    const name = escapePhp(c.name);
+    const idnumber = c.idnumber ? escapePhp(c.idnumber) : "";
+    const description = escapePhp(c.description || "");
+    const visible = c.visible === false ? 0 : 1;
+    const members = Array.isArray(c.members) ? c.members : [];
+    const lookup = idnumber
+      ? `$existing = $DB->get_record('cohort', ['contextid' => $systemcontext->id, 'idnumber' => '${idnumber}']);`
+      : `$existing = $DB->get_record('cohort', ['contextid' => $systemcontext->id, 'name' => '${name}']);`;
+    const memberLines = members
+      .map(
+        (u) => `
+$uid = $DB->get_field('user', 'id', ['username' => '${escapePhp(u)}']);
+if ($uid && !$DB->record_exists('cohort_members', ['cohortid' => $cohortid, 'userid' => (int)$uid])) {
+    cohort_add_member($cohortid, (int)$uid);
+}`,
+      )
+      .join("\n");
+    return `
+${lookup}
+if ($existing) {
+    $cohortid = (int)$existing->id;
+    $existing->name = '${name}';
+    $existing->description = '${description}';
+    $existing->descriptionformat = FORMAT_HTML;
+    ${idnumber ? `$existing->idnumber = '${idnumber}';` : ""}
+    $existing->visible = ${visible};
+    cohort_update_cohort($existing);
+} else {
+    $cohort = new stdClass();
+    $cohort->contextid = $systemcontext->id;
+    $cohort->name = '${name}';
+    $cohort->idnumber = '${idnumber}';
+    $cohort->description = '${description}';
+    $cohort->descriptionformat = FORMAT_HTML;
+    $cohort->visible = ${visible};
+    $cohortid = (int)cohort_add_cohort($cohort);
+}
+${memberLines}
+$results[] = ['name' => '${name}', 'id' => $cohortid];`;
+  });
+
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+require_once($CFG->dirroot . '/cohort/lib.php');
+global $DB, $USER;
+$admin = get_admin();
+if ($admin) { $USER = $admin; }
+$systemcontext = context_system::instance();
+$results = [];
+${blocks.join("\n")}
+purge_all_caches();
+echo json_encode(['ok' => true, 'cohorts' => $results]);
+`;
+}
