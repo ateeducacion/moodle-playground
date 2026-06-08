@@ -33,6 +33,30 @@ describe("validateBlueprint", () => {
     assert.ok(result.errors.some((e) => e.includes("unknown step")));
   });
 
+  it("accepts the file-backed config steps", () => {
+    const result = validateBlueprint({
+      steps: [
+        {
+          step: "setConfigFile",
+          plugin: "theme_adaptable",
+          name: "logo",
+          filename: "logo.png",
+          data: { url: "https://example.com/logo.png" },
+        },
+        {
+          step: "setConfigFiles",
+          plugin: "theme_adaptable",
+          name: "adaptablemarkettingimages",
+          files: [
+            { filename: "m1.jpg", data: { url: "https://example.com/m1.jpg" } },
+          ],
+        },
+      ],
+    });
+    assert.strictEqual(result.valid, true);
+    assert.strictEqual(result.errors.length, 0);
+  });
+
   it("rejects steps without step name", () => {
     const result = validateBlueprint({
       steps: [{ foo: "bar" }],

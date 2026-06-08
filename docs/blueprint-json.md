@@ -243,8 +243,10 @@ Named resources can be defined once and referenced from steps using `@name`:
 
 | Step | Description |
 |------|-------------|
-| `setConfig` | Set a single Moodle config value |
-| `setConfigs` | Set multiple config values in one call |
+| `setConfig` | Set a single Moodle config value (scalar) |
+| `setConfigs` | Set multiple config values in one call (scalar) |
+| `setConfigFile` | Store a file via the File API and point a config setting at it |
+| `setConfigFiles` | Store several files in one File API area for a config setting |
 | `setLandingPage` | Override the post-boot landing page |
 
 ### Users
@@ -788,6 +790,162 @@ provisioning data (custom profile fields, competency frameworks, badges, …):
    free) and calls the generator.
 3. Register it in `src/blueprint/steps/index.js`, add the names to `src/blueprint/schema.js` and
    `assets/blueprints/blueprint-schema.json`, then document and test it.
+
+## File-backed configuration settings
+
+Some Moodle admin settings do not store a scalar value — they store a **file**. Theme logos,
+favicons, header and marketing images, certificate backgrounds and many plugin assets are backed
+by `admin_setting_configstoredfile` (or similar file-manager settings). For these, `setConfig`
+is not enough.
+
+### Why `setConfig` is not enough
+
+`setConfig` / `setConfigs` call Moodle's `set_config($name, $value, $plugin)`, which writes a
+scalar into the `config` / `config_plugins` tables. A logo, however, is served by Moodle through
+`pluginfile.php`, which reads the **File API** (`files` table) — not the raw filesystem. So a
+file-backed setting needs *two* things:
+
+1. A **Moodle File API record** describing where the file lives, and
+2. A config value pointing at the stored file path (e.g. `/logo.png`).
+
+Just copying bytes onto disk with `writeFile` does **not** register the file with Moodle, so it
+will not be found, served, or shown in the admin UI.
+
+### How Moodle stores the file
+
+The File API keys every file by **context + component + filearea + itemid + filepath + filename**.
+For a global plugin/theme setting that is:
+
+| Key | Value |
+|-----|-------|
+| context | `context_system::instance()` (the whole site) |
+| component | the plugin, e.g. `theme_adaptable` |
+| filearea | the setting name, e.g. `logo` |
+| itemid | `0` |
+| filepath | `/` |
+| filename | the uploaded filename, e.g. `logo.png` |
+
+…and the matching config value is the first stored file path: `set_config('logo', '/logo.png', 'theme_adaptable')`.
+
+`setConfigFile` and `setConfigFiles` do exactly this. They are **generic** — they work for any
+theme or plugin, not just Adaptable — because nothing about the component or filearea is hardcoded.
+
+### setConfigFile
+
+Store a single file and point a config setting at it.
+
+```json
+{
+  "step": "setConfigFile",
+  "plugin": "theme_adaptable",
+  "name": "logo",
+  "filename": "logo.png",
+  "data": { "url": "https://example.com/logo.png" }
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `plugin` | yes | — | Component the file belongs to (e.g. `theme_adaptable`). |
+| `name` | yes | — | Setting name. Also the default `filearea` and the config key written. |
+| `filename` | yes | — | Stored filename (the config value becomes `filepath + filename`). |
+| `data` | yes | — | The file, as a [resource descriptor](#resources): `{ "url": … }`, `{ "base64": … }`, a `@named` resource, etc. |
+| `filearea` | no | `name` | File API filearea, if it differs from the setting name. |
+| `itemid` | no | `0` | File API itemid. |
+| `filepath` | no | `/` | File API filepath. |
+| `replace` | no | `true` | Delete the existing filearea first (set `false` to keep existing files). |
+| `setConfigValue` | no | `true` | Write `set_config(name, filepath+filename, plugin)`. Set `false` to store the file only. |
+| `purgeCaches` | no | `false` | Run `theme_reset_all_caches()` (if present) and `purge_all_caches()` afterwards. |
+| `author`, `license`, `source`, `userid` | no | admin / unset | Optional File API metadata. `userid` defaults to the site admin (falling back to user id `2`). |
+
+The file is owned by the admin user where possible. The step returns
+`{ ok: true, name, plugin, filearea, filename }`.
+
+#### Example — a favicon
+
+```json
+{
+  "step": "setConfigFile",
+  "plugin": "core_admin",
+  "name": "favicon",
+  "filename": "favicon.ico",
+  "data": { "url": "https://example.com/favicon.ico" }
+}
+```
+
+#### Example — a named resource
+
+```json
+{
+  "resources": {
+    "siteLogo": { "url": "https://example.com/logo.png" }
+  },
+  "steps": [
+    {
+      "step": "setConfigFile",
+      "plugin": "theme_adaptable",
+      "name": "logo",
+      "filename": "logo.png",
+      "data": "@siteLogo",
+      "purgeCaches": true
+    }
+  ]
+}
+```
+
+#### Example — inline base64
+
+```json
+{
+  "step": "setConfigFile",
+  "plugin": "theme_boost",
+  "name": "logo",
+  "filename": "logo.png",
+  "data": { "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCA— …truncated… " }
+}
+```
+
+### setConfigFiles
+
+Store **several** files in the same File API area (for settings that accept a gallery, such as a
+theme's marketing or header images). The area is deleted once before the files are added, and the
+config value is set to the **first** stored file's path.
+
+```json
+{
+  "steps": [
+    {
+      "step": "setConfigFiles",
+      "plugin": "theme_adaptable",
+      "name": "adaptablemarkettingimages",
+      "files": [
+        {
+          "filename": "marketing-1.jpg",
+          "data": { "url": "https://example.com/marketing-1.jpg" }
+        },
+        {
+          "filename": "marketing-2.jpg",
+          "data": { "url": "https://example.com/marketing-2.jpg" }
+        }
+      ],
+      "purgeCaches": true
+    }
+  ]
+}
+```
+
+Top-level fields (`filearea`, `itemid`, `filepath`, `replace`, `setConfigValue`, `purgeCaches`,
+`author`, `license`, `source`, `userid`) act as defaults. Each entry in `files` requires
+`filename` and `data`, and may override `filepath`, `author`, `license`, `source` and `userid`.
+`filearea` and `itemid` are area-level (shared by every file). If no valid files are stored the
+step fails with a clear error. The step returns `{ ok: true, name, plugin, filearea, count }`.
+
+### Themes and caches
+
+Theme file settings are served from cached CSS/markup, so a newly stored logo or image may not
+appear until caches are rebuilt. Pass `"purgeCaches": true` on the step, or run a later
+[`setTheme`](#settheme) step (which resets theme caches), so the change takes effect.
+
 ## Naming Conventions
 
 - Step names use camelCase: `createUser`, `setConfig`, `addModule`

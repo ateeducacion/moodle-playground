@@ -33,6 +33,16 @@ define('CLI_SCRIPT', true);
 require('${MOODLE_ROOT}/config.php');
 `;
 
+// Shared graceful exception handler. Moodle's default handler aborts DB
+// transactions and die(1)s on errors, which kills the WASM process before our
+// JS try/catch sees anything. Overriding it lets a failing step echo a JSON
+// error and exit(0) so the blueprint can keep going. See ADR-0005.
+const GRACEFUL_HANDLER = `set_exception_handler(function($e) {
+    while (ob_get_level()) ob_end_clean();
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    exit(0);
+});`;
+
 // Shared setup for addModule steps.
 // Overrides Moodle's default_exception_handler to prevent exit(1) on DB errors —
 // Moodle's handler calls abort_all_db_transactions() + die(1) which kills the
@@ -211,6 +221,182 @@ export function phpSetConfigs(configs) {
   return `${CLI_HEADER}
 ${lines.join("\n")}
 echo json_encode(['ok' => true, 'count' => ${configs.length}]);
+`;
+}
+
+// Cache purge used by the file-backed config generators. Theme file settings
+// (logos, favicons, marketing images) are served from cached CSS/markup, so a
+// purge is often needed before a freshly stored file becomes visible. This is
+// opt-in via `purgeCaches: true` — we do NOT purge by default because purging
+// is expensive and most plugin settings do not need it.
+const PURGE_CACHES_BLOCK = `if (function_exists('theme_reset_all_caches')) {
+    theme_reset_all_caches();
+}
+purge_all_caches();`;
+
+// Build the optional metadata lines for a Moodle file record. Only emitted when
+// provided; each value is escaped for a single-quoted PHP literal.
+function fileMetaEntries({ author, license, source }) {
+  const lines = [];
+  if (author != null) lines.push(`    'author'    => '${escapePhp(author)}',`);
+  if (license != null)
+    lines.push(`    'license'   => '${escapePhp(license)}',`);
+  if (source != null) lines.push(`    'source'    => '${escapePhp(source)}',`);
+  return lines.length ? `\n${lines.join("\n")}` : "";
+}
+
+// Resolve the file owner: an explicit userid (as int), otherwise the site admin
+// id, falling back to user id 2 (Moodle's default admin) when none is set.
+function fileUseridExpr(userid) {
+  return userid != null
+    ? String(parseInt(userid, 10) || 0)
+    : "($admin ? $admin->id : 2)";
+}
+
+// Store a single file in Moodle's File API and (by default) point a config value
+// at it. Backs admin_setting_configstoredfile-style settings (theme logos,
+// favicons, plugin assets) that set_config() alone cannot reproduce: Moodle
+// serves these through pluginfile.php, which reads the `files` table, not the
+// raw filesystem. The file lives in the system context under the given
+// component (plugin) / filearea / itemid / filepath / filename, and the config
+// value is set to "<filepath><filename>" (e.g. "/logo.png").
+export function phpSetConfigFile(opts) {
+  const {
+    plugin,
+    name,
+    filename,
+    filearea,
+    itemid = 0,
+    filepath = "/",
+    replace = true,
+    setConfigValue = true,
+    purgeCaches = false,
+    author = null,
+    license = null,
+    source = null,
+    userid = null,
+    tmppath,
+  } = opts;
+
+  const deleteBlock = replace
+    ? "$fs->delete_area_files($context->id, $component, $filearea, $itemid);\n"
+    : "";
+  const setConfigBlock = setConfigValue
+    ? `set_config('${escapePhp(name)}', $filepath . $filename, $component);\n`
+    : "";
+  const purgeBlock = purgeCaches ? `${PURGE_CACHES_BLOCK}\n` : "";
+
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+$context = context_system::instance();
+$fs = get_file_storage();
+$admin = get_admin();
+$component = '${escapePhp(plugin)}';
+$filearea = '${escapePhp(filearea)}';
+$itemid = ${parseInt(itemid, 10) || 0};
+$filepath = '${escapePhp(filepath)}';
+$filename = '${escapePhp(filename)}';
+$tmppath = '${escapePhp(tmppath)}';
+if (!file_exists($tmppath)) {
+    throw new Exception('setConfigFile: resolved file not found at ' . $tmppath);
+}
+${deleteBlock}$filerecord = [
+    'contextid' => $context->id,
+    'component' => $component,
+    'filearea'  => $filearea,
+    'itemid'    => $itemid,
+    'filepath'  => $filepath,
+    'filename'  => $filename,
+    'userid'    => ${fileUseridExpr(userid)},${fileMetaEntries({ author, license, source })}
+];
+$fs->create_file_from_pathname($filerecord, $tmppath);
+@unlink($tmppath);
+${setConfigBlock}${purgeBlock}echo json_encode(['ok' => true, 'name' => '${escapePhp(name)}', 'plugin' => $component, 'filearea' => $filearea, 'filename' => $filename]);
+`;
+}
+
+// Store several files in the same File API area (system context) under one
+// component/filearea, deleting the area once first (by default) and pointing the
+// config value at the FIRST stored file's path. Backs multi-file settings such
+// as a theme's marketing/header image galleries. `files` entries carry a
+// pre-resolved temp path plus optional per-file metadata; the area-level
+// filearea/itemid are shared by every file (that is the point of the area).
+export function phpSetConfigFiles(opts) {
+  const {
+    plugin,
+    name,
+    filearea,
+    itemid = 0,
+    replace = true,
+    setConfigValue = true,
+    purgeCaches = false,
+    userid = null,
+    files = [],
+  } = opts;
+
+  const entries = files
+    .map((f) => {
+      const parts = [
+        `'filename'=>'${escapePhp(f.filename)}'`,
+        `'filepath'=>'${escapePhp(f.filepath || "/")}'`,
+        `'tmppath'=>'${escapePhp(f.tmppath)}'`,
+        `'userid'=>${fileUseridExpr(f.userid)}`,
+      ];
+      if (f.author != null) parts.push(`'author'=>'${escapePhp(f.author)}'`);
+      if (f.license != null) parts.push(`'license'=>'${escapePhp(f.license)}'`);
+      if (f.source != null) parts.push(`'source'=>'${escapePhp(f.source)}'`);
+      return `    [${parts.join(",")}]`;
+    })
+    .join(",\n");
+
+  const deleteBlock = replace
+    ? "$fs->delete_area_files($context->id, $component, $filearea, $itemid);\n"
+    : "";
+  const setConfigBlock = setConfigValue
+    ? `if ($firstpath !== null) {
+    set_config('${escapePhp(name)}', $firstpath, $component);
+}\n`
+    : "";
+  const purgeBlock = purgeCaches ? `${PURGE_CACHES_BLOCK}\n` : "";
+
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+$context = context_system::instance();
+$fs = get_file_storage();
+$admin = get_admin();
+$component = '${escapePhp(plugin)}';
+$filearea = '${escapePhp(filearea)}';
+$itemid = ${parseInt(itemid, 10) || 0};
+${deleteBlock}$stored = 0;
+$firstpath = null;
+foreach ([
+${entries}
+] as $f) {
+    if (!file_exists($f['tmppath'])) continue;
+    $filerecord = [
+        'contextid' => $context->id,
+        'component' => $component,
+        'filearea'  => $filearea,
+        'itemid'    => $itemid,
+        'filepath'  => $f['filepath'],
+        'filename'  => $f['filename'],
+        'userid'    => $f['userid'],
+    ];
+    foreach (['author', 'license', 'source'] as $meta) {
+        if (isset($f[$meta])) $filerecord[$meta] = $f[$meta];
+    }
+    $fs->create_file_from_pathname($filerecord, $f['tmppath']);
+    @unlink($f['tmppath']);
+    if ($firstpath === null) {
+        $firstpath = $f['filepath'] . $f['filename'];
+    }
+    $stored++;
+}
+if ($stored === 0) {
+    echo json_encode(['ok' => false, 'error' => 'setConfigFiles: no valid files stored']);
+    exit(0);
+}
+${setConfigBlock}${purgeBlock}echo json_encode(['ok' => true, 'name' => '${escapePhp(name)}', 'plugin' => $component, 'filearea' => $filearea, 'count' => $stored]);
 `;
 }
 
@@ -771,12 +957,6 @@ echo json_encode(['ok' => true, 'changed' => true, 'user' => $admin->username]);
 // response + exit(0) so a failing provisioning step does not kill the WASM
 // process before the executor can read the result (see ADR-0005, mirrors
 // ADD_MODULE_SETUP). Used by the role/scale/cohort generators below.
-const GRACEFUL_HANDLER = `set_exception_handler(function($e) {
-    while (ob_get_level()) ob_end_clean();
-    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
-    exit(0);
-});`;
-
 // Map blueprint context-level names to Moodle CONTEXT_* numeric constants.
 // Values are resolved in JS so only integers are interpolated into PHP.
 const CONTEXT_LEVELS = {

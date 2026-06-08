@@ -383,6 +383,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0006](docs/decisions/0006-moodle-langpack-proxy-allowance.md) | Language pack install via the CORS proxy + Moodle's lang_installer | Accepted |
 | [0007](docs/decisions/0007-course-restore-step.md) | Course backup (.mbz) restore step (PHP streaming download + restore_controller) | Accepted |
 | [0008](docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
+| [0009](docs/decisions/0009-file-backed-config-settings-blueprint-steps.md) | File-backed Moodle config settings in blueprints (`setConfigFile` / `setConfigFiles`) | Accepted |
 
 ## Debugging
 

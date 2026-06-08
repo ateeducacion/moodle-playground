@@ -11,6 +11,8 @@ import {
   phpLogin,
   phpSetAdminAccount,
   phpSetConfig,
+  phpSetConfigFile,
+  phpSetConfigFiles,
   phpSetConfigs,
   phpSetTheme,
 } from "../../src/blueprint/php/helpers.js";
@@ -404,5 +406,191 @@ describe("PHP helpers: addModule", () => {
     assert.ok(!script.includes("v3"));
     assert.ok(!script.includes("v4"));
     assert.ok(script.includes("$moduleInfo->good_key = 'v5';"));
+  });
+});
+
+describe("PHP helpers: setConfigFile", () => {
+  function baseOpts(overrides = {}) {
+    return {
+      plugin: "theme_adaptable",
+      name: "logo",
+      filename: "logo.png",
+      filearea: "logo",
+      tmppath: "/tmp/blueprint-configfile-1.bin",
+      ...overrides,
+    };
+  }
+
+  it("is a CLI script that requires config.php once", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(script.includes("define('CLI_SCRIPT', true)"));
+    const requireCount = (script.match(/require\(/g) || []).length;
+    assert.strictEqual(requireCount, 1);
+  });
+
+  it("stores the file in the system context via the File API", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(script.includes("context_system::instance()"));
+    assert.ok(script.includes("get_file_storage()"));
+    assert.ok(script.includes("create_file_from_pathname"));
+    // component is the plugin name
+    assert.ok(script.includes("$component = 'theme_adaptable';"));
+  });
+
+  it("applies defaults: itemid 0, filepath /, replace deletes the area", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(script.includes("$itemid = 0;"));
+    assert.ok(script.includes("$filepath = '/';"));
+    assert.ok(script.includes("$filearea = 'logo';"));
+    assert.ok(
+      script.includes(
+        "$fs->delete_area_files($context->id, $component, $filearea, $itemid)",
+      ),
+    );
+  });
+
+  it("sets the config value to filepath . filename by default", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(
+      script.includes("set_config('logo', $filepath . $filename, $component)"),
+    );
+  });
+
+  it("falls back to the admin user id, then user id 2", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(script.includes("$admin = get_admin();"));
+    assert.ok(script.includes("($admin ? $admin->id : 2)"));
+  });
+
+  it("uses an explicit userid when provided", () => {
+    const script = phpSetConfigFile(baseOpts({ userid: 5 }));
+    assert.ok(script.includes("'userid'    => 5,"));
+    assert.ok(!script.includes("($admin ? $admin->id : 2)"));
+  });
+
+  it("honors explicit filearea, itemid and filepath overrides", () => {
+    const script = phpSetConfigFile(
+      baseOpts({ filearea: "banner", itemid: 3, filepath: "/sub/" }),
+    );
+    assert.ok(script.includes("$filearea = 'banner';"));
+    assert.ok(script.includes("$itemid = 3;"));
+    assert.ok(script.includes("$filepath = '/sub/';"));
+  });
+
+  it("skips the area delete when replace is false", () => {
+    const script = phpSetConfigFile(baseOpts({ replace: false }));
+    assert.ok(!script.includes("delete_area_files"));
+  });
+
+  it("skips set_config when setConfigValue is false", () => {
+    const script = phpSetConfigFile(baseOpts({ setConfigValue: false }));
+    assert.ok(!script.includes("set_config("));
+  });
+
+  it("does not purge caches by default", () => {
+    const script = phpSetConfigFile(baseOpts());
+    assert.ok(!script.includes("purge_all_caches"));
+    assert.ok(!script.includes("theme_reset_all_caches"));
+  });
+
+  it("purges caches when purgeCaches is true", () => {
+    const script = phpSetConfigFile(baseOpts({ purgeCaches: true }));
+    assert.ok(script.includes("theme_reset_all_caches()"));
+    assert.ok(script.includes("purge_all_caches()"));
+  });
+
+  it("emits optional author/license/source only when provided", () => {
+    const without = phpSetConfigFile(baseOpts());
+    assert.ok(!without.includes("'author'"));
+    const withMeta = phpSetConfigFile(
+      baseOpts({ author: "ACME", license: "cc", source: "logo.png" }),
+    );
+    assert.ok(withMeta.includes("'author'    => 'ACME',"));
+    assert.ok(withMeta.includes("'license'   => 'cc',"));
+    assert.ok(withMeta.includes("'source'    => 'logo.png',"));
+  });
+
+  it("escapes quotes and backslashes (no injection)", () => {
+    const script = phpSetConfigFile(
+      baseOpts({ name: "lo'go", filename: "a\\b'c.png" }),
+    );
+    assert.ok(script.includes("lo\\'go"));
+    assert.ok(script.includes("a\\\\b\\'c.png"));
+    // The raw, unescaped sequence must not appear.
+    assert.ok(!script.includes("$filename = 'a\\b'c.png';"));
+  });
+});
+
+describe("PHP helpers: setConfigFiles", () => {
+  function baseOpts(overrides = {}) {
+    return {
+      plugin: "theme_adaptable",
+      name: "adaptablemarkettingimages",
+      filearea: "adaptablemarkettingimages",
+      files: [
+        { filename: "m1.jpg", filepath: "/", tmppath: "/tmp/a.bin" },
+        { filename: "m2.jpg", filepath: "/", tmppath: "/tmp/b.bin" },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("requires config.php once and stores via the File API", () => {
+    const script = phpSetConfigFiles(baseOpts());
+    const requireCount = (script.match(/require\(/g) || []).length;
+    assert.strictEqual(requireCount, 1);
+    assert.ok(script.includes("context_system::instance()"));
+    assert.ok(script.includes("create_file_from_pathname"));
+  });
+
+  it("includes every file and deletes the area exactly once", () => {
+    const script = phpSetConfigFiles(baseOpts());
+    assert.ok(script.includes("'filename'=>'m1.jpg'"));
+    assert.ok(script.includes("'filename'=>'m2.jpg'"));
+    const deleteCount = (script.match(/delete_area_files/g) || []).length;
+    assert.strictEqual(deleteCount, 1);
+  });
+
+  it("points the config value at the first stored file", () => {
+    const script = phpSetConfigFiles(baseOpts());
+    assert.ok(
+      script.includes(
+        "set_config('adaptablemarkettingimages', $firstpath, $component)",
+      ),
+    );
+    assert.ok(script.includes("$firstpath = $f['filepath'] . $f['filename'];"));
+  });
+
+  it("reports the stored file count", () => {
+    const script = phpSetConfigFiles(baseOpts());
+    assert.ok(script.includes("'count' => $stored"));
+  });
+
+  it("fails cleanly when no files were stored", () => {
+    const script = phpSetConfigFiles(baseOpts());
+    assert.ok(script.includes("no valid files stored"));
+  });
+
+  it("skips set_config when setConfigValue is false", () => {
+    const script = phpSetConfigFiles(baseOpts({ setConfigValue: false }));
+    assert.ok(!script.includes("set_config("));
+  });
+
+  it("purges caches only when requested", () => {
+    assert.ok(!phpSetConfigFiles(baseOpts()).includes("purge_all_caches"));
+    assert.ok(
+      phpSetConfigFiles(baseOpts({ purgeCaches: true })).includes(
+        "purge_all_caches()",
+      ),
+    );
+  });
+
+  it("escapes per-file values (no injection)", () => {
+    const script = phpSetConfigFiles(
+      baseOpts({
+        files: [{ filename: "x'y.jpg", filepath: "/", tmppath: "/tmp/a.bin" }],
+      }),
+    );
+    assert.ok(script.includes("x\\'y.jpg"));
   });
 });
