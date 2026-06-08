@@ -281,6 +281,18 @@ Named resources can be defined once and referenced from steps using `@name`:
 | `installMoodlePlugin` | Download a plugin ZIP, extract to the correct directory, and run Moodle upgrade |
 | `installTheme` | Download a theme ZIP, extract, and run Moodle upgrade |
 
+### Languages
+
+| Step | Description |
+|------|-------------|
+| `installLanguagePack` | Install one or more language packs via Moodle's `lang_installer` (downloads from `download.moodle.org/langpack`) |
+
+> **Tip:** you usually don't need this step. Setting the site language
+> (`installMoodle` `options.locale`, or `siteOptions.locale`) auto-installs that pack on
+> boot. Use `installLanguagePack` to add **extra** languages or install without changing the
+> default. Both paths work in every browser (Chromium, Firefox, Safari). See
+> [ADR-0006](decisions/0006-moodle-langpack-proxy-allowance.md).
+
 ### Filesystem
 
 | Step | Description |
@@ -544,6 +556,44 @@ repository.
 > you see a blank page or the theme falls back to Boost, your Moove ref does
 > not match the Moodle version used by this playground. Check the Moodle
 > branch shown in the shell footer and swap the ref accordingly.
+
+### installLanguagePack
+
+Install one or more language packs. Uses Moodle's own `lang_installer`, which downloads the
+correct pack for the running Moodle version from `download.moodle.org/langpack` (proxied — works
+in every browser).
+
+```json
+{
+  "step": "installLanguagePack",
+  "language": "es",
+  "setDefault": true
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `language` | yes | A language code (`"es"`), a comma-separated string (`"es,fr,ca"`), or an array (`["es", "fr"]`). Codes must match `/^[a-z][a-z0-9_]*$/` (e.g. `es`, `pt_br`). Aliases: `languages`, `lang`. |
+| `setDefault` | no | When `true`, sets the installed language as the site default (`$CFG->lang`). Defaults to `false` (install only). |
+
+The pack version is resolved automatically from the running Moodle branch — do not hardcode a
+version. Parent languages are pulled automatically (e.g. `pt_br` also installs `pt`). A download
+failure is non-fatal: the blueprint continues and Moodle falls back to English strings.
+
+**Auto-install:** if you only need the site to be in one language, you usually don't need this
+step at all — set the site language (`installMoodle` `options.locale`, or `siteOptions.locale`)
+and the matching pack is installed automatically on boot:
+
+```json
+{
+  "steps": [
+    { "step": "installMoodle", "options": { "locale": "es" } }
+  ]
+}
+```
+
+Use `installLanguagePack` when you want **additional** languages available in the language menu,
+or to install a pack without making it the default.
 
 ## Naming Conventions
 

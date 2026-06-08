@@ -214,6 +214,51 @@ echo json_encode(['ok' => true, 'count' => ${configs.length}]);
 `;
 }
 
+// Install one or more language packs using Moodle's own lang_installer
+// (lib/componentlib.class.php) — the same engine the admin Language packs UI
+// uses. It downloads the langpack index + per-language ZIPs from
+// $CFG->langotherroot (download.moodle.org/langpack), which the github-proxy
+// authorizes, and extracts them into $CFG->dataroot/lang. Works in every
+// browser because these are GET requests over tcpOverFetch (no half-duplex
+// streaming body). See docs/decisions/0006-*.
+//
+// `codes` must be pre-validated against /^[a-z][a-z0-9_]*$/ by the caller; the
+// values are interpolated into a PHP array literal here.
+export function phpInstallLanguagePacks(codes, setDefault = false) {
+  const list = codes.map((c) => `'${escapePhp(c)}'`).join(", ");
+  const setDefaultBlock = setDefault
+    ? `if (!empty($installed)) {
+    set_config('lang', '${escapePhp(codes[0])}');
+}`
+    : "";
+  return `${CLI_HEADER}
+require_once($CFG->libdir . '/componentlib.class.php');
+$requested = [${list}];
+// lang_installer::set_queue() expects an array of codes; it also auto-queues
+// parent languages (e.g. pt_br pulls pt). Network/parse failures are caught so
+// a single bad pack does not abort the blueprint — the filesystem check below
+// reports what actually landed.
+$installed = [];
+$failed = [];
+try {
+    $installer = new lang_installer($requested);
+    $installer->run();
+} catch (\\Throwable $e) {
+    // fall through to the filesystem check
+}
+foreach ($requested as $lang) {
+    if (is_file($CFG->dataroot . '/lang/' . $lang . '/langconfig.php')) {
+        $installed[] = $lang;
+    } else {
+        $failed[] = $lang;
+    }
+}
+${setDefaultBlock}
+get_string_manager()->reset_caches();
+echo json_encode(['ok' => empty($failed), 'installed' => $installed, 'failed' => $failed]);
+`;
+}
+
 export function phpCreateUser(user) {
   return phpCreateUsers([user]);
 }

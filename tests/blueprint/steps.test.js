@@ -39,6 +39,7 @@ describe("step registry", () => {
       "addModule",
       "installMoodlePlugin",
       "installTheme",
+      "installLanguagePack",
       "mkdir",
       "rmdir",
       "writeFile",

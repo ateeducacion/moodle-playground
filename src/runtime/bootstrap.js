@@ -2200,6 +2200,50 @@ async function runAdhocTasksDrainer(php, webRoot) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
+// Auto-install the site language pack when the configured site language
+// ($CFG->lang) is not English. Uses Moodle's own lang_installer to fetch the
+// pack from download.moodle.org/langpack via the github-proxy (works in every
+// browser — GET over tcpOverFetch). Idempotent: skips when the pack already
+// exists on disk (it persists in dataroot across reloads). Non-fatal: a network
+// failure falls back to English strings rather than aborting the boot.
+// See docs/decisions/0006-moodle-langpack-proxy-allowance.md.
+async function runLanguageAutoInstall(php) {
+  const code = `<?php
+define('CLI_SCRIPT', true);
+require('/www/moodle/config.php');
+require_once($CFG->libdir . '/componentlib.class.php');
+$lang = isset($CFG->lang) ? (string) $CFG->lang : 'en';
+$result = ['ok' => true, 'lang' => $lang, 'action' => 'skipped'];
+// Re-validate the code (it is interpolated into a path below) and skip English.
+if ($lang !== 'en' && preg_match('/^[a-z][a-z0-9_]*$/', $lang)) {
+    if (is_file($CFG->dataroot . '/lang/' . $lang . '/langconfig.php')) {
+        $result['action'] = 'already-installed';
+    } else {
+        try {
+            $installer = new lang_installer($lang);
+            $installer->run();
+            if (is_file($CFG->dataroot . '/lang/' . $lang . '/langconfig.php')) {
+                get_string_manager()->reset_caches();
+                $result['action'] = 'installed';
+            } else {
+                $result['ok'] = false;
+                $result['action'] = 'download-failed';
+            }
+        } catch (\\Throwable $e) {
+            $result['ok'] = false;
+            $result['action'] = 'error';
+            $result['error'] = $e->getMessage();
+        }
+    }
+}
+echo json_encode($result);
+`;
+  const output = await php.run(code);
+  const text = output?.text || "";
+  const jsonStart = text.indexOf("{");
+  return jsonStart >= 0 ? JSON.parse(text.slice(jsonStart)) : {};
+}
+
 async function requestRuntimeScript(
   php,
   path,
@@ -2755,6 +2799,39 @@ export async function bootstrapMoodle({
     publish(
       `Theme CSS warmup crashed (${themeCssError.message}). Pages may be unstyled. [${themeCssMs}ms]`,
       0.925,
+    );
+  }
+
+  // Auto-install the configured site language pack (e.g. locale "es") before
+  // blueprint steps run, so any provisioned content renders localized strings.
+  const tLang = performance.now();
+  try {
+    const langResult = await runLanguageAutoInstall(php);
+    const langMs = Math.round(performance.now() - tLang);
+    if (langResult?.action === "installed") {
+      publish(
+        `Installed site language pack '${langResult.lang}'. [${langMs}ms]`,
+        0.927,
+      );
+    } else if (
+      langResult?.action === "download-failed" ||
+      langResult?.action === "error"
+    ) {
+      publish(
+        `Site language pack '${langResult.lang}' could not be installed (${langResult.error || "download failed"}). Falling back to English strings. [${langMs}ms]`,
+        0.927,
+      );
+    } else if (langResult?.action === "already-installed") {
+      publish(
+        `Site language pack '${langResult.lang}' already present. [${langMs}ms]`,
+        0.927,
+      );
+    }
+  } catch (langError) {
+    const langMs = Math.round(performance.now() - tLang);
+    publish(
+      `Language auto-install crashed (${langError.message}). Falling back to English strings. [${langMs}ms]`,
+      0.927,
     );
   }
 
