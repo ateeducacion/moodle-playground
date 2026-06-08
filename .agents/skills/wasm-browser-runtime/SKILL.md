@@ -257,7 +257,7 @@ Bootstrap reports progress through phases:
 - SW is bundled into `sw.bundle.js` (IIFE) at project root, registered as `type: "classic"`
 - **The SW bundle MUST live at the project root, not in `dist/`** — a SW's max scope is
   its directory path; Firefox throws `SecurityError` if violated
-- Source: `sw.js` → Bundle: `sw.bundle.js` → Built by: `npm run build:worker`
+- Source: `sw.js` → Bundle: `sw.bundle.js` → Built by: `npm run build-worker`
 
 ### Firefox WASM network limitations
 - Firefox and Safari cannot make outbound HTTP calls from Emscripten WASM (errno 23 / EHOSTUNREACH)

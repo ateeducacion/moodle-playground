@@ -100,7 +100,7 @@ reliably and Moodle will still fail during install or upgrade.
 These are the main things the current branch still depends on.
 
 - **Rebuild the worker after runtime changes**
-  Run `npm run build:worker` after editing `src/runtime/*` or `php-worker.js`.
+  Run `npm run build-worker` after editing `src/runtime/*` or `php-worker.js`.
 
 - **Hard reload after rebuilding**
   The browser can keep an old worker alive. After a new build, do a hard reload
@@ -144,7 +144,7 @@ These items are improved in this branch but not fully “desktop Moodle” parit
 
 When testing plugin support in this branch:
 
-1. Run `npm run build:worker`.
+1. Run `npm run build-worker`.
 2. Hard reload the playground.
 3. Confirm normal boot does not immediately bounce into `admin/index.php` or
    `admin/upgradesettings.php`.

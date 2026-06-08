@@ -133,7 +133,7 @@ throws `SecurityError: "The operation is insecure"` if violated.
 
 - Source: `sw.js` (ES module with imports — for development/readability)
 - Bundle: `sw.bundle.js` (IIFE, no imports — served to browsers)
-- Built by: `npm run build:worker` (esbuild.worker.mjs)
+- Built by: `npm run build-worker` (esbuild.worker.mjs)
 - Registered as: `type: "classic"` in `src/shared/service-worker-version.js`
 
 ## Firefox WASM Network Limitations

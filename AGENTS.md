@@ -85,7 +85,7 @@ This project uses npm, esbuild, and a small Makefile workflow.
 
 ```bash
 npm install
-npm run build:worker
+npm run build-worker
 npm run bundle
 
 make prepare
@@ -178,7 +178,7 @@ WP Playground & php-wasm skill. Key constraints unique to this repo:
 - `addonProxyUrl` is for browser-side ZIP downloads. `phpCorsProxyUrl` is for runtime PHP
   networking fallback. Do not conflate the two.
 - After any change in `src/runtime/php-loader.js`, `php-worker.js`, or other worker imports,
-  run `npm run build:worker`.
+  run `npm run build-worker`.
 
 ### Responsibilities
 

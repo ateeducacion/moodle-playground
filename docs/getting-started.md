@@ -47,7 +47,7 @@ npm install
     Useful after editing `php-worker.js` / `src/runtime/php-*.js`:
 
     ```bash
-    npm run build:worker
+    npm run build-worker
     ```
 
 ## Running locally
