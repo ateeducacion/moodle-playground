@@ -27,7 +27,7 @@ Blueprints can be loaded from:
 
 | Source | Example |
 |--------|---------|
-| `?blueprint=` query param | Inline JSON, base64-encoded JSON, or `data:` URL |
+| `?blueprint=` query param | Inline JSON, base64-encoded JSON, gzip+base64url, or `data:` URL |
 | `?blueprint-url=` query param | URL to a remote `.blueprint.json` file |
 | sessionStorage | Persisted from a previous load in the same tab |
 | Default blueprint URL | Configured in `playground.config.json` |
@@ -40,6 +40,25 @@ Encode your blueprint as base64 and pass it as the `?blueprint=` parameter:
 ```
 https://example.com/moodle-playground/?blueprint=eyIkc2NoZW1hIjoi...
 ```
+
+### Compressed inline blueprint (gzip)
+
+`?blueprint=` also accepts a **gzip-compressed** blueprint encoded as base64url —
+the value starts with `H4sI` (the gzip magic bytes in base64). This keeps the link
+self-contained and shareable but much shorter: a typical blueprint shrinks ~70-90%
+versus plain base64, which matters because long URLs can break on some hosts/proxies.
+
+You don't build this by hand — the **Import** button in the Blueprint side panel
+produces it automatically: it gzip-compresses the imported `.blueprint.json` into the
+`?blueprint=` URL and reloads. Plain base64-JSON links keep working (the format is
+auto-detected), and browsers without `CompressionStream` fall back to plain base64.
+
+```
+https://example.com/moodle-playground/?blueprint=H4sIAAAAAAAAE...
+```
+
+For very large blueprints (or ones you want to version-control), prefer
+`?blueprint-url=` pointing at a hosted `.blueprint.json` instead of inlining it.
 
 ### Data URL
 

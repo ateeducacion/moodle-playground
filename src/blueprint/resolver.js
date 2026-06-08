@@ -1,4 +1,4 @@
-import { parseBlueprint } from "./parser.js";
+import { parseBlueprintParam } from "./parser.js";
 import { validateBlueprint } from "./schema.js";
 import { saveBlueprint } from "./storage.js";
 
@@ -47,11 +47,11 @@ export async function resolveBlueprint({
   if (loc) {
     const url = new URL(loc.href);
 
-    // 1. ?blueprint= (inline)
+    // 1. ?blueprint= (inline — plain/base64 JSON or gzip+base64url, auto-detected)
     const blueprintParam = url.searchParams.get("blueprint");
     if (blueprintParam) {
       try {
-        const blueprint = parseBlueprint(blueprintParam);
+        const blueprint = await parseBlueprintParam(blueprintParam);
         console.log("[blueprint] Resolved from ?blueprint= param (inline).");
         return finalize(blueprint);
       } catch (error) {
