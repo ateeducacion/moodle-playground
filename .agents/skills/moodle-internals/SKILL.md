@@ -81,6 +81,26 @@ and `$plugin->requires`. The component name must match the directory path.
 - Some settings have dynamic defaults computed from `$CFG->wwwroot` — these must be
   seeded explicitly in the install snapshot to prevent `any_new_admin_settings()` loops
 
+### Language packs
+
+- Core bundles only **English** (`dirroot/lang/en`). Every other language is a separate pack
+  installed into `$CFG->dataroot/lang/<code>` (`langlocalroot`/`langotherroot`). The presence of
+  `dataroot/lang/<code>/langconfig.php` is the reliable "installed?" check.
+- Setting `$CFG->lang = 'es'` (or `set_config('lang', ...)`) only changes the *preference*; missing
+  strings fall back to English. It does **not** download the pack.
+- Install programmatically with Moodle's `lang_installer` (`lib/componentlib.class.php`) — the same
+  engine behind `admin/tool/langimport`:
+  `require_once($CFG->libdir.'/componentlib.class.php'); (new lang_installer($codes))->run();`.
+  It accepts an array (or single code), resolves parent languages (e.g. `pt_br` pulls `pt`), picks
+  the pack matching the running Moodle version, and extracts into `dataroot/lang`.
+- Downloads come from `$CFG->langotherroot` (`download.moodle.org/langpack`), proxied via the
+  github-proxy (allowlisted `/langpack/` paths, incl. the `languages.md5` index). They work in
+  every browser because they are GET requests (no `duplex:'half'` streaming body — the limit that
+  breaks Firefox/Safari WASM outbound). Call `get_string_manager()->reset_caches()` afterward.
+- In this repo: `installLanguagePack` step (`src/blueprint/steps/moodle-language.js`) and
+  `runLanguageAutoInstall()` in `bootstrap.js` (auto-installs a non-English site language on boot).
+  See `docs/decisions/0006-moodle-langpack-proxy-allowance.md`.
+
 ### Caching (MUC)
 
 - Moodle Universal Cache has stores, definitions, and mappings

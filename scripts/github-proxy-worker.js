@@ -754,7 +754,8 @@ function isSupportedGenericProxyUrl(url) {
     isDropboxShareUrl(url) ||
     isOmekaOrgResourceUrl(url) ||
     isGitLabResourceUrl(url) ||
-    isJsDelivrResourceUrl(url)
+    isJsDelivrResourceUrl(url) ||
+    isMoodleLangpackUrl(url)
   ) {
     return true;
   }
@@ -792,8 +793,30 @@ function isAllowlistedProxyHost(url) {
     hostname === "facturascripts.com" ||
     hostname === "gitlab.com" ||
     hostname === "cdn.jsdelivr.net" ||
-    hostname === "data.jsdelivr.com"
+    hostname === "data.jsdelivr.com" ||
+    // Moodle language packs. `packaging.moodle.org` serves the actual ZIPs;
+    // `download.moodle.org/download.php/direct/langpack/...` 302-redirects to it
+    // (the redirect hop is re-validated, so both hosts must be allowlisted).
+    hostname === "packaging.moodle.org" ||
+    hostname === "download.moodle.org"
   );
+}
+
+// Moodle's `tool_langimport` first fetches the langpack index (`languages.md5`)
+// and then the per-language `<code>.zip`. The index file is not zip-like, so the
+// zip-only `isAllowlistedProxyHost` check would reject it. Authorize any
+// `/langpack/` path on the two Moodle hosts regardless of extension. The SSRF
+// guard in `isSupportedGenericProxyUrl` still runs first, and both hosts are
+// listed because `download.moodle.org` 302-redirects to `packaging.moodle.org`.
+function isMoodleLangpackUrl(url) {
+  const hostname = url.hostname.toLowerCase();
+  if (
+    hostname !== "download.moodle.org" &&
+    hostname !== "packaging.moodle.org"
+  ) {
+    return false;
+  }
+  return url.pathname.toLowerCase().includes("/langpack/");
 }
 
 // Reject hosts that resolve to private, loopback, or link-local addresses to

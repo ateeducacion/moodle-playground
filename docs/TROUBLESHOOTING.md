@@ -248,6 +248,39 @@ Files:
 - `src/runtime/config-template.js`
 - `tests/e2e/php-networking.spec.mjs`
 
+### Site is still in English after setting the language (or langimport fails with CORS)
+
+Likely cause:
+
+- Moodle bundles only English; other languages are separate packs that must be downloaded into
+  `dataroot/lang/<code>`. Setting `lang`/`locale` alone only changes the preference.
+- If `admin/tool/langimport` fails with a CORS error on
+  `download.moodle.org/langpack/<v>/languages.md5`, the github-proxy is not authorizing the
+  langpack index.
+
+What works now:
+
+- The github-proxy allowlists `/langpack/` paths (incl. `languages.md5`) on `download.moodle.org`
+  and `packaging.moodle.org`, so the native **Site administration → Language → Language packs**
+  UI installs directly. Downloads route through `phpCorsProxyUrl` via `tcpOverFetch`.
+- Works in **Chromium, Firefox, and Safari** — language packs are GET requests, which avoid the
+  `duplex: 'half'` streaming-request-body limit that breaks Firefox/Safari WASM outbound (POST
+  uploads). That limit is why some other outbound PHP calls still fail on those browsers.
+- Blueprints: use the `installLanguagePack` step, or just set the site language
+  (`installMoodle` `options.locale`) — the pack auto-installs on boot
+  (`runLanguageAutoInstall()` in `bootstrap.js`).
+
+If it still fails: confirm the proxy is deployed with the langpack allowance
+(`isMoodleLangpackUrl` in `scripts/github-proxy-worker.js`) and reachable, and that
+`phpCorsProxyUrl` is set in `playground.config.json`.
+
+Files:
+
+- `scripts/github-proxy-worker.js`
+- `src/blueprint/steps/moodle-language.js`
+- `src/runtime/bootstrap.js` (`runLanguageAutoInstall`)
+- `docs/decisions/0006-moodle-langpack-proxy-allowance.md`
+
 ### `PHP worker bridge timed out`
 
 Likely cause:

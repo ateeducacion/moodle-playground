@@ -147,6 +147,18 @@ Supported module types via `addModule`:
 | `installMoodlePlugin` | Download and install a Moodle plugin from ZIP URL |
 | `installTheme` | Download and install a theme (alias with theme-specific defaults) |
 
+#### Languages
+| Step | Description |
+|------|-------------|
+| `installLanguagePack` | Install language pack(s) via Moodle's `lang_installer` (`language`: code/CSV/array; `setDefault`) |
+
+`installLanguagePack` (`steps/moodle-language.js`) wraps `lang_installer`
+(`lib/componentlib.class.php`), which downloads from `download.moodle.org/langpack` through the
+github-proxy (allowlisted `/langpack/` paths, incl. `languages.md5`). The site language set in
+config (`installMoodle` `options.locale` / `siteOptions.locale`) is **auto-installed** on boot by
+`runLanguageAutoInstall()` in `bootstrap.js`. Both work in every browser (GET requests avoid the
+`duplex:'half'` WASM-network limit). See `docs/decisions/0006-moodle-langpack-proxy-allowance.md`.
+
 #### Filesystem and code execution
 | Step | Description |
 |------|-------------|

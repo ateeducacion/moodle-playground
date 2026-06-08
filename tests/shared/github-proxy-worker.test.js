@@ -421,6 +421,102 @@ describe("github-proxy-worker generic ?url= mode", () => {
       [0x50, 0x4b, 0x03, 0x04],
     );
   });
+
+  it("proxies Moodle language packs from packaging.moodle.org", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url: String(url), init };
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://packaging.moodle.org/langpack/5.0/es.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://packaging.moodle.org/langpack/5.0/es.zip",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("proxies the Moodle langpack index (languages.md5, non-zip path)", async () => {
+    let upstreamRequest;
+    global.fetch = async (url, init = {}) => {
+      upstreamRequest = { url: String(url), init };
+      return new Response("abc123  es.zip\n", {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://download.moodle.org/langpack/5.0/languages.md5",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamRequest.url,
+      "https://download.moodle.org/langpack/5.0/languages.md5",
+    );
+    assert.equal(response.headers.get("X-Playground-Cors-Proxy"), "true");
+  });
+
+  it("follows the download.moodle.org langpack redirect to packaging.moodle.org", async () => {
+    const calls = [];
+    global.fetch = async (url) => {
+      calls.push(String(url));
+      // download.moodle.org/download.php/direct/langpack/... 302-redirects to
+      // packaging.moodle.org — both hosts are allowlisted, so the hop is followed.
+      // Match on the exact hostname (not a substring) so this stays a precise
+      // host check and not an "anywhere in the URL" comparison.
+      if (new URL(String(url)).hostname === "download.moodle.org") {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: "https://packaging.moodle.org/langpack/5.0/es.zip",
+          },
+        });
+      }
+      return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://download.moodle.org/download.php/direct/langpack/5.0/es.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(
+      calls[0],
+      "https://download.moodle.org/download.php/direct/langpack/5.0/es.zip",
+    );
+    assert.equal(calls[1], "https://packaging.moodle.org/langpack/5.0/es.zip");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
 });
 
 describe("github-proxy-worker redirect validation (SSRF)", () => {
