@@ -1,4 +1,4 @@
-# ADR-0007 Blueprint provisioning for roles, scales and cohorts
+# ADR-0008 Blueprint provisioning for roles, scales and cohorts
 
 * Status: Accepted
 * Date: 2026-06-08

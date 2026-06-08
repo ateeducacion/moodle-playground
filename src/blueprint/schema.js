@@ -28,6 +28,7 @@ const KNOWN_STEP_NAMES = new Set([
   "installMoodlePlugin",
   "installTheme",
   "installLanguagePack",
+  "restoreCourse",
   "mkdir",
   "rmdir",
   "writeFile",

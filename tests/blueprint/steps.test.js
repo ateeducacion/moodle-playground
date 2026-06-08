@@ -48,6 +48,7 @@ describe("step registry", () => {
       "installMoodlePlugin",
       "installTheme",
       "installLanguagePack",
+      "restoreCourse",
       "mkdir",
       "rmdir",
       "writeFile",

@@ -381,7 +381,8 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0004](docs/decisions/0004-opcache-tuning-and-runtime-ux-defaults.md) | OPcache tuning and runtime UX defaults | Accepted |
 | [0005](docs/decisions/0005-resilient-blueprint-step-execution.md) | Resilient blueprint step execution with graceful errors | Accepted |
 | [0006](docs/decisions/0006-moodle-langpack-proxy-allowance.md) | Language pack install via the CORS proxy + Moodle's lang_installer | Accepted |
-| [0007](docs/decisions/0007-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
+| [0007](docs/decisions/0007-course-restore-step.md) | Course backup (.mbz) restore step (PHP streaming download + restore_controller) | Accepted |
+| [0008](docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
 
 ## Debugging
 

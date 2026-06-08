@@ -116,6 +116,15 @@ Blueprint JSON
 | `createCourses` | Create multiple courses |
 | `createSection` | Add a section to a course |
 | `createSections` | Add multiple sections |
+| `restoreCourse` | Restore a `.mbz` course backup via `restore_controller` |
+
+`restoreCourse` (`steps/moodle-restore.js` → `phpRestoreCourse` in `php/helpers.js`) takes one
+source — `url` (downloaded inside PHP via `download_file_content($tofile)`, streamed to MEMFS, best
+for large files), `path` (an `.mbz` already in MEMFS), or `data` (embedded, small only) — plus
+`category` (name, auto-created), `fullname`/`shortname`/`visible`. It raises memory, guards Moodle's
+`exit(1)` handler (ADR-0005), and restores into a new course (`TARGET_NEW_COURSE`). Large/complex
+backups can fail (memory / SQLite-WASM limits) but fail gracefully. See
+`docs/decisions/0007-course-restore-step.md`.
 
 #### Activities and modules
 | Step | Description |
@@ -154,7 +163,7 @@ Supported module types via `addModule`:
 reference, an inline resource descriptor (`{ "url": … }`), or a raw JSON/XML string — the same
 resource system used by `writeFile`/`unzip`. Generators (`phpImportRolePresets`, `phpCreateRoles`,
 `phpCreateScales`, `phpCreateCohorts`) install a graceful exception handler and are idempotent. See
-`docs/decisions/0007-blueprint-roles-scales-cohorts-provisioning.md`.
+`docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md`.
 
 #### Plugins and themes
 | Step | Description |

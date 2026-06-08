@@ -281,6 +281,31 @@ Files:
 - `src/runtime/bootstrap.js` (`runLanguageAutoInstall`)
 - `docs/decisions/0006-moodle-langpack-proxy-allowance.md`
 
+### Course restore (`restoreCourse`) fails or the course is missing
+
+Likely cause:
+
+- The `.mbz` is large/complex. Restore runs entirely in the WASM runtime, which has limited memory
+  and a SQLite driver that crashes on nested savepoints (ADR-0003). Big backups (many activities,
+  large files, completion/calendar data) can exceed memory or hit transaction limits and fail.
+- The `url` is not reachable: the host must be CORS-accessible (e.g. `raw.githubusercontent.com`) or
+  proxy-allowlisted, otherwise the in-PHP download fails.
+
+What to expect / do:
+
+- A failed restore is reported in the boot log and is **non-fatal** — the rest of the blueprint still
+  runs (ADR-0005). The course simply won't be created.
+- Prefer smaller course backups. Host large `.mbz` at a CORS URL so it **streams** into the runtime
+  (the `url` source) instead of being buffered (the `data` source).
+- The download is a GET over `tcpOverFetch`, so it works in Chromium, Firefox and Safari (unlike
+  streaming-upload POSTs). If it fails only in one browser, check the URL's CORS headers.
+
+Files:
+
+- `src/blueprint/steps/moodle-restore.js`
+- `src/blueprint/php/helpers.js` (`phpRestoreCourse`)
+- `docs/decisions/0007-course-restore-step.md`
+
 ### `PHP worker bridge timed out`
 
 Likely cause:

@@ -261,6 +261,7 @@ Named resources can be defined once and referenced from steps using `@name`:
 | `createCategory` / `createCategories` | Create course categories |
 | `createCourse` / `createCourses` | Create courses |
 | `createSection` / `createSections` | Add sections to courses |
+| `restoreCourse` | Restore a Moodle course backup (`.mbz`) into a category |
 
 ### Enrolment
 
@@ -604,6 +605,38 @@ and the matching pack is installed automatically on boot:
 Use `installLanguagePack` when you want **additional** languages available in the language menu,
 or to install a pack without making it the default.
 
+### restoreCourse
+
+Restore a Moodle course backup (`.mbz`) into a category, using Moodle's own `restore_controller`.
+
+```json
+{
+  "step": "restoreCourse",
+  "url": "https://raw.githubusercontent.com/owner/repo/main/course.mbz",
+  "category": "PRUEBAS"
+}
+```
+
+Provide exactly one **source** (precedence `url` > `path` > `data`):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | one source | URL of the `.mbz`. Downloaded **inside PHP** and streamed straight to disk (memory-efficient — best for large files). The host must be CORS-reachable (e.g. `raw.githubusercontent.com`) or proxy-allowlisted. |
+| `path` | one source | Path to an `.mbz` already in the runtime filesystem (e.g. written by a previous `writeFile` step). |
+| `data` | one source | Embedded backup (string `@resourceName` or a resource descriptor). Buffered in memory — **only for small backups**; prefer `url` for large ones. |
+| `category` | no | Target category **name**. Auto-created if missing (set `createCategory: false` to require it). Defaults to the top category (id 1) when omitted. |
+| `createCategory` | no | `false` to error instead of creating a missing category. Defaults to `true`. |
+| `fullname` | no | Override the restored course full name (otherwise the backup's name is kept). |
+| `shortname` | no | Preferred course short name. Applied only if free; Moodle keeps the backup's name on a clash (short names are unique). |
+| `visible` | no | Course visibility. Defaults to `true`. |
+
+> **⚠️ Large backups may fail.** The playground runs Moodle entirely in the browser via
+> WebAssembly, with limited memory. Restoring a large or complex `.mbz` (many activities, big
+> files, completion/calendar data) can exceed the runtime's memory or hit SQLite-in-WASM
+> transaction limits and fail. A failed restore is reported in the boot log and does **not** abort
+> the rest of the blueprint. Prefer smaller course backups, and host large `.mbz` files at a
+> CORS-accessible URL (e.g. GitHub raw) so they stream into the runtime instead of being buffered.
+
 ## Roles, scales and cohorts
 
 These steps provision access control and grading building blocks. Each one can take its data
@@ -620,7 +653,7 @@ mechanism for "load from a URL": the steps consume the same [resource descriptor
 
 All of these steps are **idempotent** and **non-fatal** (a failure is reported and the blueprint
 continues — see [ADR-0005](./decisions/0005-resilient-blueprint-step-execution.md)). They are
-documented in [ADR-0007](./decisions/0007-blueprint-roles-scales-cohorts-provisioning.md).
+documented in [ADR-0008](./decisions/0008-blueprint-roles-scales-cohorts-provisioning.md).
 
 ### importRolePreset / importRoles
 
@@ -755,7 +788,6 @@ provisioning data (custom profile fields, competency frameworks, badges, …):
    free) and calls the generator.
 3. Register it in `src/blueprint/steps/index.js`, add the names to `src/blueprint/schema.js` and
    `assets/blueprints/blueprint-schema.json`, then document and test it.
-
 ## Naming Conventions
 
 - Step names use camelCase: `createUser`, `setConfig`, `addModule`

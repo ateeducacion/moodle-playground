@@ -118,6 +118,23 @@ and `$plugin->requires`. The component name must match the directory path.
 - Section sequence (`mdl_course_sections.sequence`) is a comma-separated list of
   `course_modules.id` values — must be updated when adding modules
 
+### Backup / restore (.mbz)
+
+- Restore via `restore_controller` (`backup/util/includes/restore_includes.php`). A `.mbz` is a ZIP
+  with mimetype `application/vnd.moodle.backup`; extract with
+  `get_file_packer('application/vnd.moodle.backup')->extract_to_pathname($mbz, $path)`. A valid
+  backup has `moodle_backup.xml` at the root.
+- New-course restore flow: `restore_controller::get_tempdir_name` + `make_backup_temp_directory` →
+  validate `TYPE_1COURSE` → `restore_dbops::calculate_course_names` (ensures a unique short name) →
+  `restore_dbops::create_new_course` → `new restore_controller(..., TARGET_NEW_COURSE, INTERACTIVE_NO)`
+  → `execute_precheck()` / `execute_plan()` / `destroy()`. Set `$USER = get_admin()` first.
+- **WASM caveats:** restore is memory-heavy → `raise_memory_limit(MEMORY_EXTRA)`. It uses delegated
+  transactions; nested savepoints can crash SQLite-WASM (ADR-0003), and a thrown error hits Moodle's
+  `default_exception_handler` (`exit(1)`, kills `php.run`) — override it with a `set_exception_handler`
+  that does `exit(0)` (ADR-0005). Large/complex backups may still fail; treat failure as graceful.
+- Implemented as the `restoreCourse` step (`src/blueprint/steps/moodle-restore.js`,
+  `phpRestoreCourse` in `php/helpers.js`). See `docs/decisions/0007-course-restore-step.md`.
+
 ### User and enrollment
 
 - Users in `mdl_user`, roles in `mdl_role`, assignments in `mdl_role_assignments`

@@ -259,6 +259,143 @@ echo json_encode(['ok' => empty($failed), 'installed' => $installed, 'failed' =>
 `;
 }
 
+// Restore a single Moodle course backup (.mbz) using Moodle's own
+// restore_controller. The .mbz is either downloaded inside PHP (streamed
+// straight to a MEMFS file via download_file_content's $tofile, so no large JS
+// arrayBuffer is allocated and no 50MB resource cap applies) or read from an
+// existing MEMFS path. Restore is memory-heavy and can hit SQLite-WASM limits
+// (nested savepoints, see ADR-0003), so large/complex backups may fail — the
+// exception-handler override turns that into a graceful JSON error (exit(0),
+// not exit(1)) instead of killing the runtime (ADR-0005).
+//
+// String options are interpolated into single-quoted PHP literals via escapePhp;
+// none is used as a PHP identifier.
+export function phpRestoreCourse({
+  downloadUrl = null,
+  localPath = null,
+  category = null,
+  createCategory = true,
+  fullname = null,
+  shortname = null,
+  visible = true,
+} = {}) {
+  const visibleInt = visible === false ? 0 : 1;
+
+  const sourceBlock = downloadUrl
+    ? `$mbz = make_request_directory() . '/source.mbz';
+$dlok = download_file_content('${escapePhp(downloadUrl)}', null, null, false, 600, 30, false, $mbz);
+if ($dlok === false || !is_file($mbz) || filesize($mbz) < 1000) {
+    fail('Could not download the course backup. The URL must be reachable and CORS-accessible (e.g. raw.githubusercontent.com) or proxy-allowlisted.');
+}`
+    : `$mbz = '${escapePhp(localPath)}';
+if (!is_file($mbz) || filesize($mbz) < 1000) {
+    fail('Course backup file is missing or too small: ' . $mbz);
+}`;
+
+  const categoryExpr = category ? `'${escapePhp(category)}'` : "null";
+  const categoryBlock = `$categoryname = ${categoryExpr};
+if ($categoryname === null || $categoryname === '') {
+    $categoryid = 1;
+} else {
+    $cat = $DB->get_record('course_categories', ['name' => $categoryname], 'id');
+    if ($cat) {
+        $categoryid = $cat->id;
+    } else if (${createCategory ? "true" : "false"}) {
+        $newcat = new stdClass();
+        $newcat->name = $categoryname;
+        $newcat->descriptionformat = FORMAT_HTML;
+        $categoryid = core_course_category::create($newcat)->id;
+    } else {
+        fail('Target category does not exist: ' . $categoryname);
+    }
+}`;
+
+  const fullnameExpr = fullname ? `'${escapePhp(fullname)}'` : "null";
+  const shortnameExpr = shortname ? `'${escapePhp(shortname)}'` : "null";
+
+  return `${CLI_HEADER}
+raise_memory_limit(MEMORY_EXTRA);
+@set_time_limit(0);
+require_once($CFG->dirroot . '/backup/util/includes/restore_includes.php');
+require_once($CFG->dirroot . '/course/lib.php');
+global $CFG, $DB, $USER;
+
+// Report failures as JSON and exit(0). Moodle's default_exception_handler would
+// otherwise exit(1) on a DB/restore error and kill the WASM runtime (ADR-0005).
+function fail($msg) {
+    while (ob_get_level()) { ob_end_clean(); }
+    echo json_encode(['ok' => false, 'error' => $msg]);
+    exit(0);
+}
+set_exception_handler(function($e) { fail($e->getMessage()); });
+
+$admin = get_admin();
+if (!$admin) { fail('Administrator account not found.'); }
+$USER = $admin;
+
+${sourceBlock}
+
+${categoryBlock}
+
+// Extract the .mbz into a Moodle backup temp dir and validate it is a course backup.
+$backupdir = restore_controller::get_tempdir_name(SITEID, $admin->id);
+$path = make_backup_temp_directory($backupdir);
+$packer = get_file_packer('application/vnd.moodle.backup');
+if (!$packer->extract_to_pathname($mbz, $path)) {
+    fulldelete($path);
+    fail('Could not extract the Moodle backup (.mbz).');
+}
+if (!is_file($path . '/moodle_backup.xml')) {
+    fulldelete($path);
+    fail('The .mbz does not contain moodle_backup.xml (not a valid Moodle backup).');
+}
+$tmprc = new restore_controller($backupdir, SITEID, backup::INTERACTIVE_NO, backup::MODE_GENERAL, $admin->id, backup::TARGET_EXISTING_ADDING);
+$backuptype = $tmprc->get_type();
+$tmprc->destroy();
+if ($backuptype !== backup::TYPE_1COURSE) {
+    fulldelete($path);
+    fail('The supplied .mbz is not a single-course backup.');
+}
+
+// Create the destination course shell with a guaranteed-unique shortname, then
+// restore the backup into it.
+$wantfullname = ${fullnameExpr};
+$wantshortname = ${shortnameExpr};
+list($newfullname, $newshortname) = restore_dbops::calculate_course_names(
+    0,
+    $wantfullname !== null ? $wantfullname : 'Restored course',
+    $wantshortname !== null ? $wantshortname : 'restored'
+);
+$courseid = restore_dbops::create_new_course($newfullname, $newshortname, $categoryid);
+$rc = new restore_controller($backupdir, $courseid, backup::INTERACTIVE_NO, backup::MODE_GENERAL, $admin->id, backup::TARGET_NEW_COURSE);
+try {
+    $rc->execute_precheck();
+    $rc->execute_plan();
+    $rc->destroy();
+} catch (\\Throwable $e) {
+    $rc->destroy();
+    fulldelete($path);
+    fail('Course restore failed: ' . $e->getMessage());
+}
+
+// Enforce the requested name/visibility (the backup may have set its own).
+$course = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
+if ($wantfullname !== null) {
+    $course->fullname = $wantfullname;
+}
+if ($wantshortname !== null &&
+    !$DB->record_exists_select('course', 'shortname = ? AND id <> ?', [$wantshortname, $courseid])) {
+    $course->shortname = $wantshortname;
+}
+$course->visible = ${visibleInt};
+update_course($course);
+rebuild_course_cache($courseid, true);
+fulldelete($path);
+purge_all_caches();
+echo json_encode(['ok' => true, 'courseid' => $courseid, 'shortname' => $course->shortname, 'fullname' => $course->fullname]);
+`;
+}
+
 export function phpCreateUser(user) {
   return phpCreateUsers([user]);
 }

@@ -84,6 +84,7 @@
               "enrolUser",
               "enrolUsers",
               "addModule",
+              "restoreCourse",
               "createRole",
               "createRoles",
               "importRolePreset",
