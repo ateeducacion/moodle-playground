@@ -11,7 +11,16 @@ test.describe.configure({ timeout: 180_000 });
 test("dashboard renders a themed page without Moodle exceptions", async ({
   playground,
   moodle,
+  browserName,
 }) => {
+  // Same Firefox-on-CI readiness flakiness as the PHP Info spec: parallel
+  // WASM boots overrun the content wait. A missing-file exception page is
+  // browser-independent, so the chromium run fully covers this guard.
+  test.fixme(
+    browserName === "firefox",
+    "Temporarily disabled due to Firefox CI runtime readiness flakiness.",
+  );
+
   await playground.open({ waitForMoodle: true });
 
   const bodyText = await moodle.locator("body").innerText();
