@@ -298,6 +298,81 @@ foreach (\$classes as \$classname) {
 }
 " 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
 
+# Drain the remaining ad-hoc task queue so the snapshot ships with an empty
+# queue and the heavy install-time work runs on the build machine instead of
+# in the browser. Most importantly \core\task\build_installed_themes_task
+# compiles every theme's CSS into $MOODLEDATA/localcache/theme/... with the
+# matching themerev/themesubrev values written to this very database.
+# (The qbank transfer tasks above are deleted BEFORE this so they never run.)
+# --force only bypasses the cron_enabled config check; --ignorelimits skips
+# the adhoc concurrency/runtime limits.
+DRAIN_LOG="$TMPROOT/adhoc-drain.log"
+if ${PHP_BIN:-php} -d max_input_vars=5000 "$SOURCE_DIR/admin/cli/adhoc_task.php" \
+  --execute --force --ignorelimits >"$DRAIN_LOG" 2>&1; then
+  DRAIN_EXIT=0
+else
+  DRAIN_EXIT=$?
+fi
+sed 's/^/[snapshot] /' "$DRAIN_LOG" >&2
+if [ "$DRAIN_EXIT" -ne 0 ]; then
+  echo "Error: adhoc task drain exited with code $DRAIN_EXIT" >&2
+  exit 1
+fi
+
+# The drain must leave the queue empty: adhoc_task.php exits 0 even when a
+# task fails (it only records a faildelay), so count the leftovers explicitly.
+REMAINING_TASKS=$(${PHP_BIN:-php} -r "
+define('CLI_SCRIPT', true);
+define('CACHE_DISABLE_ALL', true);
+define('CACHE_DISABLE_STORES', true);
+require('$SOURCE_DIR/config.php');
+echo 'REMAINING=' . \$DB->count_records('task_adhoc') . PHP_EOL;
+" 2>/dev/null | sed -n 's/^REMAINING=//p' | tail -n 1)
+if [ "$REMAINING_TASKS" != "0" ]; then
+  echo "Error: task_adhoc still has ${REMAINING_TASKS:-unknown} row(s) after the drain" >&2
+  exit 1
+fi
+echo "Ad-hoc task queue drained." >&2
+
+# Pre-compile the DI container so the first WASM request does not pay for it.
+${PHP_BIN:-php} -d max_input_vars=5000 -r "
+define('CLI_SCRIPT', true);
+define('CACHE_DISABLE_ALL', true);
+define('CACHE_DISABLE_STORES', true);
+require('$SOURCE_DIR/config.php');
+\core\di::get_container();
+echo 'DI container compiled.' . PHP_EOL;
+" 2>&1 | while IFS= read -r line; do echo "[snapshot] $line" >&2; done
+
+if [ ! -f "$MOODLEDATA/localcache/di/CompiledContainer.php" ]; then
+  echo "Error: DI container was not compiled at localcache/di/CompiledContainer.php" >&2
+  exit 1
+fi
+if [ ! -d "$MOODLEDATA/localcache/theme" ]; then
+  echo "Error: localcache/theme missing after the drain — theme CSS was not built" >&2
+  exit 1
+fi
+
+# Tripwire: the seed must be portable to the WASM filesystem. The compiled
+# candidate sheets are path-free (theme_config::post_process strips host and
+# scheme) and the compiled DI container is generated PHP without filesystem
+# paths — fail loud if a build-machine path ever leaks in.
+if grep -R -l -e "$TMPROOT" -e "$SOURCE_DIR" \
+  "$MOODLEDATA/localcache/theme" "$MOODLEDATA/localcache/di" >&2; then
+  echo "Error: build-machine paths leaked into the localcache seed (files above)" >&2
+  exit 1
+fi
+
+# Package the localcache seed: ONLY the deterministic, portable artifacts.
+# Whitelisting theme/ and di/ inherently excludes .lastpurged (its absence
+# skips the purge-on-boot check in make_localcache_directory), bootstrap.php
+# (its bootstraphash embeds the build dbname) and core_component.php
+# (build-machine classmap paths; the runtime uses .playground's cache).
+rm -f "$OUTPUT_DIR/localcache.zip"
+(cd "$MOODLEDATA/localcache" && zip -qr "$OUTPUT_DIR/localcache.zip" theme di)
+SEED_SIZE=$(wc -c < "$OUTPUT_DIR/localcache.zip" | tr -d ' ')
+echo "Localcache seed written to $OUTPUT_DIR/localcache.zip ($SEED_SIZE bytes)" >&2
+
 # Note: $CFG->wwwroot comes from config.php (generated at runtime), not from
 # mdl_config. No wwwroot rewriting is needed in the snapshot.
 
