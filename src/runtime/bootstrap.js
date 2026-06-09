@@ -2220,6 +2220,11 @@ if ($lang !== 'en' && preg_match('/^[a-z][a-z0-9_]*$/', $lang)) {
         $result['action'] = 'already-installed';
     } else {
         try {
+            // component_installer::check_requisites() (used by lang_installer)
+            // fails with 'installer_requisites_check_failed' unless
+            // $CFG->dataroot/lang exists, which it does not on a fresh WASM
+            // runtime. Create it up front (idempotent).
+            make_upload_directory('lang');
             $installer = new lang_installer($lang);
             $installer->run();
             if (is_file($CFG->dataroot . '/lang/' . $lang . '/langconfig.php')) {
@@ -2234,6 +2239,48 @@ if ($lang !== 'en' && preg_match('/^[a-z][a-z0-9_]*$/', $lang)) {
             $result['action'] = 'error';
             $result['error'] = $e->getMessage();
         }
+    }
+}
+echo json_encode($result);
+`;
+  const output = await php.run(code);
+  const text = output?.text || "";
+  const jsonStart = text.indexOf("{");
+  return jsonStart >= 0 ? JSON.parse(text.slice(jsonStart)) : {};
+}
+
+// Persist the blueprint-configured site language ($CFG->lang) on the snapshot
+// boot path. The snapshot ships with lang='en' and only the full CLI installer
+// (createInstallRunnerPhp) ever applies installMoodle.options.locale, so a
+// snapshot boot would otherwise ignore the configured locale entirely. This runs
+// BEFORE runLanguageAutoInstall so a locale-only blueprint (no installLanguagePack
+// step) still triggers the langpack download. It also repoints users still on the
+// previous default — the snapshot bakes admin.lang='en', and a logged-in user's
+// lang overrides $CFG->lang, so without this the auto-logged-in admin keeps
+// seeing English even after the pack installs. Idempotent: a no-op when the
+// configured locale already matches. See docs/decisions/0006-*.
+async function runSiteLanguageConfigure(php, locale) {
+  const lang = typeof locale === "string" ? locale.trim().toLowerCase() : "";
+  // The code is interpolated into the PHP below, so validate strictly first
+  // (it is re-checked in PHP too). Nothing to do for English or invalid codes.
+  if (!lang || lang === "en" || !/^[a-z][a-z0-9_]*$/.test(lang)) {
+    return { ok: true, lang: lang || "en", action: "skipped" };
+  }
+  const code = `<?php
+define('CLI_SCRIPT', true);
+require('/www/moodle/config.php');
+global $DB;
+$lang = '${lang}';
+$result = ['ok' => true, 'lang' => $lang, 'action' => 'skipped'];
+if (preg_match('/^[a-z][a-z0-9_]*$/', $lang)) {
+    $old = isset($CFG->lang) ? (string) $CFG->lang : 'en';
+    if ($old !== $lang) {
+        set_config('lang', $lang);
+        $DB->set_field_select('user', 'lang', $lang, 'lang = ? AND deleted = 0', [$old]);
+        $result['action'] = 'applied';
+        $result['previous'] = $old;
+    } else {
+        $result['action'] = 'already-set';
     }
 }
 echo json_encode($result);
@@ -2800,6 +2847,33 @@ export async function bootstrapMoodle({
       `Theme CSS warmup crashed (${themeCssError.message}). Pages may be unstyled. [${themeCssMs}ms]`,
       0.925,
     );
+  }
+
+  // Persist the blueprint-configured site language before the langpack
+  // auto-install below reads $CFG->lang. The snapshot boot path otherwise never
+  // applies installMoodle.options.locale, leaving the site (and the snapshot's
+  // admin.lang='en') in English even for a locale-only blueprint.
+  if (effectiveConfig.locale) {
+    const tLocale = performance.now();
+    try {
+      const localeResult = await runSiteLanguageConfigure(
+        php,
+        effectiveConfig.locale,
+      );
+      const localeMs = Math.round(performance.now() - tLocale);
+      if (localeResult?.action === "applied") {
+        publish(
+          `Configured site language '${localeResult.lang}' (was '${localeResult.previous}'). [${localeMs}ms]`,
+          0.926,
+        );
+      }
+    } catch (localeError) {
+      const localeMs = Math.round(performance.now() - tLocale);
+      publish(
+        `Site language configuration failed (${localeError.message}). [${localeMs}ms]`,
+        0.926,
+      );
+    }
   }
 
   // Auto-install the configured site language pack (e.g. locale "es") before

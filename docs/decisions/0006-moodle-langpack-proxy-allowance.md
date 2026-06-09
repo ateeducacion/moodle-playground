@@ -97,6 +97,47 @@ language features on top of Moodle's own `lang_installer`:
 - `src/runtime/bootstrap.js` — `runLanguageAutoInstall()` invoked before blueprint execution.
 - `tests/blueprint/language-pack.test.js`, `tests/blueprint/steps.test.js` — coverage.
 
+## Follow-up — fixes after end-to-end verification (2026-06-09)
+
+The proxy allowance shipped, but end-to-end the language never actually applied. Loading a
+Spanish blueprint left the UI in English. Investigation found the proxy and networking were
+fine (the worker already defaults `corsProxyUrl` to `config.phpCorsProxyUrl`, so
+`tcpOverFetch` routes langpack GETs through `github-proxy` even without a `?phpCorsProxyUrl=`
+URL param). Three separate problems, none of them networking, blocked it:
+
+1. **`lang_installer` failed its requisites check.** `component_installer::check_requisites()`
+   (`lib/componentlib.class.php`) returns `wrongdestpath` and throws
+   `installer_requisites_check_failed` unless `$CFG->dataroot/lang` already exists. On a fresh
+   WASM runtime that directory does not exist, so the install aborted in ~45ms **before any
+   download** — both for `runLanguageAutoInstall` and the `installLanguagePack` step. (Manual
+   install "worked" only because browsing the admin Language UI had already created the dir.)
+   **Fix:** call `make_upload_directory('lang')` before invoking `lang_installer` in both code
+   paths.
+2. **The snapshot boot never applied `installMoodle.options.locale`.** Only the full CLI
+   installer (`createInstallRunnerPhp`) writes `$CFG->lang`; the pre-built snapshot path skips
+   it, leaving `$CFG->lang = 'en'`. So `runLanguageAutoInstall` read `'en'` and skipped, and a
+   locale-only blueprint never localized. **Fix:** `runSiteLanguageConfigure()` persists the
+   configured locale (`set_config('lang', …)`) just before `runLanguageAutoInstall`.
+3. **Setting the site default was not enough for the logged-in admin.** The install snapshot
+   bakes `mdl_user.admin.lang = 'en'`, and a logged-in user's `lang` overrides `$CFG->lang`.
+   Since the playground auto-logs-in as admin, the dashboard stayed English even after
+   `set_config('lang','es')`. **Fix:** when applying a new default (both in
+   `runSiteLanguageConfigure` and the `setDefault` branch of `phpInstallLanguagePacks`),
+   repoint users still on the previous default with
+   `$DB->set_field_select('user', 'lang', <new>, 'lang = ? AND deleted = 0', [<old>])`. Users
+   provisioned by later blueprint steps inherit the new default at creation.
+
+Verified end-to-end: a blueprint with `locale: "es"` + `installLanguagePack {setDefault:true}`
+boots with `Installed site language pack 'es'`, and the auto-logged-in admin dashboard renders
+in Spanish (`<html lang="es">`, "Área personal", "Administración del sitio").
+
+### Additional files modified
+- `src/runtime/bootstrap.js` — `make_upload_directory('lang')` in `runLanguageAutoInstall`;
+  new `runSiteLanguageConfigure()` invoked before the auto-install.
+- `src/blueprint/php/helpers.js` — `make_upload_directory('lang')` + repoint-users logic in
+  the `setDefault` branch of `phpInstallLanguagePacks`.
+- `tests/blueprint/language-pack.test.js` — asserts for the dir creation and user repointing.
+
 ## Review Criteria
 - If `@php-wasm` changes `tcpOverFetch`'s CORS-proxy handling or a future Moodle changes the
   `lang_installer` API or langpack URL scheme, re-verify both the native flow and the step.

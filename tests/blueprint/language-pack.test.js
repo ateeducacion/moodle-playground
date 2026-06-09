@@ -87,6 +87,9 @@ describe("installLanguagePack: handler", () => {
     assert.strictEqual(runCalls.length, 1);
     assert.ok(runCalls[0].includes("new lang_installer"));
     assert.ok(runCalls[0].includes("$requested = ['es', 'fr'];"));
+    // The dataroot/lang dir must be created up front, otherwise
+    // component_installer::check_requisites() throws installer_requisites_check_failed.
+    assert.ok(runCalls[0].includes("make_upload_directory('lang');"));
     // Without setDefault, the site language must not be changed.
     assert.ok(!runCalls[0].includes("set_config('lang'"));
   });
@@ -95,6 +98,28 @@ describe("installLanguagePack: handler", () => {
     const { php, runCalls } = createPhpMock();
     await handler({ language: "es", setDefault: true }, { php });
     assert.ok(runCalls[0].includes("set_config('lang', 'es');"));
+  });
+
+  it("repoints users on the previous default when setDefault is true", async () => {
+    const { php, runCalls } = createPhpMock();
+    await handler({ language: "es", setDefault: true }, { php });
+    // Setting only the site default is not enough — the snapshot bakes
+    // admin.lang='en' and a logged-in user's lang overrides $CFG->lang, so the
+    // step must also repoint pre-existing users still on the old default.
+    assert.ok(
+      runCalls[0].includes("$previousLang = get_config('moodle', 'lang')"),
+    );
+    assert.ok(
+      runCalls[0].includes(
+        "$DB->set_field_select('user', 'lang', 'es', 'lang = ? AND deleted = 0', [$previousLang]);",
+      ),
+    );
+  });
+
+  it("does not repoint users when setDefault is omitted", async () => {
+    const { php, runCalls } = createPhpMock();
+    await handler({ language: "es" }, { php });
+    assert.ok(!runCalls[0].includes("set_field_select"));
   });
 
   it("does not throw when lang_installer crashes the runtime", async () => {
