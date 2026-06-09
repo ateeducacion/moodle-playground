@@ -3,6 +3,7 @@ import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   buildCoreExtractScript,
   fetchBundleWithCache,
+  verifyBundle,
 } from "../../lib/moodle-loader.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
@@ -909,7 +910,7 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-function createThemeCssWarmupPhp() {
+export function createThemeCssWarmupPhp() {
   return `<?php
 header('content-type: application/json; charset=utf-8');
 error_reporting(E_ALL);
@@ -926,23 +927,30 @@ try {
     require_once($CFG->libdir . '/outputlib.php');
 
     $themename = 'boost';
-    $type = 'all';
+    $direction = right_to_left() ? 'rtl' : 'ltr';
 
+    // theme_build_css_for_themes() writes the candidate sheet exactly where
+    // theme/styles.php serves it from at the ABORT_AFTER_CONFIG stage
+    // (localcache/theme/<rev>/<name>/css/all_<subrev>.css) and bumps the
+    // theme sub-revision config to match. Hand-rolling the path here used to
+    // miss the css/ subdirectory and the _<subrev> suffix, so styles.php
+    // never found the warmed sheet and recompiled the SCSS on first view.
     $theme = theme_config::load($themename);
+    theme_build_css_for_themes([$theme], [$direction]);
+
     $rev = theme_get_revision();
+    $subrev = theme_get_sub_revision_for_theme($themename);
+    $candidatesheet = theme_get_css_filename($themename, $rev, $subrev, $direction);
 
-    // Compile the full theme CSS (SCSS -> CSS).
-    $csscontent = $theme->get_css_content();
-
-    // Store in the local cache where theme/styles.php expects it.
-    $candidatedir = make_localcache_directory("theme/$rev/$themename", false);
-    file_put_contents("$candidatedir/$type.css", $csscontent);
+    if (!is_readable($candidatesheet)) {
+        throw new RuntimeException('candidate sheet missing after build: ' . $candidatesheet);
+    }
 
     $result = [
         'ok' => true,
         'rev' => (int) $rev,
-        'size' => strlen($csscontent),
-        'path' => "$candidatedir/$type.css",
+        'size' => (int) filesize($candidatesheet),
+        'path' => $candidatesheet,
     ];
 } catch (Throwable $error) {
     $result['error'] = [
@@ -2045,6 +2053,146 @@ async function loadInstallSnapshot(
   return true;
 }
 
+/**
+ * Builds the PHP script that extracts the build-time localcache seed
+ * (compiled theme candidate sheets + DI container) into the runtime
+ * localcache directory.
+ *
+ * The candidate sheets are compiled with wwwroot http://localhost at build
+ * time, so their [[pix:]]/[[font:]] URLs are host-relative WITHOUT a path
+ * prefix; on subpath deploys the runtime wwwroot path must be prepended or
+ * theme images and fonts would 404.
+ */
+export function buildLocalcacheSeedExtractScript(zipPath, wwwrootPath) {
+  const zip = escapePhpSingleQuoted(zipPath);
+  const prefix = escapePhpSingleQuoted(wwwrootPath || "");
+  return `<?php
+error_reporting(E_ALL);
+$result = ['ok' => false];
+try {
+    $zipPath = '${zip}';
+    $target = '${MOODLEDATA_ROOT}/localcache';
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('ext/zip is not available');
+    }
+    if (!is_dir($target) && !mkdir($target, 0777, true)) {
+        throw new RuntimeException('cannot create ' . $target);
+    }
+    $archive = new ZipArchive();
+    $code = $archive->open($zipPath);
+    if ($code !== true) {
+        throw new RuntimeException('seed zip open failed (code ' . var_export($code, true) . ')');
+    }
+    if (!$archive->extractTo($target)) {
+        $archive->close();
+        throw new RuntimeException('seed zip extraction failed');
+    }
+    $entries = $archive->numFiles;
+    $archive->close();
+    @unlink($zipPath);
+
+    $rewritten = 0;
+    $prefix = '${prefix}';
+    if ($prefix !== '') {
+        $sheets = glob($target . '/theme/*/*/css/*.css') ?: [];
+        foreach ($sheets as $sheet) {
+            $css = file_get_contents($sheet);
+            if ($css === false) {
+                throw new RuntimeException('cannot read ' . $sheet);
+            }
+            $patched = str_replace(
+                ['/theme/image.php/', '/theme/font.php/'],
+                [$prefix . '/theme/image.php/', $prefix . '/theme/font.php/'],
+                $css,
+                $count
+            );
+            if ($count > 0) {
+                file_put_contents($sheet, $patched);
+                $rewritten++;
+            }
+        }
+    }
+
+    $result = ['ok' => true, 'entries' => $entries, 'rewritten' => $rewritten];
+} catch (Throwable $error) {
+    $result['error'] = [
+        'type' => get_class($error),
+        'message' => $error->getMessage(),
+    ];
+}
+echo json_encode($result, JSON_UNESCAPED_SLASHES);
+`;
+}
+
+/**
+ * Downloads and extracts the build-time localcache seed advertised by the
+ * manifest (snapshot.localcache). Returns false only when the manifest does
+ * not advertise a seed (legacy manifests keep today's behavior); an
+ * advertised-but-broken seed (fetch error, checksum mismatch, extraction
+ * failure) throws — a deploy that ships a bad artifact must fail loud.
+ *
+ * Must run on EVERY snapshot-origin boot, including journaled reloads:
+ * fs-persistence deliberately never journals localcache, so the seed is
+ * re-applied from the (Cache API cached) artifact each time.
+ */
+async function loadLocalcacheSeed(
+  php,
+  { manifest, appBaseUrl, publish, moodleBranch, wwwroot },
+) {
+  const seedInfo = manifest?.snapshot?.localcache;
+  if (!seedInfo) {
+    return false;
+  }
+
+  const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const meta = getBranchMetadata(branch);
+  const fileName = seedInfo.fileName || "localcache.zip";
+  const seedPath = meta
+    ? `assets/moodle/${meta.snapshotDir}/${fileName}`
+    : `assets/moodle/snapshot/${fileName}`;
+
+  publish("Downloading pre-built localcache seed (theme CSS + DI).", 0.911);
+  const seedUrl = new URL(`./${seedPath}`, appBaseUrl);
+  const response = await fetch(seedUrl);
+  if (!response?.ok) {
+    throw new Error(
+      `Manifest advertises a localcache seed but ${seedPath} returned HTTP ${response?.status}.`,
+    );
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await verifyBundle(bytes, seedInfo.sha256);
+
+  const zipPath = `${TEMP_ROOT}/moodle-localcache-seed.zip`;
+  await php.writeFile(zipPath, bytes);
+  const wwwrootPath = new URL(wwwroot).pathname.replace(/\/$/u, "");
+  const result = await php.run(
+    buildLocalcacheSeedExtractScript(zipPath, wwwrootPath),
+  );
+
+  const text = result.text ?? "";
+  const jsonStart = text.lastIndexOf("\n{");
+  const candidate = jsonStart >= 0 ? text.slice(jsonStart + 1) : text.trim();
+  let payload = null;
+  try {
+    payload = JSON.parse(candidate);
+  } catch {
+    throw new Error(
+      `Localcache seed extraction returned non-JSON output: ${text}`,
+    );
+  }
+  if (!payload?.ok) {
+    throw new Error(
+      `Localcache seed extraction failed: ${payload?.error?.message || "unknown error"}`,
+    );
+  }
+
+  publish(
+    `Localcache seed applied (${payload.entries} entries, ${payload.rewritten} stylesheet(s) rewritten for base path).`,
+    0.913,
+  );
+  return true;
+}
+
 async function runProvisioningCheck(php, webRoot) {
   const payload = await requestRuntimeScript(
     php,
@@ -2666,6 +2814,8 @@ export async function bootstrapMoodle({
     }
   }
 
+  let localcacheSeeded = false;
+
   if (!installMarkerMatches && !installState?.installed) {
     const tInstall = performance.now();
 
@@ -2690,6 +2840,13 @@ export async function bootstrapMoodle({
         `Install snapshot loaded in ${snapshotMs}ms (skipped full install).`,
         0.91,
       );
+      localcacheSeeded = await loadLocalcacheSeed(php, {
+        manifest: archive.manifest,
+        appBaseUrl: appBaseUrl || origin,
+        publish,
+        moodleBranch: resolvedBranch,
+        wwwroot,
+      });
     } else {
       // Fallback: run the full Moodle CLI installer
       publish("Running Moodle installation inside the CGI runtime.", 0.89);
@@ -2755,6 +2912,20 @@ export async function bootstrapMoodle({
       "Moodle database already installed, skipping CLI provisioning.",
       0.89,
     );
+    // Journaled reloads of a snapshot-origin install: localcache is never
+    // journaled (fs-persistence excludes caches by design), so the seed must
+    // be re-applied from the build artifact on every such boot. CLI-origin
+    // installs are not seeded — their themerev values differ from the
+    // snapshot's, so the seeded sheets would just be dead files.
+    if (savedInstallState?.source === "snapshot") {
+      localcacheSeeded = await loadLocalcacheSeed(php, {
+        manifest: archive.manifest,
+        appBaseUrl: appBaseUrl || origin,
+        publish,
+        moodleBranch: resolvedBranch,
+        wwwroot,
+      });
+    }
   }
   phases.install.finish();
 
@@ -2796,57 +2967,77 @@ export async function bootstrapMoodle({
   // Clear Moodle 5.0+ qbank transfer adhoc tasks queued during install — the
   // playground has no cron and no legacy question data to migrate, so leaving
   // them queued only serves to block /question/banks.php.  Non-fatal.
-  const tAdhoc = performance.now();
-  try {
-    publish("Clearing qbank transfer ad-hoc tasks.", 0.9195);
-    const adhoc = await runAdhocTasksDrainer(php, webRoot);
-    const adhocMs = Math.round(performance.now() - tAdhoc);
-    if (adhoc?.ok) {
-      const cleared = Object.values(adhoc.cleared || {}).filter(Boolean).length;
+  // Skipped when the snapshot was drained at build time: its task_adhoc table
+  // is provably empty, so there is nothing to clear.
+  if (localcacheSeeded && archive.manifest?.snapshot?.drained === true) {
+    publish(
+      "Ad-hoc task queue drained at build time — skipping runtime drainer.",
+      0.9197,
+    );
+  } else {
+    const tAdhoc = performance.now();
+    try {
+      publish("Clearing qbank transfer ad-hoc tasks.", 0.9195);
+      const adhoc = await runAdhocTasksDrainer(php, webRoot);
+      const adhocMs = Math.round(performance.now() - tAdhoc);
+      if (adhoc?.ok) {
+        const cleared = Object.values(adhoc.cleared || {}).filter(
+          Boolean,
+        ).length;
+        publish(
+          `Cleared ${cleared} blocking qbank task entry/entries. [${adhocMs}ms]`,
+          0.9197,
+        );
+      } else {
+        publish(
+          `Ad-hoc task drainer reported failure: ${adhoc?.error?.message || "unknown error"}. [${adhocMs}ms]`,
+          0.9197,
+        );
+      }
+    } catch (adhocError) {
+      const adhocMs = Math.round(performance.now() - tAdhoc);
       publish(
-        `Cleared ${cleared} blocking qbank task entry/entries. [${adhocMs}ms]`,
-        0.9197,
-      );
-    } else {
-      publish(
-        `Ad-hoc task drainer reported failure: ${adhoc?.error?.message || "unknown error"}. [${adhocMs}ms]`,
+        `Ad-hoc task drainer crashed (${adhocError.message}). [${adhocMs}ms]`,
         0.9197,
       );
     }
-  } catch (adhocError) {
-    const adhocMs = Math.round(performance.now() - tAdhoc);
-    publish(
-      `Ad-hoc task drainer crashed (${adhocError.message}). [${adhocMs}ms]`,
-      0.9197,
-    );
   }
 
   // Pre-compile theme CSS so that theme/styles.php can serve it from cache.
   // SCSS compilation is memory-intensive and can crash the WASM runtime if
   // triggered lazily on the first HTTP request.  Warming the cache here
   // (during the loading screen) avoids that runtime crash.
-  const tThemeCss = performance.now();
-  try {
-    publish("Compiling theme CSS (this may take a moment).", 0.92);
-    const themeCss = await runThemeCssWarmup(php, webRoot);
-    const themeCssMs = Math.round(performance.now() - tThemeCss);
-    if (themeCss?.ok) {
+  // Skipped when the localcache seed already provided the candidate sheets
+  // compiled at build time (1-3s of scssphp work saved per boot).
+  if (localcacheSeeded) {
+    publish(
+      "Theme CSS pre-compiled at build time — skipping SCSS warmup.",
+      0.925,
+    );
+  } else {
+    const tThemeCss = performance.now();
+    try {
+      publish("Compiling theme CSS (this may take a moment).", 0.92);
+      const themeCss = await runThemeCssWarmup(php, webRoot);
+      const themeCssMs = Math.round(performance.now() - tThemeCss);
+      if (themeCss?.ok) {
+        publish(
+          `Theme CSS compiled and cached (${themeCss.size} bytes, rev ${themeCss.rev}). [${themeCssMs}ms]`,
+          0.925,
+        );
+      } else {
+        publish(
+          `Theme CSS warmup failed: ${themeCss?.error?.message || "unknown error"}. [${themeCssMs}ms]`,
+          0.925,
+        );
+      }
+    } catch (themeCssError) {
+      const themeCssMs = Math.round(performance.now() - tThemeCss);
       publish(
-        `Theme CSS compiled and cached (${themeCss.size} bytes, rev ${themeCss.rev}). [${themeCssMs}ms]`,
-        0.925,
-      );
-    } else {
-      publish(
-        `Theme CSS warmup failed: ${themeCss?.error?.message || "unknown error"}. [${themeCssMs}ms]`,
+        `Theme CSS warmup crashed (${themeCssError.message}). Pages may be unstyled. [${themeCssMs}ms]`,
         0.925,
       );
     }
-  } catch (themeCssError) {
-    const themeCssMs = Math.round(performance.now() - tThemeCss);
-    publish(
-      `Theme CSS warmup crashed (${themeCssError.message}). Pages may be unstyled. [${themeCssMs}ms]`,
-      0.925,
-    );
   }
 
   // Persist the blueprint-configured site language before the langpack

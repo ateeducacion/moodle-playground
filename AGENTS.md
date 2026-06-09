@@ -248,6 +248,13 @@ Current database assumptions:
   `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`
 - A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) eliminates the
   3-8s CLI install phase. If unavailable, the full CLI install runs as a fallback.
+- Snapshot v2 manifests additionally advertise `snapshot.drained` (the adhoc task
+  queue was executed at build time via `admin/cli/adhoc_task.php`) and
+  `snapshot.localcache` (a `localcache.zip` seed with the compiled theme candidate
+  sheets + DI container). Snapshot-origin boots extract the seed into
+  `/persist/moodledata/localcache` on EVERY boot (localcache is never journaled)
+  and skip the SCSS warmup and qbank drainer steps. Legacy manifests without
+  these fields keep the warmup/drainer behavior.
 
 When touching the migration/runtime path, preserve these invariants:
 
