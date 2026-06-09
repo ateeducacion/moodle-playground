@@ -413,11 +413,27 @@ export function phpInstallLanguagePacks(codes, setDefault = false) {
   const list = codes.map((c) => `'${escapePhp(c)}'`).join(", ");
   const setDefaultBlock = setDefault
     ? `if (!empty($installed)) {
+    $previousLang = get_config('moodle', 'lang') ?: 'en';
     set_config('lang', '${escapePhp(codes[0])}');
+    // Repoint users still on the previous site default to the new language.
+    // Setting only the site default is not enough: the install snapshot bakes
+    // admin.lang='en', and a logged-in user's lang overrides $CFG->lang, so the
+    // auto-logged-in admin would keep seeing English. Users provisioned by later
+    // blueprint steps inherit the new default at creation, so only pre-existing
+    // accounts (admin/guest) need repointing.
+    if ($previousLang !== '${escapePhp(codes[0])}') {
+        $DB->set_field_select('user', 'lang', '${escapePhp(codes[0])}', 'lang = ? AND deleted = 0', [$previousLang]);
+    }
 }`
     : "";
   return `${CLI_HEADER}
+global $DB;
 require_once($CFG->libdir . '/componentlib.class.php');
+// component_installer::check_requisites() (used by lang_installer) bails out with
+// 'installer_requisites_check_failed' unless $CFG->dataroot/lang already exists —
+// and on a fresh WASM runtime it does not, so the install would fail before any
+// download. Create it up front (idempotent).
+make_upload_directory('lang');
 $requested = [${list}];
 // lang_installer::set_queue() expects an array of codes; it also auto-queues
 // parent languages (e.g. pt_br pulls pt). Network/parse failures are caught so
