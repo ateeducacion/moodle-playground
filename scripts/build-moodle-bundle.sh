@@ -111,9 +111,25 @@ BUNDLE_NAME="moodle-core-$SAFE_RELEASE.zip"
 BUNDLE_PATH="$DIST_DIR/$BUNDLE_NAME"
 
 echo "Packing $BUNDLE_NAME" >&2
-(cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" .)
+# Remove any previous archive: zip -r UPDATES an existing file, which would
+# keep entries that the exclusion list below no longer allows.
+rm -f "$BUNDLE_PATH"
+# The runtime never reads VCS metadata, PHPUnit or Behat fixtures; excluding
+# them cuts the download roughly in half (the shallow .git packfile alone is
+# ~82 MB of incompressible data) and shrinks MEMFS/extraction accordingly.
+(cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" . \
+  -x ".git/*" \
+  -x "tests/*" -x "*/tests/*" \
+  -x "behat/*" -x "*/behat/*" \
+  -x "node_modules/*" -x "*/node_modules/*")
 
-FILE_COUNT=$(find "$MOODLE_DIR" -type f | wc -l | tr -d ' ')
+# Keep the manifest fileCount consistent with what the zip actually contains.
+FILE_COUNT=$(find "$MOODLE_DIR" -type f \
+  -not -path "*/.git/*" \
+  -not -path "*/tests/*" \
+  -not -path "*/behat/*" \
+  -not -path "*/node_modules/*" \
+  | wc -l | tr -d ' ')
 
 SNAPSHOT_ARGS=""
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
