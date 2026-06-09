@@ -114,20 +114,23 @@ echo "Packing $BUNDLE_NAME" >&2
 # Remove any previous archive: zip -r UPDATES an existing file, which would
 # keep entries that the exclusion list below no longer allows.
 rm -f "$BUNDLE_PATH"
-# The runtime never reads VCS metadata, PHPUnit or Behat fixtures; excluding
+# The runtime never reads VCS metadata or PHPUnit/Behat test suites; excluding
 # them cuts the download roughly in half (the shallow .git packfile alone is
 # ~82 MB of incompressible data) and shrinks MEMFS/extraction accordingly.
+# IMPORTANT: only */tests/* may be excluded. A standalone behat pattern would
+# also delete lib/behat/ (required at runtime by theme/boost layouts via
+# require_once($CFG->libdir . '/behat/lib.php')) and admin/tool/behat/ (an
+# installed plugin); plugin Behat suites live under */tests/behat/ and are
+# already covered by the tests pattern.
 (cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" . \
   -x ".git/*" \
-  -x "tests/*" -x "*/tests/*" \
-  -x "behat/*" -x "*/behat/*" \
+  -x "*/tests/*" \
   -x "node_modules/*" -x "*/node_modules/*")
 
 # Keep the manifest fileCount consistent with what the zip actually contains.
 FILE_COUNT=$(find "$MOODLE_DIR" -type f \
   -not -path "*/.git/*" \
   -not -path "*/tests/*" \
-  -not -path "*/behat/*" \
   -not -path "*/node_modules/*" \
   | wc -l | tr -d ' ')
 
