@@ -1,5 +1,6 @@
 import {
   clearBlueprint,
+  compressBlueprint,
   parseBlueprint,
   resolveBlueprint,
   validateBlueprint,
@@ -360,10 +361,17 @@ async function importPayload(file) {
     );
   }
 
-  // Encode the blueprint into the URL and trigger a full page reload,
-  // the same way version changes work. This ensures a clean WASM runtime
-  // with no stale state from the previous session.
-  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
+  // Encode the blueprint into the URL and trigger a full page reload, the same
+  // way version changes work. This ensures a clean WASM runtime with no stale
+  // state from the previous session. Compress with gzip+base64url so large
+  // blueprints don't produce huge fragile URLs; fall back to plain base64 when
+  // CompressionStream is unavailable (the resolver auto-detects either form).
+  let encoded;
+  try {
+    encoded = await compressBlueprint(blueprint);
+  } catch {
+    encoded = btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("blueprint", encoded);
   url.searchParams.delete("blueprint-url");

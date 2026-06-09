@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseBlueprint } from "../../src/blueprint/parser.js";
+import {
+  compressBlueprint,
+  parseBlueprint,
+  parseBlueprintParam,
+} from "../../src/blueprint/parser.js";
 
 describe("parseBlueprint", () => {
   it("passes through plain objects", () => {
@@ -67,5 +71,63 @@ describe("parseBlueprint", () => {
 
   it("throws on non-object/non-string input", () => {
     assert.throws(() => parseBlueprint(42), /Unsupported/);
+  });
+});
+
+describe("compressBlueprint / parseBlueprintParam (gzip round-trip)", () => {
+  // A repetitive blueprint compresses well — mirrors a real heavy import.
+  const heavy = {
+    steps: Array.from({ length: 40 }, (_, i) => ({
+      step: "setConfig",
+      name: `setting_${i}`,
+      value: "a repeated value that gzip loves ".repeat(8),
+    })),
+  };
+
+  it("round-trips a blueprint through gzip+base64url", async () => {
+    const encoded = await compressBlueprint(heavy);
+    const decoded = await parseBlueprintParam(encoded);
+    assert.deepStrictEqual(decoded, heavy);
+  });
+
+  it("produces a gzip stream (decoded bytes start with 1f 8b)", async () => {
+    const encoded = await compressBlueprint({ steps: [] });
+    // base64url → base64 → bytes
+    const b64 = encoded.replaceAll("-", "+").replaceAll("_", "/");
+    const bytes = Buffer.from(b64, "base64");
+    assert.strictEqual(bytes[0], 0x1f);
+    assert.strictEqual(bytes[1], 0x8b);
+  });
+
+  it("is much shorter than plain base64 for a heavy blueprint", async () => {
+    const json = JSON.stringify(heavy);
+    const plain = Buffer.from(json).toString("base64");
+    const gz = await compressBlueprint(heavy);
+    assert.ok(
+      gz.length < plain.length / 2,
+      `expected gzip (${gz.length}) to be < half of base64 (${plain.length})`,
+    );
+  });
+
+  it("still accepts old plain base64-JSON values (backwards compatible)", async () => {
+    const obj = { steps: [{ step: "login" }] };
+    const b64 = Buffer.from(JSON.stringify(obj)).toString("base64");
+    const decoded = await parseBlueprintParam(b64);
+    assert.deepStrictEqual(decoded.steps, [{ step: "login" }]);
+  });
+
+  it("falls through to the sync parser for objects, JSON and data: URLs", async () => {
+    assert.deepStrictEqual(await parseBlueprintParam({ steps: [] }), {
+      steps: [],
+    });
+    assert.deepStrictEqual(
+      (await parseBlueprintParam('{"steps":[{"step":"login"}]}')).steps,
+      [{ step: "login" }],
+    );
+    const b64 = Buffer.from(JSON.stringify({ steps: [] })).toString("base64");
+    assert.deepStrictEqual(
+      await parseBlueprintParam(`data:application/json;base64,${b64}`),
+      { steps: [] },
+    );
   });
 });

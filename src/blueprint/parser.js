@@ -91,16 +91,110 @@ function normalizeBase64(str) {
 }
 
 function decodeBase64(str) {
+  return new TextDecoder().decode(decodeBase64ToBytes(str));
+}
+
+// Decode a base64 / base64url string to raw bytes (no UTF-8 decoding), so we can
+// inspect gzip magic bytes and feed DecompressionStream.
+function decodeBase64ToBytes(str) {
   const normalized = normalizeBase64(str);
   if (typeof atob === "function") {
-    // atob returns Latin-1; decode via Uint8Array for correct UTF-8 handling
     const binary = atob(normalized);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    return new TextDecoder().decode(bytes);
+    return bytes;
   }
   // Node.js fallback
-  return Buffer.from(normalized, "base64").toString("utf-8");
+  return new Uint8Array(Buffer.from(normalized, "base64"));
+}
+
+// Encode raw bytes to base64url (URL-safe, unpadded) for use in `?blueprint=`.
+function bytesToBase64Url(bytes) {
+  let b64;
+  if (typeof btoa === "function") {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    b64 = btoa(binary);
+  } else {
+    b64 = Buffer.from(bytes).toString("base64");
+  }
+  return b64.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+// gzip / gunzip via the web Streams API (browsers + Node 18+). Portable: write
+// the bytes to the stream's writable end and read the result off the readable.
+async function gzip(bytes) {
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+
+async function gunzip(bytes) {
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+}
+
+/**
+ * Compress a blueprint to a short, URL-safe `?blueprint=` value: gzip(JSON) then
+ * base64url. A repetitive blueprint shrinks ~70-85% vs plain base64, keeping the
+ * shareable link self-contained but small. Throws if `CompressionStream` is
+ * unavailable so the caller can fall back to plain base64.
+ *
+ * @param {object} blueprint
+ * @returns {Promise<string>} base64url of gzipped JSON
+ */
+export async function compressBlueprint(blueprint) {
+  if (typeof CompressionStream === "undefined") {
+    throw new Error("CompressionStream is not available in this environment.");
+  }
+  const input = new TextEncoder().encode(JSON.stringify(blueprint));
+  return bytesToBase64Url(await gzip(input));
+}
+
+/**
+ * Async wrapper over {@link parseBlueprint} that also accepts a gzip+base64url
+ * value. Detection is by content, not by a new URL param: a base64 value whose
+ * decoded bytes start with the gzip magic `0x1f 0x8b` is decompressed; anything
+ * else (object, JSON string, data: URL, plain base64-JSON) falls through to the
+ * synchronous parser unchanged. A JSON document never starts with those bytes,
+ * so old `?blueprint=<base64-JSON>` links keep working.
+ *
+ * @param {*} value
+ * @returns {Promise<object>} Parsed blueprint object.
+ */
+export async function parseBlueprintParam(value) {
+  if (typeof value !== "string") {
+    return parseBlueprint(value);
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("{") || trimmed.startsWith("data:")) {
+    return parseBlueprint(value);
+  }
+  if (trimmed.length >= 20 && /^[A-Za-z0-9+/=_-]+$/u.test(trimmed)) {
+    let bytes;
+    try {
+      bytes = decodeBase64ToBytes(trimmed);
+    } catch {
+      return parseBlueprint(value);
+    }
+    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      if (typeof DecompressionStream === "undefined") {
+        throw new Error(
+          "DecompressionStream is required to read a gzipped blueprint.",
+        );
+      }
+      const json = new TextDecoder().decode(await gunzip(bytes));
+      return JSON.parse(json);
+    }
+  }
+  return parseBlueprint(value);
 }
