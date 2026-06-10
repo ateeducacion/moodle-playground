@@ -52,7 +52,6 @@ function buildRuntimePaths(webRoot) {
     PDO_PROBE_PATH: `${webRoot}/__pdo_probe.php`,
     PDO_DDL_PROBE_PATH: `${webRoot}/__pdo_ddl_probe.php`,
     CONFIG_NORMALIZER_PATH: `${webRoot}/__config_normalizer.php`,
-    ADMIN_DEFAULTS_SEEDER_PATH: `${webRoot}/__admin_defaults_seeder.php`,
     CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
     CACHE_ADMIN_HELPER_PATH: `${webRoot}/cache/classes/administration_helper.php`,
     ADMIN_INDEX_PATH: `${webRoot}/admin/index.php`,
@@ -69,7 +68,6 @@ function buildRuntimePaths(webRoot) {
     LOG_SETTINGS_PATH: `${webRoot}/admin/tool/log/settings.php`,
     HTTPSREPLACE_SETTINGS_PATH: `${webRoot}/admin/tool/httpsreplace/settings.php`,
     THEME_CSS_WARMUP_PATH: `${webRoot}/__theme_css_warmup.php`,
-    ADHOC_TASKS_DRAINER_PATH: `${webRoot}/__adhoc_tasks_drainer.php`,
   };
 }
 
@@ -677,7 +675,7 @@ if ($stage === 'themes') {
 `;
 }
 
-function createConfigNormalizerPhp(effectiveDebug = 0) {
+export function createConfigNormalizerPhp(effectiveDebug = 0) {
   const normalizedDebug = Number(effectiveDebug) || 0;
   return `<?php
 header('content-type: application/json; charset=utf-8');
@@ -857,6 +855,33 @@ try {
         $result['warning']['usertours'] = $tourError->getMessage();
     }
 
+    // Clear Moodle 5.0+ qbank transfer adhoc tasks. They are queued during
+    // install/upgrade to migrate legacy question contexts; the playground has
+    // no cron and no legacy questions, but leaving them queued blocks
+    // /question/banks.php with a "tasks are not yet complete" banner. The
+    // classname list matches what question_bank_helper::
+    // has_bank_migration_task_completed_successfully() inspects. Snapshot v2
+    // databases ship with an empty queue, so this is a no-op there.
+    $blockingClasses = [
+        '\\\\mod_qbank\\\\task\\\\transfer_question_categories',
+        '\\\\mod_qbank\\\\task\\\\transfer_questions',
+    ];
+    $qbankCleared = 0;
+    foreach ($blockingClasses as $classname) {
+        try {
+            $count = $DB->count_records('task_adhoc', ['classname' => $classname]);
+            if ($count > 0) {
+                $DB->delete_records('task_adhoc', ['classname' => $classname]);
+                $qbankCleared += $count;
+            }
+        } catch (Throwable $taskError) {
+            $result['warning']['qbanktasks'] = $taskError->getMessage();
+        }
+    }
+    if ($qbankCleared > 0) {
+        $result['set']['qbanktaskscleared'] = $qbankCleared;
+    }
+
     $result['ok'] = true;
 } catch (Throwable $error) {
     $result['error'] = [
@@ -866,40 +891,6 @@ try {
         'line' => $error->getLine(),
     ];
 }
-
-$buffer = ob_get_clean();
-if ($buffer !== '') {
-    $result['output'] = $buffer;
-}
-
-echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-`;
-}
-
-/**
- * Historically this tried to call admin_apply_default_settings() again after
- * bootstrap with MUC enabled. In the WASM runtime that can leave cache store
- * mappings in a partial state, which later breaks
- * cache\\administration_helper on /admin/index.php.
- *
- * We already patch any_new_admin_settings() to short-circuit the admin
- * redirect loop, so this extra seeding pass is no longer required.
- */
-function createAdminDefaultsSeederPhp() {
-  return `<?php
-header('content-type: application/json; charset=utf-8');
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-ob_start();
-
-unset($_SERVER['REMOTE_ADDR']);
-define('CLI_SCRIPT', true);
-
-$result = [
-    'ok' => true,
-    'applied' => false,
-    'skipped' => 'PLAYGROUND: admin defaults seeder disabled to avoid partial MUC mappings',
-];
 
 $buffer = ob_get_clean();
 if ($buffer !== '') {
@@ -953,67 +944,6 @@ try {
         'path' => $candidatesheet,
     ];
 } catch (Throwable $error) {
-    $result['error'] = [
-        'type' => get_class($error),
-        'message' => $error->getMessage(),
-    ];
-}
-
-$buffer = ob_get_clean();
-if ($buffer !== '') {
-    $result['output'] = $buffer;
-}
-
-echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-`;
-}
-
-// Clears Moodle 5.0+ qbank transfer adhoc tasks at boot.  These tasks
-// (\mod_qbank\task\transfer_question_categories and \mod_qbank\task\transfer_questions)
-// are queued during install/upgrade to migrate questions from legacy contexts
-// into the new course-shared question bank.  The playground has no cron and no
-// pre-existing question data to migrate, so executing the tasks is both slow
-// and pointless — but leaving them queued blocks /question/banks.php with a
-// "tasks are not yet complete" banner.  We simply remove them from the queue.
-//
-// The list of blocking classnames is the same one
-// question_bank_helper::has_bank_migration_task_completed_successfully()
-// inspects (see question/classes/local/bank/question_bank_helper.php).
-export function createAdhocTasksDrainerPhp() {
-  return `<?php
-header('content-type: application/json; charset=utf-8');
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-ob_start();
-
-unset($_SERVER['REMOTE_ADDR']);
-define('CLI_SCRIPT', true);
-
-$result = [
-    'ok' => false,
-    'cleared' => [],
-];
-
-$blockingClasses = [
-    '\\\\mod_qbank\\\\task\\\\transfer_question_categories',
-    '\\\\mod_qbank\\\\task\\\\transfer_questions',
-];
-
-try {
-    require_once('/www/moodle/config.php');
-
-    global $DB;
-    foreach ($blockingClasses as $classname) {
-        try {
-            $deleted = $DB->delete_records('task_adhoc', ['classname' => $classname]);
-            $result['cleared'][$classname] = (bool) $deleted;
-        } catch (\\Throwable $taskError) {
-            $result['cleared'][$classname] = false;
-            $result['errors'][$classname] = $taskError->getMessage();
-        }
-    }
-    $result['ok'] = true;
-} catch (\\Throwable $error) {
     $result['error'] = [
         'type' => get_class($error),
         'message' => $error->getMessage(),
@@ -1961,10 +1891,6 @@ async function prepareMoodleRuntime({
     textEncoder.encode(configNormalizerPhp),
   );
   await php.writeFile(
-    rp.ADMIN_DEFAULTS_SEEDER_PATH,
-    textEncoder.encode(createAdminDefaultsSeederPhp()),
-  );
-  await php.writeFile(
     rp.DATAPRIVACY_SETTINGS_PATH,
     textEncoder.encode(createPatchedDataprivacySettingsPhp()),
   );
@@ -1979,10 +1905,6 @@ async function prepareMoodleRuntime({
   await php.writeFile(
     rp.THEME_CSS_WARMUP_PATH,
     textEncoder.encode(createThemeCssWarmupPhp()),
-  );
-  await php.writeFile(
-    rp.ADHOC_TASKS_DRAINER_PATH,
-    textEncoder.encode(createAdhocTasksDrainerPhp()),
   );
   const filesMs = Math.round(performance.now() - tFiles);
 
@@ -2306,38 +2228,10 @@ async function runConfigNormalizer(php, webRoot) {
   return jsonPayload ? JSON.parse(jsonPayload) : {};
 }
 
-async function runAdminDefaultsSeeder(php, webRoot) {
-  const output = await requestRuntimeScript(
-    php,
-    "/__admin_defaults_seeder.php",
-    undefined,
-    webRoot,
-  );
-  const payload = output.trim();
-  const jsonStart = payload.indexOf("{");
-  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
-
-  return jsonPayload ? JSON.parse(jsonPayload) : {};
-}
-
 async function runThemeCssWarmup(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
     "/__theme_css_warmup.php",
-    undefined,
-    webRoot,
-  );
-  const payload = output.trim();
-  const jsonStart = payload.indexOf("{");
-  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
-
-  return jsonPayload ? JSON.parse(jsonPayload) : {};
-}
-
-async function runAdhocTasksDrainer(php, webRoot) {
-  const output = await requestRuntimeScript(
-    php,
-    "/__adhoc_tasks_drainer.php",
     undefined,
     webRoot,
   );
@@ -2946,61 +2840,6 @@ export async function bootstrapMoodle({
       `Config default normalization failed: ${configNormalizer.error.message} [${normMs}ms]`,
       0.918,
     );
-  }
-
-  // Apply ALL admin default settings with CACHE_DISABLE_ALL = false (matching the
-  // runtime config.php). This catches cache-store plugin settings and any other
-  // admin settings only registered when MUC is active, preventing
-  // any_new_admin_settings() from redirecting to upgradesettings.php.
-  const tAdminDefaults = performance.now();
-  const adminDefaults = await runAdminDefaultsSeeder(php, webRoot);
-  const adminDefaultsMs = Math.round(performance.now() - tAdminDefaults);
-  if (adminDefaults?.ok) {
-    publish(`Admin default settings applied. [${adminDefaultsMs}ms]`, 0.919);
-  } else if (adminDefaults?.error?.message) {
-    publish(
-      `Admin defaults seeder failed: ${adminDefaults.error.message} [${adminDefaultsMs}ms]`,
-      0.919,
-    );
-  }
-
-  // Clear Moodle 5.0+ qbank transfer adhoc tasks queued during install — the
-  // playground has no cron and no legacy question data to migrate, so leaving
-  // them queued only serves to block /question/banks.php.  Non-fatal.
-  // Skipped when the snapshot was drained at build time: its task_adhoc table
-  // is provably empty, so there is nothing to clear.
-  if (localcacheSeeded && archive.manifest?.snapshot?.drained === true) {
-    publish(
-      "Ad-hoc task queue drained at build time — skipping runtime drainer.",
-      0.9197,
-    );
-  } else {
-    const tAdhoc = performance.now();
-    try {
-      publish("Clearing qbank transfer ad-hoc tasks.", 0.9195);
-      const adhoc = await runAdhocTasksDrainer(php, webRoot);
-      const adhocMs = Math.round(performance.now() - tAdhoc);
-      if (adhoc?.ok) {
-        const cleared = Object.values(adhoc.cleared || {}).filter(
-          Boolean,
-        ).length;
-        publish(
-          `Cleared ${cleared} blocking qbank task entry/entries. [${adhocMs}ms]`,
-          0.9197,
-        );
-      } else {
-        publish(
-          `Ad-hoc task drainer reported failure: ${adhoc?.error?.message || "unknown error"}. [${adhocMs}ms]`,
-          0.9197,
-        );
-      }
-    } catch (adhocError) {
-      const adhocMs = Math.round(performance.now() - tAdhoc);
-      publish(
-        `Ad-hoc task drainer crashed (${adhocError.message}). [${adhocMs}ms]`,
-        0.9197,
-      );
-    }
   }
 
   // Pre-compile theme CSS so that theme/styles.php can serve it from cache.
