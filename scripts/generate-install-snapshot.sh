@@ -353,23 +353,113 @@ if [ ! -d "$MOODLEDATA/localcache/theme" ]; then
   exit 1
 fi
 
+# Pre-build the combined RequireJS bundle so the first page in the browser does
+# not pay for find_all_amd_modules() (unreliable on the Emscripten VFS) +
+# concatenation. Replicates requirejs.php's production "all non-lazy modules"
+# combine and writes it to the file requirejs.php will serve at runtime, where
+# config.php forces $CFG->jsrev = 1 (so $etag = sha1(1)). See ADR 0013.
+REQUIREJS_WARMUP="$TMPROOT/requirejs-warmup.php"
+cat > "$REQUIREJS_WARMUP" <<'PHPEOF'
+<?php
+define('CLI_SCRIPT', true);
+define('CACHE_DISABLE_ALL', true);
+define('CACHE_DISABLE_STORES', true);
+$sourcedir = $argv[1];
+require($sourcedir . '/config.php');
+require_once($CFG->dirroot . '/lib/jslib.php');
+
+// requirejs_fix_define() is defined INSIDE lib/requirejs.php (a web script, not
+// an autoloadable class), so it cannot be reused here — duplicated verbatim
+// from lib/requirejs.php. Keep in sync with upstream if that function changes.
+function requirejs_fix_define(string $modulename, string $js): string {
+    $missingmodule = preg_match('/define\(\s*(\[|function)/', $js);
+    $missingmodule = $missingmodule && !preg_match("@define\s*\(\s*['\"]{$modulename}['\"]@", $js);
+    if ($missingmodule) {
+        $replace = 'define(\'' . $modulename . '\', ';
+        return implode($replace, explode('define(', $js, 2));
+    }
+    return $js;
+}
+
+// Mirror requirejs.php's non-lazy "return ALL amd modules" branch exactly.
+$jsfiles = core_requirejs::find_all_amd_modules();
+$content = '';
+foreach ($jsfiles as $modulename => $jsfile) {
+    $js = file_get_contents($jsfile);
+    if ($js === false) {
+        // Fail the build instead of embedding requirejs.php's
+        // "/* Failed to load */" placeholder into the shipped bundle.
+        fwrite(STDERR, 'Failed to read AMD module ' . $jsfile . PHP_EOL);
+        exit(1);
+    }
+    $js = preg_replace('~//# sourceMappingURL.*$~s', '', $js);
+    $js = rtrim($js) . "\n";
+    $js = requirejs_fix_define($modulename, $js);
+    $content .= $js;
+}
+
+// At runtime config.php forces $CFG->jsrev = 1, so module URLs are
+// /lib/requirejs.php/1/<component>/<module> and requirejs.php computes the
+// non-lazy combine etag as sha1($rev) = sha1(1). Seed exactly that file
+// (sha1(1) === sha1('1') === 356a192b7913b04c54574d18c28d46e6395428ab).
+$target = $CFG->localcachedir . '/requirejs/' . sha1(1);
+js_write_cache_file_content($target, $content);
+clearstatcache();
+if (!file_exists($target)) {
+    fwrite(STDERR, 'RequireJS combine was not written to ' . $target . PHP_EOL);
+    exit(1);
+}
+$size = filesize($target);
+$combined = file_get_contents($target);
+if ($size < 1048576) {
+    fwrite(STDERR, 'RequireJS combine too small (' . $size . ' bytes) — expected > 1MB' . PHP_EOL);
+    exit(1);
+}
+// core/first is the bootstrap module RequireJS loads first; its named define
+// must be present or the whole combined bundle is unusable.
+if (strpos($combined, 'define("core/first"') === false
+    && strpos($combined, "define('core/first'") === false) {
+    fwrite(STDERR, 'RequireJS combine is missing the core/first define' . PHP_EOL);
+    exit(1);
+}
+echo 'RequireJS combined bundle written (' . count($jsfiles) . ' modules, ' . $size . ' bytes).' . PHP_EOL;
+PHPEOF
+REQUIREJS_LOG="$TMPROOT/requirejs-warmup.log"
+if ${PHP_BIN:-php} -d max_input_vars=5000 "$REQUIREJS_WARMUP" "$SOURCE_DIR" >"$REQUIREJS_LOG" 2>&1; then
+  WARMUP_EXIT=0
+else
+  WARMUP_EXIT=$?
+fi
+sed 's/^/[snapshot] /' "$REQUIREJS_LOG" >&2
+if [ "$WARMUP_EXIT" -ne 0 ]; then
+  echo "Error: RequireJS warmup exited with code $WARMUP_EXIT" >&2
+  exit 1
+fi
+if [ ! -f "$MOODLEDATA/localcache/requirejs/356a192b7913b04c54574d18c28d46e6395428ab" ]; then
+  echo "Error: RequireJS combined seed missing at localcache/requirejs/356a192b..." >&2
+  exit 1
+fi
+
 # Tripwire: the seed must be portable to the WASM filesystem. The compiled
 # candidate sheets are path-free (theme_config::post_process strips host and
-# scheme) and the compiled DI container is generated PHP without filesystem
-# paths — fail loud if a build-machine path ever leaks in.
+# scheme), the compiled DI container is generated PHP without filesystem paths,
+# and the RequireJS combine has its sourceMappingURL comments stripped — fail
+# loud if a build-machine path ever leaks in.
 if grep -R -l -e "$TMPROOT" -e "$SOURCE_DIR" \
-  "$MOODLEDATA/localcache/theme" "$MOODLEDATA/localcache/di" >&2; then
+  "$MOODLEDATA/localcache/theme" "$MOODLEDATA/localcache/di" \
+  "$MOODLEDATA/localcache/requirejs" >&2; then
   echo "Error: build-machine paths leaked into the localcache seed (files above)" >&2
   exit 1
 fi
 
 # Package the localcache seed: ONLY the deterministic, portable artifacts.
-# Whitelisting theme/ and di/ inherently excludes .lastpurged (its absence
-# skips the purge-on-boot check in make_localcache_directory), bootstrap.php
-# (its bootstraphash embeds the build dbname) and core_component.php
-# (build-machine classmap paths; the runtime uses .playground's cache).
+# Whitelisting theme/, di/ and requirejs/ inherently excludes .lastpurged (its
+# absence skips the purge-on-boot check in make_localcache_directory),
+# bootstrap.php (its bootstraphash embeds the build dbname) and
+# core_component.php (build-machine classmap paths; the runtime uses
+# .playground's cache).
 rm -f "$OUTPUT_DIR/localcache.zip"
-(cd "$MOODLEDATA/localcache" && zip -qr "$OUTPUT_DIR/localcache.zip" theme di)
+(cd "$MOODLEDATA/localcache" && zip -qr "$OUTPUT_DIR/localcache.zip" theme di requirejs)
 SEED_SIZE=$(wc -c < "$OUTPUT_DIR/localcache.zip" | tr -d ' ')
 echo "Localcache seed written to $OUTPUT_DIR/localcache.zip ($SEED_SIZE bytes)" >&2
 

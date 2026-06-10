@@ -1,7 +1,13 @@
 # ADR-0004 OPcache tuning and runtime UX defaults for WASM
 
-* Status: Accepted
+* Status: Accepted (rationale amended by ADR-0011)
 * Date: 2026-03-27
+
+> **Note (ADR-0011):** with `opcache.file_cache_only=1` OPcache allocates no
+> shared-memory segment, so `opcache.max_accelerated_files`,
+> `memory_consumption` and `interned_strings_buffer` are inert in this mode.
+> They are retained only as future-proofing. See
+> [0011](0011-bundle-trim-and-runtime-tuning.md).
 
 ## Context and Problem
 

@@ -25,6 +25,7 @@ export function createMoodleConfigPhp({
   wwwroot,
   playgroundProxyUrl = "",
   debugdisplay = 0,
+  requirejsSeeded = false,
 }) {
   const resolvedComponentCachePath =
     componentCachePath || buildComponentCachePath(moodleRoot);
@@ -66,10 +67,28 @@ $CFG->debugdisplay = ${Number(debugdisplay) ? 1 : 0};
 $CFG->showcrondebugging = false;
 // Enable all caching layers — the filesystem is MEMFS (pure memory) so file-backed
 // caches are fast and persist for the lifetime of the worker session.
-// cachejs must stay false: when enabled, Moodle rewrites JS module URLs to serve
-// combined bundles through javascript.php. The caching endpoint fails silently
-// in the WASM environment, causing "No define call for core/first" RequireJS errors.
-$CFG->cachejs = false;
+${
+  requirejsSeeded
+    ? `// RequireJS combined bundle is seeded at build time (manifest
+// snapshot.requirejs), so we re-enable $CFG->cachejs: the browser makes ONE
+// combined JS request per page (/lib/requirejs.php/1/core/first.js) instead of
+// dozens of per-module requests through the serial worker queue. See ADR 0013.
+// - jsrev is FORCED to 1 (not time()): config.php overrides DB config, so
+//   js_reset_all_caches()'s set_config('jsrev', time()) cannot desync the URL
+//   revision from the seeded sha1(1) file across journaled reloads. Bundle JS
+//   is immutable per build, so in-session JS cache-busting being a no-op is fine.
+// - The runtime NEVER builds the combine (lib/requirejs.php is patched at build
+//   time; find_all_amd_modules is unreliable on the Emscripten VFS).
+// - 'Purge all caches' wipes localcache including requirejs/, so the is_dir()
+//   probe flips cachejs back to false (dev-mode per-module serving — today's
+//   behavior) for the rest of the session; the next boot re-extracts the seed.
+$CFG->jsrev = 1;
+$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');`
+    : `// cachejs stays false: without the build-time RequireJS seed, enabling it makes
+// the runtime build the combine itself, which fails silently in the WASM
+// environment ("No define call for core/first" RequireJS errors). See ADR 0013.
+$CFG->cachejs = false;`
+}
 $CFG->cachetemplates = true;
 $CFG->langstringcache = true;
 $CFG->themedesignermode = false;
@@ -271,13 +290,32 @@ export function createPhpIniEntries({
     upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
     "session.save_path": `${TEMP_ROOT}/sessions`,
-    // OPcache tuning — use in-memory file cache with a high file limit
-    // and no timestamp checks (the readonly bundle never changes within
-    // a session), so PHP avoids recompiling on every request.
+    // Realpath cache — every include resolves each path component via lstat
+    // through Emscripten's JS FS (cheap individually, but tens of thousands
+    // of JS calls per Moodle request at path depth ~6). The bundle tree is
+    // immutable within a session and there is exactly ONE PHP process, so
+    // every mid-session unlink/rename happens inside PHP, which invalidates
+    // its own realpath-cache entries; JS-side FS writes (journal hydration,
+    // boot patches) all happen before the first request, and PHP does not
+    // cache negative lookups, so files created later are never masked.
+    // If a future feature ever deletes MEMFS files from the JS side between
+    // requests, revisit this TTL.
+    realpath_cache_size: "8M",
+    realpath_cache_ttl: "86400",
+    // OPcache tuning — compiled bytecode is kept in /internal/shared/opcache
+    // with no timestamp checks (the readonly bundle never changes within a
+    // session), so PHP avoids recompiling on every request.
+    // NOTE: with file_cache_only=1 OPcache allocates NO shared memory
+    // segment, so max_accelerated_files / memory_consumption /
+    // interned_strings_buffer are inert in this mode. They are kept (with
+    // max_accelerated_files sized above Moodle's ~15k bundled PHP files)
+    // only as future-proofing should file_cache_only ever be revisited.
+    // See docs/decisions/0011-bundle-trim-and-runtime-tuning.md (amends
+    // ADR 0004).
     "opcache.enable": "1",
     "opcache.file_cache": "/internal/shared/opcache",
     "opcache.file_cache_only": "1",
-    "opcache.max_accelerated_files": "10000",
+    "opcache.max_accelerated_files": "20000",
     "opcache.memory_consumption": "128",
     "opcache.interned_strings_buffer": "32",
     "opcache.validate_timestamps": "0",

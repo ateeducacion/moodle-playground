@@ -2,8 +2,8 @@ import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   buildCoreExtractScript,
+  fetchAssetWithCache,
   fetchBundleWithCache,
-  verifyBundle,
 } from "../../lib/moodle-loader.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
@@ -1340,6 +1340,11 @@ async function patchRuntimePhpSources(php, webRoot) {
     ],
   ]);
 
+  // All three plugin_manager.php hunks are applied in ONE patchFile call:
+  // patchFile applies replacers sequentially over a single in-memory string,
+  // so this is identical to the previous three read-after-write passes while
+  // saving two decode/split/join/encode/write cycles on this large file.
+  // Order is preserved (the third hunk must keep matching after the first two).
   await patchFile(rp.PLUGIN_MANAGER_PATH, [
     [
       `        remove_dir($plugin->rootdir);
@@ -1356,9 +1361,6 @@ async function patchRuntimePhpSources(php, webRoot) {
             opcache_reset();
         }`,
     ],
-  ]);
-
-  await patchFile(rp.PLUGIN_MANAGER_PATH, [
     [
       `        if (function_exists('opcache_reset')) {
             opcache_reset();
@@ -1381,12 +1383,9 @@ async function patchRuntimePhpSources(php, webRoot) {
 
         return true;`,
     ],
-  ]);
-
-  // Guard against null $plugininfo when reinstalling over an existing plugin.
-  // After core_component::reset() during upgrade, get_plugin_info() may return null
-  // for the old plugin. Fall back to direct remove_dir() in that case.
-  await patchFile(rp.PLUGIN_MANAGER_PATH, [
+    // Guard against null $plugininfo when reinstalling over an existing plugin.
+    // After core_component::reset() during upgrade, get_plugin_info() may return
+    // null for the old plugin. Fall back to direct remove_dir() in that case.
     [
       `            if (file_exists($target . '/' . $pluginname)) {
                 $this->remove_plugin_folder($this->get_plugin_info($plugin->component));
@@ -1927,40 +1926,68 @@ async function prepareMoodleRuntime({
 
 async function loadInstallSnapshot(
   php,
-  { dbFile, appBaseUrl, publish, moodleBranch },
+  { dbFile, appBaseUrl, publish, moodleBranch, manifest, prefetched },
 ) {
   const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
   const meta = getBranchMetadata(branch);
 
-  // Try branch-specific snapshot first, then fall back to legacy path
-  const snapshotPaths = [];
-  if (meta) {
-    snapshotPaths.push(`assets/moodle/${meta.snapshotDir}/install.sq3`);
+  // Candidate sources: the manifest-advertised URL first (served cache-first
+  // through the Cache API and verified against the manifest sha256), then
+  // the legacy branch-path probes (plain fetch, no checksum) for manifests
+  // that predate snapshot.url.
+  const candidates = [];
+  if (manifest?.snapshot?.url) {
+    candidates.push({ url: manifest.snapshot.url, info: manifest.snapshot });
   }
-  snapshotPaths.push("assets/moodle/snapshot/install.sq3");
+  if (meta) {
+    candidates.push({
+      url: new URL(
+        `./assets/moodle/${meta.snapshotDir}/install.sq3`,
+        appBaseUrl,
+      ).toString(),
+      info: {},
+    });
+  }
+  candidates.push({
+    url: new URL("./assets/moodle/snapshot/install.sq3", appBaseUrl).toString(),
+    info: {},
+  });
 
   publish("Downloading pre-installed database snapshot.", 0.87);
 
-  let response;
-  for (const snapshotPath of snapshotPaths) {
-    const snapshotUrl = new URL(`./${snapshotPath}`, appBaseUrl);
-    try {
-      response = await fetch(snapshotUrl);
-      if (response.ok) {
-        break;
-      }
-      response = null;
-    } catch {
-      response = null;
+  let bytes = null;
+
+  // Use the bytes prefetched in parallel with the ZIP extraction if that
+  // prefetch (against manifest.snapshot.url) succeeded. A wrapped {error}
+  // means it failed — fall through to the candidate loop, which re-tries the
+  // manifest URL and the legacy branch paths.
+  if (prefetched) {
+    const result = await prefetched;
+    if (result instanceof Uint8Array) {
+      bytes = result;
     }
   }
 
-  if (!response?.ok) {
+  if (!bytes) {
+    for (const candidate of candidates) {
+      try {
+        bytes = await fetchAssetWithCache(candidate.url, candidate.info);
+        if (bytes) {
+          break;
+        }
+      } catch {
+        // A missing or corrupted snapshot is non-fatal: try the next candidate
+        // and ultimately fall back to the full CLI install below.
+        bytes = null;
+      }
+    }
+  }
+
+  if (!bytes) {
     publish("Snapshot not available, falling back to full install.", 0.875);
     return false;
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length < 100) {
     publish("Snapshot too small, falling back to full install.", 0.875);
     return false;
@@ -2059,7 +2086,7 @@ echo json_encode($result, JSON_UNESCAPED_SLASHES);
  */
 async function loadLocalcacheSeed(
   php,
-  { manifest, appBaseUrl, publish, moodleBranch, wwwroot },
+  { manifest, appBaseUrl, publish, moodleBranch, wwwroot, prefetched },
 ) {
   const seedInfo = manifest?.snapshot?.localcache;
   if (!seedInfo) {
@@ -2074,15 +2101,30 @@ async function loadLocalcacheSeed(
     : `assets/moodle/snapshot/${fileName}`;
 
   publish("Downloading pre-built localcache seed (theme CSS + DI).", 0.911);
-  const seedUrl = new URL(`./${seedPath}`, appBaseUrl);
-  const response = await fetch(seedUrl);
-  if (!response?.ok) {
-    throw new Error(
-      `Manifest advertises a localcache seed but ${seedPath} returned HTTP ${response?.status}.`,
-    );
+  // Prefer the manifest-advertised absolute URL (cache-first + checksum
+  // verified); fall back to the branch path for older manifests. The seed is
+  // re-applied on EVERY snapshot-origin boot, so the Cache API turns a
+  // recurring network round-trip into a CacheStorage read. fetchAssetWithCache
+  // throws on a non-OK response or checksum mismatch, preserving this
+  // function's fail-loud contract for an advertised-but-broken seed.
+  const seedUrl =
+    seedInfo.url || new URL(`./${seedPath}`, appBaseUrl).toString();
+  // Use the bytes prefetched in parallel with the ZIP extraction when present.
+  // The prefetch wraps rejections as { error }; rethrow to keep the fail-loud
+  // contract (a deploy that ships a bad seed must fail, not boot silently
+  // without it and re-enable the slow SCSS warmups).
+  let bytes;
+  if (prefetched) {
+    const result = await prefetched;
+    if (result instanceof Uint8Array) {
+      bytes = result;
+    } else if (result?.error) {
+      throw result.error;
+    }
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  await verifyBundle(bytes, seedInfo.sha256);
+  if (!bytes) {
+    bytes = await fetchAssetWithCache(seedUrl, seedInfo);
+  }
 
   const zipPath = `${TEMP_ROOT}/moodle-localcache-seed.zip`;
   await php.writeFile(zipPath, bytes);
@@ -2394,6 +2436,59 @@ function createBootstrapTracker() {
   };
 }
 
+/**
+ * Resolve the manifest and download the core bundle (cache-first). Extracted
+ * so the caller (php-worker getRuntimeState) can kick this off CONCURRENTLY
+ * with php.refresh() (WASM compilation) instead of strictly after it — the
+ * download proceeds in the browser's network process while the worker thread
+ * compiles WASM, so cold boot saves ~min(refresh, download). Touches only the
+ * network + Cache API, never the PHP FS, so it is safe to run during
+ * loadWebRuntime/initFsPersistence.
+ *
+ * Returns the same archive object as the inline path; the progress mapping
+ * mirrors the original (manifest -> 0.16, cache-bust -> 0.24, download ratio
+ * -> 0.2..0.44) but uses a local pct accumulator instead of a static on
+ * bootstrapMoodle.
+ */
+export async function startArchiveResolution({
+  moodleBranch,
+  appBaseUrl,
+  publish,
+}) {
+  const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
+  const manifestUrl = await resolveManifestUrl(
+    resolvedBranch,
+    appBaseUrl || self.location.href,
+  );
+  let lastDownloadPct;
+  return resolveBootstrapArchive(
+    { manifestUrl },
+    ({ ratio, cached, phase, detail }) => {
+      if (phase === "manifest") {
+        publish(detail, 0.16);
+        return;
+      }
+      if (phase === "cache-bust") {
+        publish(detail, 0.24);
+        return;
+      }
+      const progress = cached
+        ? 0.44
+        : 0.2 + (typeof ratio === "number" ? ratio * 0.22 : 0.22);
+      // Only publish at ~10% intervals to avoid log spam
+      const pct = Math.floor((typeof ratio === "number" ? ratio : 0) * 10);
+      if (cached || pct !== lastDownloadPct) {
+        lastDownloadPct = pct;
+        const label =
+          typeof ratio === "number"
+            ? `Downloading Moodle bundle (${Math.round(ratio * 100)}%).`
+            : detail || "Downloading Moodle bundle.";
+        publish(label, progress);
+      }
+    },
+  );
+}
+
 export async function bootstrapMoodle({
   config,
   blueprint,
@@ -2408,6 +2503,7 @@ export async function bootstrapMoodle({
   moodleBranch,
   webRoot: webRootParam,
   onPluginInstalled,
+  archivePromise,
 }) {
   const selection = resolveRuntimeSelection({ runtimeId, moodleBranch });
   const resolvedRuntimeId = selection.runtimeId;
@@ -2485,43 +2581,21 @@ export async function bootstrapMoodle({
   const branchMeta = getBranchMetadata(resolvedBranch);
   const webRoot = webRootParam || branchMeta?.webRoot || MOODLE_ROOT;
   const tArchive = performance.now();
-  const manifestUrl = await resolveManifestUrl(
-    resolvedBranch,
-    appBaseUrl || self.location.href,
-  );
-  let archive = await resolveBootstrapArchive(
-    {
-      manifestUrl,
-    },
-    ({ ratio, cached, phase, detail }) => {
-      if (phase === "manifest") {
-        publish(detail, 0.16);
-        return;
-      }
-
-      if (phase === "cache-bust") {
-        publish(detail, 0.24);
-        return;
-      }
-
-      const progress = cached
-        ? 0.44
-        : 0.2 + (typeof ratio === "number" ? ratio * 0.22 : 0.22);
-      // Only publish at ~10% intervals to avoid log spam
-      const pct = Math.floor((typeof ratio === "number" ? ratio : 0) * 10);
-      if (cached || pct !== bootstrapMoodle._lastDownloadPct) {
-        bootstrapMoodle._lastDownloadPct = pct;
-        const label =
-          typeof ratio === "number"
-            ? `Downloading Moodle bundle (${Math.round(ratio * 100)}%).`
-            : detail || "Downloading Moodle bundle.";
-        publish(label, progress);
-      }
-    },
-  );
+  // When the caller pre-started the download in parallel with php.refresh()
+  // (php-worker getRuntimeState), await that promise; otherwise resolve it
+  // inline for back-compat. tArchive then measures only the remaining wait.
+  let archive = await (archivePromise ||
+    startArchiveResolution({
+      moodleBranch: resolvedBranch,
+      appBaseUrl,
+      publish,
+    }));
   phases.download.finish();
   const archiveMs = Math.round(performance.now() - tArchive);
-  publish(`Bundle resolved in ${archiveMs}ms.`, 0.45);
+  publish(
+    `Bundle resolved in ${archiveMs}ms (waited ${archiveMs}ms after refresh).`,
+    0.45,
+  );
 
   if (
     runtime.mountStrategy === "zip-extract" &&
@@ -2585,7 +2659,40 @@ export async function bootstrapMoodle({
     wwwroot,
     playgroundProxyUrl,
     debugdisplay: effectiveConfig.debugdisplay,
+    // Re-enable cachejs only when the manifest advertises the build-time
+    // RequireJS combined seed (ADR 0013); legacy bundles keep cachejs=false.
+    requirejsSeeded: Boolean(archive.manifest?.snapshot?.requirejs),
   });
+
+  // Kick off the install snapshot + localcache seed downloads NOW so the
+  // network transfer overlaps the multi-second PHP-side ZIP extraction inside
+  // prepareMoodleRuntime (the fetch proceeds in the browser's network process
+  // while the WASM thread is busy in ZipArchive). markerLikelyValid mirrors the
+  // installMarkerMatches initialization below; gating by it avoids downloading
+  // install.sq3 on journaled reloads where only the seed is needed. Failures
+  // are wrapped (not thrown) here so a missing/broken asset keeps today's
+  // graceful fallback — the loaders unwrap and decide. On warm Cache API boots
+  // these resolve from CacheStorage almost instantly.
+  const markerLikelyValid = installStateMatches(
+    savedInstallState,
+    manifestState,
+    dbName,
+  );
+  const snapshotPrefetch =
+    !markerLikelyValid && archive.manifest?.snapshot?.url
+      ? fetchAssetWithCache(
+          archive.manifest.snapshot.url,
+          archive.manifest.snapshot,
+        ).catch((error) => ({ error }))
+      : null;
+  const seedPrefetch =
+    (!markerLikelyValid || savedInstallState?.source === "snapshot") &&
+    archive.manifest?.snapshot?.localcache?.url
+      ? fetchAssetWithCache(
+          archive.manifest.snapshot.localcache.url,
+          archive.manifest.snapshot.localcache,
+        ).catch((error) => ({ error }))
+      : null;
 
   const tPrepare = performance.now();
   publish("Writing Moodle runtime configuration.", 0.84);
@@ -2619,18 +2726,23 @@ export async function bootstrapMoodle({
     await setPhpIniEntries(php._php, iniOverrides);
   }
 
-  const tPdo = performance.now();
-  publish("Probing PDO SQLite connectivity.", 0.865);
-  const pdoProbe = await runPdoProbe(php, webRoot);
-  const pdoMs = Math.round(performance.now() - tPdo);
-  if (pdoProbe.ok) {
-    publish(
-      `PDO SQLite probe connected successfully with ${pdoProbe.dsn}. [${pdoMs}ms]`,
-      0.868,
-    );
-  } else {
-    const detail = pdoProbe.error?.message || "SQLite PDO connection failed.";
-    publish(`PDO SQLite probe failed: ${detail} [${pdoMs}ms]`, 0.868);
+  // The PDO probe is purely diagnostic (it does not gate the boot — a failure
+  // only logs). Skip the extra php.run() on normal boots and only spend it
+  // when debugging/profiling, where the diagnostic is actually consumed.
+  if (debug || profile) {
+    const tPdo = performance.now();
+    publish("Probing PDO SQLite connectivity.", 0.865);
+    const pdoProbe = await runPdoProbe(php, webRoot);
+    const pdoMs = Math.round(performance.now() - tPdo);
+    if (pdoProbe.ok) {
+      publish(
+        `PDO SQLite probe connected successfully with ${pdoProbe.dsn}. [${pdoMs}ms]`,
+        0.868,
+      );
+    } else {
+      const detail = pdoProbe.error?.message || "SQLite PDO connection failed.";
+      publish(`PDO SQLite probe failed: ${detail} [${pdoMs}ms]`, 0.868);
+    }
   }
 
   publish(
@@ -2640,11 +2752,9 @@ export async function bootstrapMoodle({
 
   let installState = null;
   const hasSavedInstallState = Boolean(savedInstallState?.installed);
-  let installMarkerMatches = installStateMatches(
-    savedInstallState,
-    manifestState,
-    dbName,
-  );
+  // Same computation as markerLikelyValid above (used to gate the prefetches);
+  // reused here so the value cannot diverge.
+  let installMarkerMatches = markerLikelyValid;
 
   if (installMarkerMatches) {
     publish(
@@ -2719,6 +2829,8 @@ export async function bootstrapMoodle({
       appBaseUrl: appBaseUrl || origin,
       publish,
       moodleBranch: resolvedBranch,
+      manifest: archive.manifest,
+      prefetched: snapshotPrefetch,
     });
 
     if (snapshotLoaded) {
@@ -2740,6 +2852,7 @@ export async function bootstrapMoodle({
         publish,
         moodleBranch: resolvedBranch,
         wwwroot,
+        prefetched: seedPrefetch,
       });
     } else {
       // Fallback: run the full Moodle CLI installer
@@ -2818,6 +2931,7 @@ export async function bootstrapMoodle({
         publish,
         moodleBranch: resolvedBranch,
         wwwroot,
+        prefetched: seedPrefetch,
       });
     }
   }
@@ -3037,5 +3151,14 @@ export async function bootstrapMoodle({
     manifest: archive.manifest,
     manifestState,
     readyPath,
+    // Boot timings surfaced for the "should we chunk the bundle?" decision
+    // (ADR 0011 / plan F2.5). downloadWaitMs is how long bootstrap blocked
+    // waiting for the bundle AFTER php.refresh() finished — i.e. the part of
+    // the download that did NOT overlap the WASM compile. A large value is the
+    // signal that chunking (parallel part downloads) could still help.
+    timings: {
+      downloadWaitMs: archiveMs,
+      prepareMs,
+    },
   };
 }

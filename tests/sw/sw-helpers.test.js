@@ -167,6 +167,34 @@ function rewriteHtmlDocumentAttributes(html, scope) {
   );
 }
 
+// Replicate the OPTIMIZED rewriteHtmlDocument attribute step from sw.js with
+// the fast-path filter + per-document memo. Used by the equivalence tests
+// below to prove the fast path is byte-identical to the unfiltered path.
+function rewriteHtmlDocumentAttributesFast(html, scope) {
+  const memo = new Map();
+  return html.replace(
+    /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
+    (match, prefix, rawValue, suffix) => {
+      if (
+        rawValue === "" ||
+        (!rawValue.startsWith("/") &&
+          !rawValue.includes("://") &&
+          !rawValue.includes("&") &&
+          !rawValue.includes("<") &&
+          !rawValue.includes(">"))
+      ) {
+        return match;
+      }
+      let encoded = memo.get(rawValue);
+      if (encoded === undefined) {
+        encoded = escapeHtml(rewriteHtmlAttributeUrl(rawValue, scope));
+        memo.set(rawValue, encoded);
+      }
+      return `${prefix}${encoded}${suffix}`;
+    },
+  );
+}
+
 // Replicate buildScopedCacheKey from sw.js
 function buildScopedCacheKey(origin, scopeId, runtimeId, requestPath) {
   const queryIndex = requestPath.indexOf("?");
@@ -438,6 +466,63 @@ describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
     const html = '<a href="upgradesettings.php">x</a>';
     const out = rewriteHtmlDocumentAttributes(html, scope);
     assert.strictEqual(out, '<a href="upgradesettings.php">x</a>');
+  });
+});
+
+describe("rewriteHtmlDocument fast-path equivalence", () => {
+  // The fast-path filter + memo in sw.js must produce BYTE-IDENTICAL output to
+  // the unfiltered decode -> rewrite -> escapeHtml path for every value,
+  // otherwise it changes behaviour (and, for the escape cases, security).
+  const scope = {
+    origin: "https://ateeducacion.github.io",
+    scopeId: "main",
+    runtimeId: "php83-moodle50",
+    appBasePath: "/moodle-playground",
+  };
+
+  const corpus = [
+    // Relative URLs without special chars (the values the fast path skips).
+    '<a href="upgradesettings.php">x</a>',
+    '<a href="view.php?id=3">x</a>',
+    '<form action="">x</form>',
+    '<a href="#section">x</a>',
+    '<img src="logo.png">',
+    "<a href='../course/index.php'>x</a>",
+    // Anchor / scheme values handled by the early returns.
+    '<a href="javascript:void(0)">x</a>',
+    '<a href="mailto:a@b.test">x</a>',
+    '<a href="data:image/png;base64,AAAA">x</a>',
+    '<a href="//cdn.example.test/x.js">x</a>',
+    // Entity-encoded query strings (force the slow path via "&").
+    '<a href="/moodle-playground/admin/index.php?cache=1&amp;sesskey=abc">x</a>',
+    // Absolute same-origin path (force the slow path via leading "/").
+    '<a href="/moodle-playground/course/edit.php">x</a>',
+    // Absolute URL (force the slow path via "://").
+    '<a href="https://ateeducacion.github.io/moodle-playground/x.php">x</a>',
+    // Quote-breakout payloads (force the slow path via "<"/">" and "&").
+    '<a href="foo.php?x=&quot;&gt;&lt;img src=x onerror=alert(1)&gt;">x</a>',
+    "<a href='foo.php?n=&#39;a&#39;'>x</a>",
+    // Repeated identical values (exercise the memo).
+    '<img src="/moodle-playground/pix/i.svg"><img src="/moodle-playground/pix/i.svg">',
+    // Multiple attributes in one tag.
+    '<a href="/moodle-playground/a.php" data-url="b.php" data-action="/moodle-playground/c.php">x</a>',
+  ];
+
+  for (const html of corpus) {
+    it(`is byte-identical for: ${html.slice(0, 50)}`, () => {
+      assert.strictEqual(
+        rewriteHtmlDocumentAttributesFast(html, scope),
+        rewriteHtmlDocumentAttributes(html, scope),
+      );
+    });
+  }
+
+  it("is byte-identical for a combined document", () => {
+    const html = corpus.join("\n");
+    assert.strictEqual(
+      rewriteHtmlDocumentAttributesFast(html, scope),
+      rewriteHtmlDocumentAttributes(html, scope),
+    );
   });
 });
 

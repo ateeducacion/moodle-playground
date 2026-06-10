@@ -132,6 +132,30 @@ describe("createMoodleConfigPhp", () => {
     const config = createMoodleConfigPhp(baseParams);
     assert.ok(config.includes("spl_autoload_register"));
   });
+
+  it("keeps cachejs disabled by default (no RequireJS seed)", () => {
+    const config = createMoodleConfigPhp(baseParams);
+    assert.ok(config.includes("$CFG->cachejs = false;"));
+    assert.ok(!config.includes("$CFG->jsrev = 1;"));
+    assert.ok(!config.includes("is_dir($CFG->localcachedir . '/requirejs')"));
+  });
+
+  it("re-enables cachejs and pins jsrev when the RequireJS seed is present", () => {
+    const config = createMoodleConfigPhp({
+      ...baseParams,
+      requirejsSeeded: true,
+    });
+    // jsrev forced to 1 so the URL revision matches the seeded sha1(1) file.
+    assert.ok(config.includes("$CFG->jsrev = 1;"));
+    // cachejs flips back to false (self-heal) if localcache/requirejs is purged.
+    assert.ok(
+      config.includes(
+        "$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');",
+      ),
+    );
+    // Must NOT also emit the unconditional disable.
+    assert.ok(!config.includes("$CFG->cachejs = false;"));
+  });
 });
 
 describe("createPhpIniEntries", () => {
@@ -166,5 +190,18 @@ describe("createPhpIniEntries", () => {
   it("sets session save path under TEMP_ROOT", () => {
     const entries = createPhpIniEntries();
     assert.ok(entries["session.save_path"].startsWith(TEMP_ROOT));
+  });
+
+  it("enables the realpath cache for the immutable MEMFS tree", () => {
+    const entries = createPhpIniEntries();
+    assert.strictEqual(entries.realpath_cache_size, "8M");
+    assert.strictEqual(entries.realpath_cache_ttl, "86400");
+  });
+
+  it("keeps OPcache in file-cache-only mode with timestamps disabled", () => {
+    const entries = createPhpIniEntries();
+    assert.strictEqual(entries["opcache.enable"], "1");
+    assert.strictEqual(entries["opcache.file_cache_only"], "1");
+    assert.strictEqual(entries["opcache.validate_timestamps"], "0");
   });
 });

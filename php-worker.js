@@ -1,6 +1,6 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
-import { bootstrapMoodle } from "./src/runtime/bootstrap.js";
+import { bootstrapMoodle, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import {
@@ -34,6 +34,11 @@ let debug = workerUrl.searchParams.get("debug") || null;
 let profile = workerUrl.searchParams.get("profile") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
+// The ready PHP instance, exposed for the static fast path (see
+// installBridgeListener). Set once boot completes, cleared on reset / boot
+// error. Reading it is only ever a fast-path optimization — a stale or null
+// value just routes the request through the normal serial queue.
+let readyPhp = null;
 let requestQueue = Promise.resolve();
 let activeBlueprint = null;
 let activeRuntimeConfig = null;
@@ -451,6 +456,7 @@ function resetRuntime(reason) {
   reactiveRestartCount += 1;
   requestCount = 0;
   runtimeStatePromise = null;
+  readyPhp = null;
   phpInfoCapturePromise = null;
   automaticPhpInfoAttempted = false;
   activeRuntimeConfig = null;
@@ -500,33 +506,55 @@ async function getRuntimeState() {
       forceCleanBoot,
     });
 
-    postShell({
-      kind: "progress",
-      title: "Refreshing PHP runtime",
-      detail: `[${configMs}ms config] Booting PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}.`,
-      progress: 0.12,
+    // Progress reporter, hoisted above refresh so the bundle-download band
+    // (0.16-0.44, emitted by startArchiveResolution running concurrently with
+    // refresh below) and the refresh band (0.12-0.14) can interleave. Clamp to
+    // monotonic so the bar never jumps backwards when the two interleave.
+    let maxProgress = 0;
+    const emitProgress = (title, detail, progress) => {
+      const elapsed = Math.round(performance.now() - bootStart);
+      const clamped =
+        typeof progress === "number" ? Math.max(maxProgress, progress) : progress;
+      if (typeof clamped === "number") {
+        maxProgress = clamped;
+      }
+      postShell({
+        kind: "progress",
+        title,
+        detail: `[${elapsed}ms] ${detail}`,
+        progress: clamped,
+      });
+    };
+    const publish = (detail, progress) =>
+      emitProgress("Bootstrapping Moodle", detail, progress);
+
+    emitProgress(
+      "Refreshing PHP runtime",
+      `[${configMs}ms config] Booting PHP ${phpVersion || "8.3"}${branchMeta ? ` + ${branchMeta.label}` : ""}.`,
+      0.12,
+    );
+
+    // Kick off the manifest resolution + bundle download NOW so it overlaps the
+    // WASM compile in php.refresh(). The no-op .catch prevents an
+    // unhandledrejection if refresh() throws first; the real error resurfaces
+    // at `await archivePromise` inside bootstrapMoodle and flows into the
+    // bootstrap-error catch below.
+    const archivePromise = startArchiveResolution({
+      moodleBranch,
+      appBaseUrl: appRootUrl,
+      publish,
     });
+    archivePromise.catch(() => {});
 
     const t1 = performance.now();
     await php.refresh();
     const refreshMs = Math.round(performance.now() - t1);
 
-    postShell({
-      kind: "progress",
-      title: "Refreshing PHP runtime",
-      detail: `[${refreshMs}ms refresh] PHP runtime ready.`,
-      progress: 0.14,
-    });
-
-    const publish = (detail, progress) => {
-      const elapsed = Math.round(performance.now() - bootStart);
-      postShell({
-        kind: "progress",
-        title: "Bootstrapping Moodle",
-        detail: `[${elapsed}ms] ${detail}`,
-        progress,
-      });
-    };
+    emitProgress(
+      "Refreshing PHP runtime",
+      `[${refreshMs}ms refresh] PHP runtime ready.`,
+      0.14,
+    );
 
     const t2 = performance.now();
     let bootstrapState;
@@ -545,6 +573,7 @@ async function getRuntimeState() {
         profile,
         webRoot,
         onPluginInstalled: (dirPath) => snapshot.trackPluginDir(dirPath),
+        archivePromise,
       });
     } catch (error) {
       if (!automaticPhpInfoAttempted) {
@@ -558,16 +587,26 @@ async function getRuntimeState() {
       // retry decision live in the bridge listener (installBridgeListener),
       // not here, to avoid double-counting restarts.
       runtimeStatePromise = null;
+      readyPhp = null;
 
       throw error;
     }
     const bootstrapMs = Math.round(performance.now() - t2);
 
     const totalMs = Math.round(performance.now() - bootStart);
+    // downloadWaitMs = bundle download time that did NOT overlap the WASM
+    // compile (0 means the parallel download fully hid behind php.refresh()).
+    // A large value is the signal that bundle chunking could still help
+    // (plan F2.5 / ADR 0011).
+    const t = bootstrapState?.timings || {};
+    const downloadWaitDetail =
+      typeof t.downloadWaitMs === "number"
+        ? ` | Bundle wait (post-refresh): ${t.downloadWaitMs}ms`
+        : "";
     postShell({
       kind: "progress",
       title: "Boot timing summary",
-      detail: `Config: ${configMs}ms | PHP refresh: ${refreshMs}ms | Bootstrap: ${bootstrapMs}ms | Total: ${totalMs}ms`,
+      detail: `Config: ${configMs}ms | PHP refresh: ${refreshMs}ms | Bootstrap: ${bootstrapMs}ms${downloadWaitDetail} | Total: ${totalMs}ms`,
       progress: 0.95,
     });
 
@@ -594,6 +633,8 @@ async function getRuntimeState() {
       path: bootstrapState.readyPath || activeBlueprint?.landingPage || config.landingPath || "/",
     });
 
+    // Expose the ready instance for the static fast path (installBridgeListener).
+    readyPhp = php;
     return { php };
   })();
 
@@ -624,6 +665,37 @@ function installBridgeListener() {
 
     if (data?.kind !== "http-request") {
       return;
+    }
+
+    // Static fast path: serve non-.php MEMFS files (CSS/JS/images/fonts)
+    // WITHOUT waiting in the serial PHP request queue. readFileAsBuffer is a
+    // pure-JS Emscripten MEMFS read, safe to run while a php.run() is
+    // suspended (the worker is single-threaded). serveStaticSync returns null
+    // for PHP scripts, .php/PATH_INFO routes, traversals and missing files, so
+    // those fall through to the queue with today's exact semantics.
+    // requestCount and detectPluginInstall are intentionally skipped — both
+    // are PHP-execution concerns. HEAD/POST keep queueing.
+    if (data.request?.method === "GET" && readyPhp) {
+      let staticHit = null;
+      try {
+        const u = new URL(data.request.url);
+        staticHit = readyPhp.serveStaticSync(u.pathname + u.search);
+      } catch {
+        staticHit = null;
+      }
+      if (staticHit) {
+        respond({
+          kind: "http-response",
+          id: data.id,
+          response: {
+            status: staticHit.status,
+            statusText: "OK",
+            headers: staticHit.headers,
+            body: staticHit.bytes,
+          },
+        });
+        return;
+      }
     }
 
     requestQueue = requestQueue.then(async () => {

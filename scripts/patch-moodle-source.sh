@@ -52,6 +52,7 @@ ENCRYPTION_PATCH="$PATCH_DIR/lib/classes/encryption.php"
 COMPONENTPHP="$SOURCE_DIR/${PUB}lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/${PUB}lib/setuplib.php"
 SETUPPHP="$SOURCE_DIR/${PUB}lib/setup.php"
+REQUIREJSPHP="$SOURCE_DIR/${PUB}lib/requirejs.php"
 
 if [ -f "$DMLLIB" ] && [ -f "$SOURCE_DIR/${PUB}lib/classes/exception/response_aware_exception.php" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
   python3 - "$DMLLIB" <<'PY'
@@ -143,6 +144,72 @@ if needle not in text:
     raise SystemExit(f"Needle not found in {path}")
 
 path.write_text(text.replace(needle, insert, 1), encoding="utf-8")
+PY
+fi
+
+# PLAYGROUND: re-enable cachejs by serving a build-time-seeded combined
+# RequireJS bundle (see ADR 0013). Two hunks:
+#  1. The runtime must NEVER build the combine itself — find_all_amd_modules()
+#     relies on realpath()/getRealPath(), unreliable on the Emscripten VFS, so
+#     a runtime build writes a poisoned-but-existing cache file
+#     ("No define call for core/first"). Guard the cache-miss build branch with
+#     !defined('MOODLE_PLAYGROUND') so the playground falls through to the
+#     existing dev-mode single-module serving instead.
+#  2. The seeded combine contains only the modules present at BUILD time, so it
+#     is served ONLY for the core/first bootstrap request; every other non-lazy
+#     module (incl. AMD from plugins installed at runtime) falls through to
+#     per-module serving. Restricting it to core/first keeps runtime plugins
+#     working while still saving the dozens-of-requests-per-page cost.
+if [ -f "$REQUIREJSPHP" ] && ! grep -q "MOODLE_PLAYGROUND" "$REQUIREJSPHP"; then
+  python3 - "$REQUIREJSPHP" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+# Hunk 2: restrict the seeded combine to core/first and skip the candidate for
+# every other non-lazy module. Applied first because hunk 1 rewrites the
+# "} else {" that follows the file_exists() block.
+needle2 = (
+    "    $candidate = $CFG->localcachedir . '/requirejs/' . $etag;\n"
+    "\n"
+    "    if (file_exists($candidate)) {\n"
+)
+insert2 = (
+    "    $candidate = $CFG->localcachedir . '/requirejs/' . $etag;\n"
+    "\n"
+    "    // PLAYGROUND: the combined bundle is seeded at build time and contains\n"
+    "    // only the modules present then, so serve it ONLY for the core/first\n"
+    "    // bootstrap request. Every other non-lazy module (including AMD from\n"
+    "    // plugins installed at runtime) falls through to per-module serving.\n"
+    "    if (defined('MOODLE_PLAYGROUND') && !$lazyload && !($component === 'core' && $module === 'first.js')) {\n"
+    "        $candidate = '';\n"
+    "    }\n"
+    "\n"
+    "    if ($candidate !== '' && file_exists($candidate)) {\n"
+)
+
+# Hunk 1: never build the combine at runtime in the playground.
+needle1 = (
+    "    } else {\n"
+    "        $jsfiles = array();\n"
+    "        if ($lazyload) {\n"
+)
+insert1 = (
+    "    } else if (!defined('MOODLE_PLAYGROUND')) {\n"
+    "        $jsfiles = array();\n"
+    "        if ($lazyload) {\n"
+)
+
+if needle2 not in text:
+    raise SystemExit(f"Needle 2 (candidate guard) not found in {path}")
+if needle1 not in text:
+    raise SystemExit(f"Needle 1 (build branch) not found in {path}")
+
+text = text.replace(needle2, insert2, 1)
+text = text.replace(needle1, insert1, 1)
+path.write_text(text, encoding="utf-8")
 PY
 fi
 

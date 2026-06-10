@@ -98,6 +98,14 @@ if (args.snapshot) {
     manifest.snapshot.drained = true;
   }
 
+  // The localcache seed carries a pre-built combined RequireJS bundle: the
+  // runtime re-enables $CFG->cachejs (one combined JS request per page instead
+  // of dozens). Keyed off the actual artifact so cached/legacy seeds without it
+  // keep cachejs=false. See ADR 0013.
+  if (args.snapshotRequirejs === "1" || args.snapshotRequirejs === "true") {
+    manifest.snapshot.requirejs = true;
+  }
+
   if (args.snapshotLocalcache) {
     const seedPath = resolve(args.snapshotLocalcache);
     const seedStats = statSync(seedPath);
