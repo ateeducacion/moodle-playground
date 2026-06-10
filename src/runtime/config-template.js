@@ -25,6 +25,7 @@ export function createMoodleConfigPhp({
   wwwroot,
   playgroundProxyUrl = "",
   debugdisplay = 0,
+  requirejsSeeded = false,
 }) {
   const resolvedComponentCachePath =
     componentCachePath || buildComponentCachePath(moodleRoot);
@@ -66,10 +67,28 @@ $CFG->debugdisplay = ${Number(debugdisplay) ? 1 : 0};
 $CFG->showcrondebugging = false;
 // Enable all caching layers — the filesystem is MEMFS (pure memory) so file-backed
 // caches are fast and persist for the lifetime of the worker session.
-// cachejs must stay false: when enabled, Moodle rewrites JS module URLs to serve
-// combined bundles through javascript.php. The caching endpoint fails silently
-// in the WASM environment, causing "No define call for core/first" RequireJS errors.
-$CFG->cachejs = false;
+${
+  requirejsSeeded
+    ? `// RequireJS combined bundle is seeded at build time (manifest
+// snapshot.requirejs), so we re-enable $CFG->cachejs: the browser makes ONE
+// combined JS request per page (/lib/requirejs.php/1/core/first.js) instead of
+// dozens of per-module requests through the serial worker queue. See ADR 0013.
+// - jsrev is FORCED to 1 (not time()): config.php overrides DB config, so
+//   js_reset_all_caches()'s set_config('jsrev', time()) cannot desync the URL
+//   revision from the seeded sha1(1) file across journaled reloads. Bundle JS
+//   is immutable per build, so in-session JS cache-busting being a no-op is fine.
+// - The runtime NEVER builds the combine (lib/requirejs.php is patched at build
+//   time; find_all_amd_modules is unreliable on the Emscripten VFS).
+// - 'Purge all caches' wipes localcache including requirejs/, so the is_dir()
+//   probe flips cachejs back to false (dev-mode per-module serving — today's
+//   behavior) for the rest of the session; the next boot re-extracts the seed.
+$CFG->jsrev = 1;
+$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');`
+    : `// cachejs stays false: without the build-time RequireJS seed, enabling it makes
+// the runtime build the combine itself, which fails silently in the WASM
+// environment ("No define call for core/first" RequireJS errors). See ADR 0013.
+$CFG->cachejs = false;`
+}
 $CFG->cachetemplates = true;
 $CFG->langstringcache = true;
 $CFG->themedesignermode = false;

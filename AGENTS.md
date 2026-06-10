@@ -249,12 +249,18 @@ Current database assumptions:
 - A pre-built install snapshot (`assets/moodle/snapshot/install.sq3`) eliminates the
   3-8s CLI install phase. If unavailable, the full CLI install runs as a fallback.
 - Snapshot v2 manifests additionally advertise `snapshot.drained` (the adhoc task
-  queue was executed at build time via `admin/cli/adhoc_task.php`) and
+  queue was executed at build time via `admin/cli/adhoc_task.php`),
   `snapshot.localcache` (a `localcache.zip` seed with the compiled theme candidate
-  sheets + DI container). Snapshot-origin boots extract the seed into
-  `/persist/moodledata/localcache` on EVERY boot (localcache is never journaled)
-  and skip the SCSS warmup and qbank drainer steps. Legacy manifests without
-  these fields keep the warmup/drainer behavior.
+  sheets + DI container) and `snapshot.requirejs` (the seed also contains a
+  pre-built combined RequireJS bundle at `localcache/requirejs/<sha1(1)>`).
+  Snapshot-origin boots extract the seed into `/persist/moodledata/localcache` on
+  EVERY boot (localcache is never journaled) and skip the SCSS warmup and qbank
+  drainer steps. When `snapshot.requirejs` is set, the runtime re-enables
+  `$CFG->cachejs` (pinning `$CFG->jsrev = 1`) so the browser makes one combined JS
+  request per page instead of dozens; `lib/requirejs.php` is patched at build time
+  to never build the combine itself and to serve the seed only for `core/first`
+  (ADR 0013). Legacy manifests without these fields keep the
+  warmup/drainer/`cachejs = false` behavior.
 
 When touching the migration/runtime path, preserve these invariants:
 
@@ -406,6 +412,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0010](docs/decisions/0010-build-time-localcache-seed.md) | Build-time localcache seed (theme CSS + DI container) | Accepted |
 | [0011](docs/decisions/0011-bundle-trim-and-runtime-tuning.md) | Bundle content trim + php.ini/runtime tuning (amends ADR 0004) | Accepted |
 | [0012](docs/decisions/0012-worker-static-fast-path.md) | Static-file fast path bypassing the serial PHP request queue | Accepted |
+| [0013](docs/decisions/0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Accepted |
 
 ## Debugging
 

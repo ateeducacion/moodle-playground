@@ -2118,7 +2118,7 @@ async function loadLocalcacheSeed(
     const result = await prefetched;
     if (result instanceof Uint8Array) {
       bytes = result;
-    } else if (result && result.error) {
+    } else if (result?.error) {
       throw result.error;
     }
   }
@@ -2659,6 +2659,9 @@ export async function bootstrapMoodle({
     wwwroot,
     playgroundProxyUrl,
     debugdisplay: effectiveConfig.debugdisplay,
+    // Re-enable cachejs only when the manifest advertises the build-time
+    // RequireJS combined seed (ADR 0013); legacy bundles keep cachejs=false.
+    requirejsSeeded: Boolean(archive.manifest?.snapshot?.requirejs),
   });
 
   // Kick off the install snapshot + localcache seed downloads NOW so the

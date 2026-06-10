@@ -220,6 +220,13 @@ if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
     # The seed and the drained task queue are produced together by
     # generate-install-snapshot.sh, so advertise both to the runtime.
     SNAPSHOT_ARGS="$SNAPSHOT_ARGS --snapshotLocalcache $SNAPSHOT_DIR/localcache.zip --snapshotDrained 1"
+    # Advertise the combined RequireJS seed ONLY if it is actually in the zip,
+    # so the runtime cachejs flip is keyed off the shipped artifact: cached
+    # pre-warmup seeds and legacy bundles keep cachejs=false (graceful
+    # degradation). See ADR 0013.
+    if unzip -l "$SNAPSHOT_DIR/localcache.zip" 2>/dev/null | grep -q ' requirejs/'; then
+      SNAPSHOT_ARGS="$SNAPSHOT_ARGS --snapshotRequirejs 1"
+    fi
   fi
 fi
 
