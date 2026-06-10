@@ -2,7 +2,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 export const DEFAULT_LANDING_PATH = "/my/";
-export const readyTimeoutMs = process.env.CI ? 150_000 : 120_000;
+// CI boots race each other for the runner's CPU (2 Playwright workers, each
+// a full WASM PHP instance). On Firefox the readiness tail regularly crossed
+// 150s — the heaviest blueprint boots (roles/scales/cohorts) flaked ~50% on
+// loaded runners while passing untouched reruns — so give CI a budget that
+// covers the observed tail instead of its median.
+export const readyTimeoutMs = process.env.CI ? 240_000 : 120_000;
+// Spec-level budget: must exceed readyTimeoutMs so a slow boot fails on the
+// readiness expectation (diagnosable) rather than on the test timeout.
+export const specTimeoutMs = process.env.CI ? 300_000 : 180_000;
 
 export function createDiagnosticsCollector(page) {
   const consoleMessages = [];
