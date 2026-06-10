@@ -1,7 +1,11 @@
 import { expect, test } from "./fixtures.mjs";
-import { buildBlueprintParam, waitForShellReady } from "./helpers.mjs";
+import {
+  buildBlueprintParam,
+  specTimeoutMs,
+  waitForShellReady,
+} from "./helpers.mjs";
 
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: specTimeoutMs });
 
 // ---------------------------------------------------------------------------
 // Blueprint: course creation with users, enrollment, and modules

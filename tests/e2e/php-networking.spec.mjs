@@ -8,12 +8,13 @@ import { expect, test } from "./fixtures.mjs";
 import {
   buildBlueprintParam,
   findMoodleFrame,
+  specTimeoutMs,
   waitForPlaygroundReady,
   waitForRuntimeFrameReady,
   waitForScopedHttpReady,
 } from "./helpers.mjs";
 
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: specTimeoutMs });
 test.use({ ignoreHTTPSErrors: true });
 
 let localHttpsServer;

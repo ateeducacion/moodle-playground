@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures.mjs";
+import { specTimeoutMs } from "./helpers.mjs";
 
-test.describe.configure({ timeout: 180_000 });
+test.describe.configure({ timeout: specTimeoutMs });
 
 // Guard: the booted playground must render a real themed Moodle page.
 // The boot/blueprint specs validate the worker pipeline but never render a
