@@ -403,6 +403,9 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0007](docs/decisions/0007-course-restore-step.md) | Course backup (.mbz) restore step (PHP streaming download + restore_controller) | Accepted |
 | [0008](docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
 | [0009](docs/decisions/0009-file-backed-config-settings-blueprint-steps.md) | File-backed Moodle config settings in blueprints (`setConfigFile` / `setConfigFiles`) | Accepted |
+| [0010](docs/decisions/0010-build-time-localcache-seed.md) | Build-time localcache seed (theme CSS + DI container) | Accepted |
+| [0011](docs/decisions/0011-bundle-trim-and-runtime-tuning.md) | Bundle content trim + php.ini/runtime tuning (amends ADR 0004) | Accepted |
+| [0012](docs/decisions/0012-worker-static-fast-path.md) | Static-file fast path bypassing the serial PHP request queue | Accepted |
 
 ## Debugging
 

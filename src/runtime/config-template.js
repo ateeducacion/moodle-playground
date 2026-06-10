@@ -271,13 +271,32 @@ export function createPhpIniEntries({
     upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
     "session.save_path": `${TEMP_ROOT}/sessions`,
-    // OPcache tuning — use in-memory file cache with a high file limit
-    // and no timestamp checks (the readonly bundle never changes within
-    // a session), so PHP avoids recompiling on every request.
+    // Realpath cache — every include resolves each path component via lstat
+    // through Emscripten's JS FS (cheap individually, but tens of thousands
+    // of JS calls per Moodle request at path depth ~6). The bundle tree is
+    // immutable within a session and there is exactly ONE PHP process, so
+    // every mid-session unlink/rename happens inside PHP, which invalidates
+    // its own realpath-cache entries; JS-side FS writes (journal hydration,
+    // boot patches) all happen before the first request, and PHP does not
+    // cache negative lookups, so files created later are never masked.
+    // If a future feature ever deletes MEMFS files from the JS side between
+    // requests, revisit this TTL.
+    realpath_cache_size: "8M",
+    realpath_cache_ttl: "86400",
+    // OPcache tuning — compiled bytecode is kept in /internal/shared/opcache
+    // with no timestamp checks (the readonly bundle never changes within a
+    // session), so PHP avoids recompiling on every request.
+    // NOTE: with file_cache_only=1 OPcache allocates NO shared memory
+    // segment, so max_accelerated_files / memory_consumption /
+    // interned_strings_buffer are inert in this mode. They are kept (with
+    // max_accelerated_files sized above Moodle's ~15k bundled PHP files)
+    // only as future-proofing should file_cache_only ever be revisited.
+    // See docs/decisions/0011-bundle-trim-and-runtime-tuning.md (amends
+    // ADR 0004).
     "opcache.enable": "1",
     "opcache.file_cache": "/internal/shared/opcache",
     "opcache.file_cache_only": "1",
-    "opcache.max_accelerated_files": "10000",
+    "opcache.max_accelerated_files": "20000",
     "opcache.memory_consumption": "128",
     "opcache.interned_strings_buffer": "32",
     "opcache.validate_timestamps": "0",

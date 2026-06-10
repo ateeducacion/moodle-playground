@@ -167,4 +167,17 @@ describe("createPhpIniEntries", () => {
     const entries = createPhpIniEntries();
     assert.ok(entries["session.save_path"].startsWith(TEMP_ROOT));
   });
+
+  it("enables the realpath cache for the immutable MEMFS tree", () => {
+    const entries = createPhpIniEntries();
+    assert.strictEqual(entries.realpath_cache_size, "8M");
+    assert.strictEqual(entries.realpath_cache_ttl, "86400");
+  });
+
+  it("keeps OPcache in file-cache-only mode with timestamps disabled", () => {
+    const entries = createPhpIniEntries();
+    assert.strictEqual(entries["opcache.enable"], "1");
+    assert.strictEqual(entries["opcache.file_cache_only"], "1");
+    assert.strictEqual(entries["opcache.validate_timestamps"], "0");
+  });
 });

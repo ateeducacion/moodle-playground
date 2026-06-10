@@ -509,6 +509,52 @@ export function wrapPhpInstance(
     },
 
     /**
+     * Synchronously serve a static (non-.php) file from MEMFS, or return null
+     * when the caller must fall back to the normal queued request() path:
+     * the target is a PHP script (incl. `.php/PATH_INFO` routes), a path
+     * traversal, or the file is missing.
+     *
+     * This is the same MEMFS read as the static branch of request() (above),
+     * exposed so the worker can answer it WITHOUT waiting in the serial PHP
+     * request queue. Safe to call while a php.run() is suspended:
+     * readFileAsBuffer is a pure-JS Emscripten MEMFS read (no WASM re-entry)
+     * and the worker is single-threaded, so reads are atomic w.r.t. PHP
+     * writes. moodledata is NOT URL-addressable (resolveScriptPath only maps
+     * under webRoot), so dataroot files never take this path.
+     *
+     * @returns {{status:number, headers:object, bytes:Uint8Array}|null}
+     */
+    serveStaticSync(urlPath) {
+      const path = String(urlPath || "/");
+      const qIdx = path.indexOf("?");
+      const pathname = qIdx >= 0 ? path.substring(0, qIdx) : path;
+      // Defense in depth: never let a traversal escape webRoot. The SW/Request
+      // URL normalization already collapses dot segments, so this is
+      // belt-and-braces.
+      if (pathname.includes("/../")) {
+        return null;
+      }
+      const { scriptPath } = resolveScriptPath(pathname, resolvedWebRoot);
+      // .php (and .php/PATH_INFO, which resolveScriptPath maps to a .php
+      // script) must keep going through the queued PHP execution path.
+      if (isPhpScript(scriptPath)) {
+        return null;
+      }
+      try {
+        const bytes = php.readFileAsBuffer(scriptPath);
+        return {
+          status: 200,
+          headers: { "content-type": getMimeType(scriptPath) },
+          bytes,
+        };
+      } catch {
+        // Missing file → fall back to the queue (preserves boot-race /
+        // mid-install semantics; never reply 404 from the fast path).
+        return null;
+      }
+    },
+
+    /**
      * Run inline PHP code. Returns a PHPResponse with .text and .errors.
      */
     async run(code) {

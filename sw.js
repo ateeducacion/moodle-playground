@@ -21,7 +21,12 @@ const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico
 // PHP scripts that serve cacheable assets with revision numbers in the URL.
 // The revision acts as a natural cache key — when content changes, the URL changes.
 // Excludes pluginfile.php and draftfile.php (user content, not cacheable).
-const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|theme\/image\.php|theme\/font\.php)\//u;
+// lib/requirejs.php is included for symmetry with lib/javascript.php: its
+// module URLs (/lib/requirejs.php/<rev>/core/first.js) already match
+// SCOPED_STATIC_RE via their .js suffix, so this is belt-and-braces (the
+// scope+runtime cache key and BUILD_VERSION-scoped cache name prevent stale
+// cross-build content), not a functional change.
+const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|lib\/requirejs\.php|theme\/image\.php|theme\/font\.php)\//u;
 const INTERNAL_PROXY_PATH = "/__playground_proxy__";
 let playgroundConfigPromise;
 let addonProxyUrlOverride = null;
@@ -74,10 +79,20 @@ const STATIC_PREFIXES = [
   "/logo.png",
 ];
 
+// self.registration.scope is constant for the Service Worker's lifetime, so
+// memoize the parsed base path: getScopedBasePath -> withAppBasePath ->
+// getAppBasePath used to construct a fresh URL on every HTML attribute rewrite.
+let cachedAppBasePath = null;
 function getAppBasePath() {
+  if (cachedAppBasePath !== null) {
+    return cachedAppBasePath;
+  }
   const scopeUrl = new URL(self.registration.scope);
   const pathname = scopeUrl.pathname;
-  return pathname.endsWith("/") ? pathname.slice(0, -1) || "/" : pathname || "/";
+  cachedAppBasePath = pathname.endsWith("/")
+    ? pathname.slice(0, -1) || "/"
+    : pathname || "/";
+  return cachedAppBasePath;
 }
 
 function stripAppBasePath(pathname) {
@@ -408,10 +423,16 @@ function decodeHtmlAttributeEntities(value) {
     .replaceAll("&amp;", "&");
 }
 
-function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
+function rewriteHtmlAttributeUrl(rawValue, scope) {
+  const { origin } = scope;
+  // scopedBasePath / appBasePath are computed once per document by
+  // rewriteHtmlDocument and threaded through `scope`, instead of being
+  // recomputed for every matched attribute. Fall back to computing them for
+  // callers that don't pre-populate the scope (keeps the function standalone).
+  const scopedBasePath =
+    scope.scopedBasePath ?? getScopedBasePath(scope.scopeId, scope.runtimeId);
+  const appBasePath = scope.appBasePath ?? getAppBasePath();
   const decodedValue = decodeHtmlAttributeEntities(rawValue);
-  const scopedBasePath = getScopedBasePath(scopeId, runtimeId);
-  const appBasePath = getAppBasePath();
 
   if (!decodedValue) {
     return decodedValue;
@@ -472,7 +493,15 @@ function rewriteHtmlAttributeUrl(rawValue, { origin, scopeId, runtimeId }) {
 
 function rewriteHtmlDocument(html, scope) {
   const { origin, scopeId, runtimeId } = scope;
-  const scopedBase = `${origin}${getScopedBasePath(scopeId, runtimeId)}`;
+  const scopedBasePath = getScopedBasePath(scopeId, runtimeId);
+  const appBasePath = getAppBasePath();
+  const scopedBase = `${origin}${scopedBasePath}`;
+  // Compute the per-document base paths once and thread them through `scope`
+  // so rewriteHtmlAttributeUrl doesn't recompute them for every attribute.
+  const docScope = { ...scope, scopedBasePath, appBasePath };
+  // Moodle pages repeat identical pix/theme URLs dozens of times; memoize the
+  // rewritten+escaped output per raw attribute value within this document.
+  const memo = new Map();
 
   let result = html.replace(
     /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
@@ -481,7 +510,29 @@ function rewriteHtmlDocument(html, scope) {
     // interpolating it back between the quotes, otherwise a decoded value
     // containing a quote could close the attribute early and inject HTML into
     // the playground iframe (reflected XSS).
-    (match, prefix, rawValue, suffix) => `${prefix}${escapeHtml(rewriteHtmlAttributeUrl(rawValue, scope))}${suffix}`,
+    (match, prefix, rawValue, suffix) => {
+      // Fast path: a value that is relative (no leading "/", no "://") and
+      // contains none of & < > decodes to itself and re-encodes to itself, so
+      // the full decode -> rewrite -> escapeHtml round-trip is the identity.
+      // The regex capture already excludes quotes ([^"']*), so escapeHtml has
+      // nothing to encode here. Returning `match` unchanged is byte-identical.
+      if (
+        rawValue === "" ||
+        (!rawValue.startsWith("/") &&
+          !rawValue.includes("://") &&
+          !rawValue.includes("&") &&
+          !rawValue.includes("<") &&
+          !rawValue.includes(">"))
+      ) {
+        return match;
+      }
+      let encoded = memo.get(rawValue);
+      if (encoded === undefined) {
+        encoded = escapeHtml(rewriteHtmlAttributeUrl(rawValue, docScope));
+        memo.set(rawValue, encoded);
+      }
+      return `${prefix}${encoded}${suffix}`;
+    },
   );
 
   // Rewrite M.cfg.wwwroot in inline <script> blocks so Moodle's JavaScript

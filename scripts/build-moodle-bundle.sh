@@ -122,6 +122,16 @@ echo "Packing $BUNDLE_NAME" >&2
 # Remove any previous archive: zip -r UPDATES an existing file, which would
 # keep entries that the exclusion list below no longer allows.
 rm -f "$BUNDLE_PATH"
+
+# Exclusion list. zip -x patterns match the stored entry paths (no leading
+# "./"), so "README.md" anchors at the bundle root while "*/README*" matches
+# nested entries only. Keep this an explicit, commented allowlist: audit any
+# new pattern against ALL branches before landing — e.g. HISTORY* must NEVER
+# be added (it would swallow real code: mod/wiki/history.php,
+# lib/aws-sdk/src/History.php, question/bank/history/...). The PHP-parity
+# tripwire below fails the build if a pattern ever swallows runtime PHP.
+# See docs/decisions/0011-bundle-trim-and-runtime-tuning.md.
+#
 # The runtime never reads VCS metadata or PHPUnit/Behat test suites; excluding
 # them cuts the download roughly in half (the shallow .git packfile alone is
 # ~82 MB of incompressible data) and shrinks MEMFS/extraction accordingly.
@@ -130,17 +140,78 @@ rm -f "$BUNDLE_PATH"
 # require_once($CFG->libdir . '/behat/lib.php')) and admin/tool/behat/ (an
 # installed plugin); plugin Behat suites live under */tests/behat/ and are
 # already covered by the tests pattern.
-(cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" . \
-  -x ".git/*" \
-  -x "*/tests/*" \
-  -x "node_modules/*" -x "*/node_modules/*")
+set -- -x ".git/*" -x "*/tests/*" -x "node_modules/*" -x "*/node_modules/*"
 
-# Keep the manifest fileCount consistent with what the zip actually contains.
-FILE_COUNT=$(find "$MOODLE_DIR" -type f \
+# AMD sources: Moodle serves the compiled amd/build/*.min.js. The dev-mode
+# fallback in lib/requirejs.php only reads amd/src when a module's
+# .min.js.map is MISSING, and every bundled min.js ships its map, so amd/src
+# is dead weight (~845 files / ~13 MB uncompressed). INVARIANT: while
+# $CFG->cachejs is false, amd/src XOR *.map must remain in the bundle —
+# excluding BOTH breaks dev-mode JS (lib/requirejs.php falls back to reading
+# amd/src when the map is absent).
+set -- "$@" -x "*/amd/src/*"
+
+# Root-level docs and build/CI/IDE metadata — never in the runtime include
+# graph. security.txt is deliberately KEPT (it is a servable file).
+set -- "$@" \
+  -x "UPGRADING.md" -x "CONTRIBUTING.md" -x "README.md" -x "INSTALL.txt" \
+  -x "COPYING.txt" -x "TRADEMARK.txt" \
+  -x "Gruntfile.js" -x "package.json" -x "npm-shrinkwrap.json" \
+  -x "composer.json" -x "composer.lock" \
+  -x ".github/*" -x ".grunt/*" -x ".upgradenotes/*" -x ".esbuild/*" -x ".jest/*" \
+  -x ".eslintrc" -x ".stylelintrc" -x ".gherkin-lintrc" -x ".jshintrc" \
+  -x ".jshintignore" -x ".nvmrc" -x ".shifter.json" -x ".phpstorm.meta.php" \
+  -x ".gitattributes" -x ".gitignore"
+
+# Vendor/plugin documentation bundled by Moodle's dependency strategy —
+# nothing in the runtime include graph reads these (~344 files / ~4.6 MB).
+set -- "$@" \
+  -x "*/README*" -x "*/readme*" \
+  -x "*/CHANGELOG*" -x "*/changelog*" -x "*/CHANGES*" \
+  -x "*/AUTHORS*" -x "*/CONTRIBUTING*" \
+  -x "*/upgrade.txt" -x "*/UPGRADING*"
+
+(cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" . "$@")
+
+# Keep the manifest fileCount consistent with what the zip actually contains:
+# derive it from the artifact itself instead of mirroring the exclusion list
+# in a parallel find (root-anchored patterns like "README.md" cannot be
+# expressed as -not -path filters, so a mirror would silently drift).
+mkdir -p "$WORK_DIR"
+BUNDLE_LISTING="$WORK_DIR/bundle-listing.txt"
+unzip -Z1 "$BUNDLE_PATH" > "$BUNDLE_LISTING"
+FILE_COUNT=$(grep -cv '/$' "$BUNDLE_LISTING" || true)
+
+# Tripwire 1: no exclusion pattern may ever swallow runtime PHP. Compare the
+# bundled .php count against the tree filtered by the structural exclusions
+# plus the two known non-runtime PHP locations (.phpstorm.meta.php and the
+# root .github CI tooling — both excluded deliberately above; the .github
+# filter is anchored to the root, matching the zip pattern's anchoring).
+ZIP_PHP_COUNT=$(grep -c '\.php$' "$BUNDLE_LISTING" || true)
+TREE_PHP_COUNT=$(find "$MOODLE_DIR" -type f -name '*.php' \
   -not -path "*/.git/*" \
   -not -path "*/tests/*" \
   -not -path "*/node_modules/*" \
+  -not -path "$MOODLE_DIR/.github/*" \
+  -not -name '.phpstorm.meta.php' \
   | wc -l | tr -d ' ')
+if [ "$ZIP_PHP_COUNT" -ne "$TREE_PHP_COUNT" ]; then
+  echo "ERROR: bundle PHP entry count ($ZIP_PHP_COUNT) != source tree PHP count ($TREE_PHP_COUNT)." >&2
+  echo "An exclusion pattern is swallowing runtime PHP files. Audit the -x list above." >&2
+  exit 1
+fi
+
+# Tripwire 2: required runtime files must be present (Moodle 5.1+ nests the
+# docroot under public/).
+for REQUIRED_RE in \
+  '^(public/)?lib/requirejs\.php$' \
+  '^(public/)?lib/behat/lib\.php$' \
+  '^(public/)?lang/en/moodle\.php$'; do
+  if ! grep -Eq "$REQUIRED_RE" "$BUNDLE_LISTING"; then
+    echo "ERROR: required runtime file matching $REQUIRED_RE missing from bundle." >&2
+    exit 1
+  fi
+done
 
 SNAPSHOT_ARGS=""
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
