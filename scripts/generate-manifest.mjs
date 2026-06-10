@@ -89,6 +89,29 @@ if (args.snapshot) {
     size: snapshotStats.size,
     sha256: sha256For(snapshotPath),
   };
+
+  // The snapshot generator drains the adhoc task queue and packages the
+  // localcache seed (compiled theme CSS + DI container) in the same run;
+  // both flags travel together so the runtime can skip the corresponding
+  // boot steps. Additive fields — schemaVersion stays at 1.
+  if (args.snapshotDrained === "1" || args.snapshotDrained === "true") {
+    manifest.snapshot.drained = true;
+  }
+
+  if (args.snapshotLocalcache) {
+    const seedPath = resolve(args.snapshotLocalcache);
+    const seedStats = statSync(seedPath);
+
+    manifest.snapshot.localcache = {
+      path: relative(resolve(manifestPath, ".."), seedPath).replaceAll(
+        "\\",
+        "/",
+      ),
+      fileName: basename(seedPath),
+      size: seedStats.size,
+      sha256: sha256For(seedPath),
+    };
+  }
 }
 
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

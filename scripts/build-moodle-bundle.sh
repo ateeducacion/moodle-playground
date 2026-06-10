@@ -65,11 +65,16 @@ if [ -n "$BRANCH" ] && [ -d "$MOODLE_DIR/.git" ]; then
   SNAPSHOT_FINGERPRINT="${MOODLE_COMMIT}-$(printf '%.16s' "$SCRIPTS_HASH")-$(printf '%.16s' "$PATCHES_HASH")"
 fi
 
+# A valid cached snapshot is the DB plus the localcache seed (theme CSS +
+# DI container) generated in the same run — restore only when both exist.
 SNAPSHOT_CACHED=false
-if [ -n "$SNAPSHOT_FINGERPRINT" ] && [ -f "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3" ]; then
+if [ -n "$SNAPSHOT_FINGERPRINT" ] \
+  && [ -f "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3" ] \
+  && [ -f "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/localcache.zip" ]; then
   echo "Snapshot cache hit: $SNAPSHOT_FINGERPRINT" >&2
   mkdir -p "$SNAPSHOT_DIR"
   cp "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3" "$SNAPSHOT_DIR/install.sq3"
+  cp "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/localcache.zip" "$SNAPSHOT_DIR/localcache.zip"
   SNAPSHOT_CACHED=true
 fi
 
@@ -78,10 +83,13 @@ if [ "$SNAPSHOT_CACHED" = false ]; then
   if "$SCRIPT_DIR/generate-install-snapshot.sh" "$MOODLE_DIR" "$SNAPSHOT_DIR"; then
     echo "Snapshot generated successfully" >&2
     # Save to cache for future builds
-    if [ -n "$SNAPSHOT_FINGERPRINT" ] && [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
+    if [ -n "$SNAPSHOT_FINGERPRINT" ] \
+      && [ -f "$SNAPSHOT_DIR/install.sq3" ] \
+      && [ -f "$SNAPSHOT_DIR/localcache.zip" ]; then
       rm -rf "${SNAPSHOT_CACHE_DIR:?}/$BRANCH"
       mkdir -p "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT"
       cp "$SNAPSHOT_DIR/install.sq3" "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/install.sq3"
+      cp "$SNAPSHOT_DIR/localcache.zip" "$SNAPSHOT_CACHE_DIR/$BRANCH/$SNAPSHOT_FINGERPRINT/localcache.zip"
       echo "Snapshot cached: $SNAPSHOT_FINGERPRINT" >&2
     fi
   else
@@ -137,6 +145,11 @@ FILE_COUNT=$(find "$MOODLE_DIR" -type f \
 SNAPSHOT_ARGS=""
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
   SNAPSHOT_ARGS="--snapshot $SNAPSHOT_DIR/install.sq3"
+  if [ -f "$SNAPSHOT_DIR/localcache.zip" ]; then
+    # The seed and the drained task queue are produced together by
+    # generate-install-snapshot.sh, so advertise both to the runtime.
+    SNAPSHOT_ARGS="$SNAPSHOT_ARGS --snapshotLocalcache $SNAPSHOT_DIR/localcache.zip --snapshotDrained 1"
+  fi
 fi
 
 node "$SCRIPT_DIR/generate-manifest.mjs" \
@@ -152,6 +165,9 @@ node "$SCRIPT_DIR/generate-manifest.mjs" \
 echo "Bundle written to $BUNDLE_PATH" >&2
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
   echo "Snapshot written to $SNAPSHOT_DIR/install.sq3" >&2
+fi
+if [ -f "$SNAPSHOT_DIR/localcache.zip" ]; then
+  echo "Localcache seed written to $SNAPSHOT_DIR/localcache.zip" >&2
 fi
 echo "Manifest written to $MANIFEST_PATH" >&2
 

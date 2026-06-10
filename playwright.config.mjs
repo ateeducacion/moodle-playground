@@ -25,10 +25,16 @@ export default defineConfig({
     process.env.PLAYWRIGHT_EXTERNAL_SERVER === "1"
       ? undefined
       : {
-          command: `sh -lc 'if [ -f assets/manifests/latest.json ]; then PORT=${port} npx http-server ${JSON.stringify(webRoot)} -p ${port} -c-1; else PORT=${port} make up; fi'`,
+          // Probe the manifest inside the SERVED root: in CI that is the
+          // downloaded _site artifact (which always contains the manifests),
+          // so the static server starts in seconds. The old repo-relative
+          // check always missed in CI (manifests are gitignored) and fell
+          // back to `make up`, whose npm install + builds burned 3-4 of the
+          // 5 timeout minutes and made every e2e job a coin toss.
+          command: `sh -lc 'if [ -f ${JSON.stringify(webRoot)}/assets/manifests/latest.json ]; then PORT=${port} npx http-server ${JSON.stringify(webRoot)} -p ${port} -c-1; else PORT=${port} make up; fi'`,
           url: baseURL,
           reuseExistingServer: !process.env.CI,
-          timeout: 300_000,
+          timeout: 600_000,
         },
   reporter: process.env.CI
     ? [["line"]]
