@@ -53,6 +53,7 @@ COMPONENTPHP="$SOURCE_DIR/${PUB}lib/classes/component.php"
 SETUPLIBPHP="$SOURCE_DIR/${PUB}lib/setuplib.php"
 SETUPPHP="$SOURCE_DIR/${PUB}lib/setup.php"
 REQUIREJSPHP="$SOURCE_DIR/${PUB}lib/requirejs.php"
+PROCESSORPHP="$SOURCE_DIR/${PUB}lib/mlbackend/python/classes/processor.php"
 
 if [ -f "$DMLLIB" ] && [ -f "$SOURCE_DIR/${PUB}lib/classes/exception/response_aware_exception.php" ] && ! grep -q "response_aware_exception.php" "$DMLLIB"; then
   python3 - "$DMLLIB" <<'PY'
@@ -209,6 +210,51 @@ if needle1 not in text:
 
 text = text.replace(needle2, insert2, 1)
 text = text.replace(needle1, insert1, 1)
+path.write_text(text, encoding="utf-8")
+PY
+fi
+
+# PLAYGROUND: mlbackend_python's processor.php require_once()s a PHPUnit test
+# trait (analytics/tests/classes/mlbackend_helper_trait.php). The core bundle
+# excludes */tests/* (ADR 0011), so /admin/plugins.php -> the analytics admin
+# settings -> core_analytics\manager::get_all_prediction_processors() instantiates
+# \mlbackend_python\processor and fatals on the missing trait. mlbackend_python
+# cannot run in WASM (no python/exec, no server), so drop the test-trait
+# dependency and inline the only method the class itself uses
+# (is_mlbackend_python_configured(), reached only under BEHAT/PHPUNIT).
+if [ -f "$PROCESSORPHP" ] && grep -q "analytics/tests/classes/mlbackend_helper_trait" "$PROCESSORPHP"; then
+  python3 - "$PROCESSORPHP" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+require_needle = "require_once($CFG->dirroot . '/analytics/tests/classes/mlbackend_helper_trait.php');\n"
+use_needle = "use core_analytics\\tests\\mlbackend_helper_trait;\n"
+trait_needle = "    use mlbackend_helper_trait;\n"
+inline = (
+    "    /**\n"
+    "     * Check if mlbackend_python is configured. Inlined from the upstream\n"
+    "     * core_analytics\\tests\\mlbackend_helper_trait so the playground bundle\n"
+    "     * (which excludes test directories) does not need the test trait file.\n"
+    "     */\n"
+    "    public static function is_mlbackend_python_configured(): bool {\n"
+    "        if (defined('TEST_MLBACKEND_PYTHON_HOST') && defined('TEST_MLBACKEND_PYTHON_PORT')\n"
+    "                && defined('TEST_MLBACKEND_PYTHON_USERNAME') && defined('TEST_MLBACKEND_PYTHON_USERNAME')) {\n"
+    "            return true;\n"
+    "        }\n"
+    "        return false;\n"
+    "    }\n"
+)
+
+for needle in (require_needle, use_needle, trait_needle):
+    if needle not in text:
+        raise SystemExit(f"Needle not found in {path}: {needle!r}")
+
+text = text.replace(require_needle, "", 1)
+text = text.replace(use_needle, "", 1)
+text = text.replace(trait_needle, inline, 1)
 path.write_text(text, encoding="utf-8")
 PY
 fi
