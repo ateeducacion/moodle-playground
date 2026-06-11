@@ -413,6 +413,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0011](docs/decisions/0011-bundle-trim-and-runtime-tuning.md) | Bundle content trim + php.ini/runtime tuning (amends ADR 0004) | Accepted |
 | [0012](docs/decisions/0012-worker-static-fast-path.md) | Static-file fast path bypassing the serial PHP request queue | Accepted |
 | [0013](docs/decisions/0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Accepted |
+| [0014](docs/decisions/0014-production-require-of-tests-files-patch.md) | Patch production code that require_once()s files under tests/ (mlbackend_python) | Accepted |
 
 ## Debugging
 

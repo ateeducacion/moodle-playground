@@ -96,6 +96,31 @@ Files:
 - `patches/shared/lib/dml/sqlite3_pdo_moodle_database.php`
 - runtime override in `src/runtime/bootstrap.js`
 
+### Fatal in `admin/plugins.php`: `Failed opening required '…/analytics/tests/classes/mlbackend_helper_trait.php'`
+
+Likely cause:
+
+- the core bundle excludes every `*/tests/*` directory (ADR 0011), but some
+  Moodle 5.0+ **production** code `require_once()`s a file that lives under
+  `tests/`. `lib/mlbackend/python/classes/processor.php` requires the analytics
+  test trait `core_analytics\tests\mlbackend_helper_trait`. Building the admin
+  tree instantiates every `mlbackend` plugin
+  (`core_analytics\manager::get_all_prediction_processors()`), so loading
+  `/admin/plugins.php` (or any analytics admin page) fatals on the excluded file.
+
+Files:
+
+- `scripts/patch-moodle-source.sh` (drops the test-trait `require_once`/`use` and
+  inlines the only method the class actually uses)
+- `docs/decisions/0014-production-require-of-tests-files-patch.md`
+
+Notes:
+
+- `make up-local` does NOT reproduce this — it serves the full checkout with
+  `tests/` present. Reproduce/verify only against a real bundle (`make bundle`).
+- If a different Moodle branch fatals on another `…/tests/…` require, generalize
+  this into a build-time detector (see ADR 0014 Review Criteria).
+
 ### `Invalid cache store in config` warnings everywhere
 
 Likely cause:
