@@ -42,6 +42,24 @@ mkdir -p "$DIST_DIR" "$MANIFEST_DIR"
 
 "$SCRIPT_DIR/patch-moodle-source.sh" "$MOODLE_DIR" "$BRANCH"
 
+# Moodle 5.1+ manages its runtime dependencies with Composer; vendor/ is no
+# longer committed to the source tree, so the git checkout from
+# fetch-moodle-source.sh lacks it. The component-cache and install-snapshot
+# steps below boot Moodle, which without vendor/ fails its "Composer vendor
+# directory not found" environment check (and can fatal on missing autoloaded
+# classes). Materialize vendor/ with native Composer on the build machine
+# before those steps; vendor/ then travels in the bundle (it is not excluded
+# from the zip, and PHP autoloading is self-contained — composer.json/lock stay
+# excluded). Pre-5.1 has no public/ webroot and ships its dependencies, so it is
+# skipped. Idempotent: a no-op if vendor/ already exists.
+if [ -f "$MOODLE_DIR/composer.json" ] \
+  && [ ! -f "$MOODLE_DIR/vendor/autoload.php" ] \
+  && [ -f "$MOODLE_DIR/public/version.php" ]; then
+  echo "Installing Composer runtime dependencies (Moodle 5.1+)" >&2
+  ( cd "$MOODLE_DIR" && composer install --no-dev --prefer-dist \
+      --classmap-authoritative --no-interaction --no-progress )
+fi
+
 COMPONENT_CACHE_DIR="$MOODLE_DIR/.playground"
 COMPONENT_CACHE_FILE="$COMPONENT_CACHE_DIR/core_component.php"
 mkdir -p "$COMPONENT_CACHE_DIR"
