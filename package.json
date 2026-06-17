@@ -23,10 +23,10 @@
     "fflate": "^0.8.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.5.0",
     "@playwright/test": "^1.60.0",
     "concurrently": "^10.0.3",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "http-server": "^14.1.1"
   }
 }

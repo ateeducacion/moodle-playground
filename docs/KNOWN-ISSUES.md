@@ -136,6 +136,50 @@ Examples:
 - some config values must be seeded manually
 - extension assumptions from Moodle core still need local accommodation
 
+## 6. Production code that require_once()s files under tests/
+
+Status:
+
+- mlbackend_python case: resolved (patched)
+- other references: latent (open, low impact)
+
+Impact:
+
+- low — the active case is fixed; the remaining references are unreachable in
+  the playground
+
+Background:
+
+- the core bundle excludes every `*/tests/*` directory (ADR 0011) to halve the
+  download. A few Moodle 5.0+ production files violate the "runtime never reads
+  test code" assumption by `require_once()`-ing files under `tests/`.
+
+Current state:
+
+- **Fixed:** `lib/mlbackend/python/classes/processor.php` required the analytics
+  test trait `core_analytics\tests\mlbackend_helper_trait`, which made
+  `/admin/plugins.php` (and analytics admin pages) fatal. Patched in
+  `scripts/patch-moodle-source.sh` (drop the require, inline the one method used).
+  See ADR 0014.
+- **Latent (not patched):** `cache/classes/factory.php` →
+  `cache/tests/fixtures/lib.php` (test-mode only) and the `tool_generator` /
+  `tool_behat` Behat data generators →
+  `lib/tests/behat/…`, `admin/tests/behat/…`, `course/tests/behat/…`. These code
+  paths are only reached under Behat/PHPUnit, never in the playground.
+
+Where to continue:
+
+- if a new Moodle branch fatals on a different `…/tests/…` require, add a
+  build-time detector in `scripts/build-moodle-bundle.sh` (grep production PHP
+  for `require/include` of `tests/…\.php`, assert each is present in the zip via
+  a suffix match). See ADR 0014 Review Criteria.
+
+Main files involved:
+
+- `scripts/patch-moodle-source.sh`
+- `scripts/build-moodle-bundle.sh`
+- `docs/decisions/0014-production-require-of-tests-files-patch.md`
+
 ## Current top priority
 
 If continuing work from here, the next priority should be:
