@@ -1,4 +1,4 @@
-# 0014 — Buffer the request body synchronously for Firefox
+# 0015 — Buffer the request body synchronously for Firefox
 
 ## Status
 
@@ -68,9 +68,11 @@ self.addEventListener("fetch", (event) => {
   request intact for the pass-through branches (`fetch(event.request)`, the
   static cache fetches), so buffering is safe for every code path.
 * The promise is awaited later where the body is actually needed
-  (`const earlyBody = bufferedBody ? await bufferedBody : null;`) and threaded
-  into `buildPhpRequest(..., earlyBody)`. Starting the read synchronously is what
-  matters; awaiting the already-started read afterwards is fine.
+  (`const earlyBody = await bufferedBody;` — `bufferedBody` is `null` for
+  `GET`/`HEAD` and `await null` is `null`, so no extra guard is needed) and
+  threaded into `buildPhpRequest(..., earlyBody)`. Starting the read
+  synchronously is what matters; awaiting the already-started read afterwards is
+  fine.
 * `.catch(() => null)` keeps a failed/absent body from rejecting the handler.
 
 The worker already received an `ArrayBuffer` body before, so Chromium behaviour
