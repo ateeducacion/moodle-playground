@@ -80,6 +80,10 @@ This project uses npm, esbuild, and a small Makefile workflow.
 - Python 3
 - Git
 - PHP 8.3 with `pdo_sqlite` for `make up-local`
+- Composer — required to build Moodle **5.1+** bundles (`MOODLE_501_STABLE`,
+  `main`, …). Since 5.1 `vendor/` is no longer committed upstream, so
+  `scripts/build-moodle-bundle.sh` runs `composer install` for those branches.
+  Pre-5.1 branches do not need it. CI provisions it via `shivammathur/setup-php`.
 
 ### Common Commands
 
