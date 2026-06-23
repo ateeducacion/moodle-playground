@@ -665,6 +665,15 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // Buffer the request body synchronously, before any await. Firefox neuters
+  // event.request.body once this handler yields to the event loop, so reading
+  // it later (e.g. after `await resolveScopedRequest()`) can return an empty
+  // body for POST/PUT and break form submissions. Cloning leaves event.request
+  // intact for the pass-through `fetch(event.request)` / static branches. See
+  // ADR 0015.
+  const bufferedBody = ["GET", "HEAD"].includes(event.request.method)
+    ? null
+    : event.request.clone().arrayBuffer().catch(() => null);
   event.respondWith((async () => {
     try {
       const url = new URL(event.request.url);
@@ -708,12 +717,11 @@ self.addEventListener("fetch", (event) => {
         return fetch(event.request);
       }
 
-      // Read POST body immediately, before any async operations.
-      // Firefox's Service Worker may discard the request body after
-      // the handler yields to the event loop.
-      const earlyBody = !["GET", "HEAD"].includes(event.request.method)
-        ? await event.request.arrayBuffer()
-        : null;
+      // Resolve the body buffered synchronously at the top of the handler
+      // (before any yield), so Firefox has not discarded it. `bufferedBody` is
+      // null for GET/HEAD and `await null` is null, so no guard is needed. See
+      // ADR 0015.
+      const earlyBody = await bufferedBody;
 
       const { scopeId, runtimeId, requestPath } = scopedRequest;
       if (event.clientId) {
