@@ -16,15 +16,15 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@php-wasm/fs-journal": "^3.1.38",
-    "@php-wasm/stream-compression": "^3.1.38",
-    "@php-wasm/universal": "^3.1.38",
-    "@php-wasm/web": "^3.1.38",
+    "@php-wasm/fs-journal": "^3.1.40",
+    "@php-wasm/stream-compression": "^3.1.40",
+    "@php-wasm/universal": "^3.1.40",
+    "@php-wasm/web": "^3.1.40",
     "fflate": "^0.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.0",
     "concurrently": "^10.0.3",
     "esbuild": "^0.28.1",
     "http-server": "^14.1.1"
