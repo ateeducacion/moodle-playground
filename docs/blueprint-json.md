@@ -992,3 +992,20 @@ Blueprints can be exported and imported via the sidebar Blueprint tab:
 
 The default blueprint is at `assets/blueprints/default.blueprint.json`. Example
 blueprints are in `assets/blueprints/examples/`.
+
+## Runtime portability
+
+Blueprints are primarily executed by Moodle Playground's browser runtime. A
+compatible subset can also be applied by the sibling Docker runtime
+[`alpine-moodle`](https://github.com/erseco/alpine-moodle).
+
+For portable blueprints:
+
+- use explicit steps,
+- avoid unsafe code execution steps,
+- prefer bundled resources,
+- keep identifiers stable,
+- check the runtime compatibility matrix.
+
+See [Blueprint runtimes](blueprint-runtimes.md) for the full compatibility
+matrix, authoring guidelines and a Docker-compatible example.
