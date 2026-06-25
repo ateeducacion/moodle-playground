@@ -52,6 +52,7 @@ nav:
   - Blueprints:
       - Blueprint reference: blueprint-json.md
       - Blueprint gallery: blueprint-gallery.md
+      - Blueprint runtimes: blueprint-runtimes.md
   - Architecture:
       - Overview: architecture.md
       - Implementation status: implementation-status.md

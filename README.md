@@ -108,6 +108,19 @@ Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-
 
 See the [development docs](docs/development.md) and [`AGENTS.md`](AGENTS.md) for the full command reference.
 
+## Sibling Docker runtime: alpine-moodle
+
+Moodle Playground focuses on browser-based, ephemeral Moodle instances for demos, QA, and shareable test scenarios.
+
+For Docker-based development, CI, plugin development, and persistent integration testing, the sibling project [`alpine-moodle`](https://github.com/erseco/alpine-moodle) can apply a compatible subset of Moodle Playground `blueprint.json` files during container startup.
+
+This means a plugin or course demo can keep a single declarative `blueprint.json` and run it either:
+
+- in Moodle Playground for fast browser validation and sharing, or
+- in alpine-moodle for a real Docker-based Moodle environment.
+
+See [`docs/blueprint-runtimes.md`](docs/blueprint-runtimes.md) for compatibility notes and a portable, Docker-compatible example.
+
 ## Contributing
 
 Contributions are welcome. See the [development docs](docs/development.md) to get started.
