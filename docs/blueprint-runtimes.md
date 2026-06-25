@@ -89,8 +89,8 @@ always confirm against its
 Other steps in the schema (`createCategories`, `createCourses`, `createSection`,
 `createSections`, `enrolUsers`, `setConfigFile(s)`, `setLandingPage`,
 `installLanguagePack`, `createRole(s)`, `importRole(s)`, `createScale(s)`,
-`createCohort(s)`, `mkdir`, `rmdir`, `copyFile`, `moveFile`, `request`) are fully
-supported in Moodle Playground; in `alpine-moodle` they are either **planned**
+`createCohort(s)`, `writeFiles`, `mkdir`, `rmdir`, `copyFile`, `moveFile`,
+`request`) are fully supported in Moodle Playground; in `alpine-moodle` they are either **planned**
 or **disabled** (unsafe). They fail clearly there rather than being silently
 ignored.
 
