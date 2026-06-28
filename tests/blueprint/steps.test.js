@@ -57,10 +57,14 @@ describe("step registry", () => {
       "writeFiles",
       "copyFile",
       "moveFile",
+      "deleteFile",
+      "deleteFiles",
       "unzip",
       "request",
       "runPhpCode",
       "runPhpScript",
+      "purgeMoodleCaches",
+      "applyPrOverlay",
     ];
     const registered = getRegisteredStepNames();
     for (const name of expected) {

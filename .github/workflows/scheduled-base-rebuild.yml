@@ -1,0 +1,52 @@
+# Scheduled base rebuild
+#
+# The PR Overlay Preview feature (ADR-0016, applyPrOverlay) overlays a pull
+# request's changed files on top of a prebuilt Moodle base. Whole-file overlay
+# assumes that prebuilt base is reasonably close to the branch tip, so the bases
+# must be rebuilt periodically to keep drift small.
+#
+# This workflow does NOT build or deploy anything itself — it simply dispatches
+# the existing CI pipeline (ci.yml) on `main`, which already builds every Moodle
+# branch bundle and deploys to GitHub Pages / Cloudflare with the established
+# credentials. Reusing ci.yml avoids inventing new deployment secrets here.
+name: Scheduled base rebuild
+
+on:
+  schedule:
+    # Weekly, Mondays at 06:00 UTC. Conservative cadence; adjust if drift hurts.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for the manual base rebuild"
+        required: false
+        type: string
+
+# Least privilege: only enough to trigger ci.yml via the API.
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: scheduled-base-rebuild
+  cancel-in-progress: false
+
+jobs:
+  trigger-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch CI to rebuild and redeploy base bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pass the untrusted input via env (never inline ${{ ... }} into the
+          # script) to avoid shell injection.
+          REASON: ${{ github.event.inputs.reason }}
+        run: |
+          reason="$REASON"
+          if [ -z "$reason" ]; then
+            reason="Scheduled base rebuild to keep PR-overlay bases close to branch tips"
+          fi
+          gh workflow run ci.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f reason="$reason"

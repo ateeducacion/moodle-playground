@@ -13,6 +13,7 @@ import { registerMoodleRestoreSteps } from "./moodle-restore.js";
 import { registerMoodleRoleSteps } from "./moodle-roles.js";
 import { registerMoodleScaleSteps } from "./moodle-scales.js";
 import { registerMoodleUserSteps } from "./moodle-users.js";
+import { registerPrOverlaySteps } from "./pr-overlay.js";
 import { registerRequestSteps } from "./request.js";
 
 /** @type {Map<string, (step: object, context: object) => Promise<void>>} */
@@ -47,3 +48,4 @@ registerMoodlePluginSteps(registerStep);
 registerMoodleRoleSteps(registerStep);
 registerMoodleScaleSteps(registerStep);
 registerMoodleCohortSteps(registerStep);
+registerPrOverlaySteps(registerStep);

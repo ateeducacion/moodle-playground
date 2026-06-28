@@ -37,10 +37,14 @@ const KNOWN_STEP_NAMES = new Set([
   "writeFiles",
   "copyFile",
   "moveFile",
+  "deleteFile",
+  "deleteFiles",
   "unzip",
   "request",
   "runPhpCode",
   "runPhpScript",
+  "purgeMoodleCaches",
+  "applyPrOverlay",
 ]);
 
 const RESOURCE_TYPE_KEYS = new Set([

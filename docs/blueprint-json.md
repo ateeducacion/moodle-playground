@@ -334,7 +334,16 @@ Named resources can be defined once and referenced from steps using `@name`:
 | `writeFiles` | Write multiple files |
 | `copyFile` | Copy a file |
 | `moveFile` | Move a file |
+| `deleteFile` | Delete a file (idempotent) |
+| `deleteFiles` | Delete multiple files |
 | `unzip` | Extract a ZIP archive |
+
+### PR overlay preview
+
+| Step | Description |
+|------|-------------|
+| `purgeMoodleCaches` | Purge Moodle caches and reset the component registry |
+| `applyPrOverlay` | Overlay a pull request's changed files onto the booted Moodle base |
 
 ### Low-level
 
@@ -657,6 +666,222 @@ Provide exactly one **source** (precedence `url` > `path` > `data`):
 > transaction limits and fail. A failed restore is reported in the boot log and does **not** abort
 > the rest of the blueprint. Prefer smaller course backups, and host large `.mbz` files at a
 > CORS-accessible URL (e.g. GitHub raw) so they stream into the runtime instead of being buffered.
+
+### deleteFile / deleteFiles
+
+Delete files from the runtime filesystem. `deleteFile` is **idempotent** — a path that
+does not exist is silently skipped — but a real filesystem error (e.g. a failed `unlink`)
+is surfaced and aborts the blueprint. `deleteFiles` deletes a batch; each entry may be a
+plain string path or an object with a `path` property.
+
+```json
+{ "step": "deleteFile", "path": "/www/moodle/lib/example.php" }
+```
+
+```json
+{
+  "step": "deleteFiles",
+  "files": [
+    "/www/moodle/lib/old.php",
+    "/www/moodle/course/old.php"
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | yes (`deleteFile`) | Absolute path of the file to delete. |
+| `files` | yes (`deleteFiles`) | Array of string paths or `{ "path": "…" }` objects. |
+
+### purgeMoodleCaches
+
+Purge Moodle's caches and reset the component registry. Run this after overwriting core or
+plugin files at runtime so MUC, the compiled DI container, theme CSS, and the component cache
+no longer point at stale code. It loads `/www/moodle/config.php`, then calls
+`\core_component::reset()`, `theme_reset_all_caches()`, `purge_all_caches()`, and clears
+`allversionshash`. `applyPrOverlay` runs this automatically; you rarely need it standalone.
+
+```json
+{ "step": "purgeMoodleCaches" }
+```
+
+### applyPrOverlay
+
+Preview a **Moodle core pull request** by overlaying its changed files onto an already-booted,
+prebuilt Moodle base. This is the runtime half of the [PR Overlay Preview](#pr-overlay-preview)
+feature; the [GitHub Action](https://github.com/ateeducacion/action-moodle-playground-pr-preview)
+generates the blueprint that drives it.
+
+**Whole-file overlay, not a unified diff.** Each changed file is replaced with its *final*
+contents fetched at the PR head commit. Whole-file replacement handles add / modify / remove /
+rename predictably and avoids hunk failures, fuzzy patching, `.rej` files, context drift, and
+binary-diff problems. This is a preview system, not a source-control engine — no diff/patch
+engine is implemented.
+
+Two input modes:
+
+1. **Pre-resolved manifest (`files`)** — recommended; reproducible and avoids runtime GitHub
+   API calls. The Action emits this.
+2. **Runtime fetch (`repo` + `pr`)** — the step calls the GitHub REST API
+   (`/repos/{owner}/{repo}/pulls/{n}/files`) itself. Useful for Tampermonkey/manual URLs.
+
+```json
+{
+  "step": "applyPrOverlay",
+  "baseRef": "MOODLE_501_STABLE",
+  "runUpgrade": "auto",
+  "root": "/www/moodle",
+  "files": [
+    {
+      "path": "lib/classes/example.php",
+      "status": "modified",
+      "rawUrl": "https://raw.githubusercontent.com/user/moodle/abc123/lib/classes/example.php",
+      "size": 12345
+    },
+    { "path": "lib/classes/old.php", "status": "removed" },
+    {
+      "path": "lib/classes/newname.php",
+      "previousPath": "lib/classes/oldname.php",
+      "status": "renamed",
+      "rawUrl": "https://raw.githubusercontent.com/user/moodle/abc123/lib/classes/newname.php"
+    }
+  ]
+}
+```
+
+Runtime-fetch form:
+
+```json
+{ "step": "applyPrOverlay", "repo": "moodle/moodle", "pr": 1234, "runUpgrade": "auto" }
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `files` | one of `files` / `repo`+`pr` | Pre-resolved manifest of changed files (see below). |
+| `repo` | with `pr` | `owner/name` to fetch changed files from at runtime. |
+| `pr` | with `repo` | Pull request number. |
+| `baseRef` | no | Informational: the PR target branch the base was chosen for. |
+| `runUpgrade` | no | `off`, `on`, or `auto` (default `auto`). See below. |
+| `root` | no | Filesystem root to overlay onto. Defaults to `/www/moodle`. |
+| `proxy` | no | Optional CORS/caching proxy base URL (URL-passthrough `?url=`). |
+| `maxFiles` | no | Cap on changed-file count (default 200). |
+| `maxFileBytes` | no | Per-file byte cap (default 5 MiB). |
+| `purgeCaches` | no | Set `false` to skip the automatic cache purge (rarely useful). |
+
+**Manifest entries** carry `path` (repo-relative), `status` (`added`/`modified`/`removed`/
+`renamed`), `rawUrl` (required for everything except `removed`), `previousPath` (required for
+`renamed`), and optional `size`. Paths are sanitized: empty, absolute, `..`, backslash, null-byte,
+and control-character paths are rejected.
+
+**Paths root at `/www/moodle`, never auto-prefixed with `public/`.** GitHub PR paths are
+relative to the repo root, so `lib/classes/example.php` → `/www/moodle/lib/classes/example.php`
+and `public/course/view.php` → `/www/moodle/public/course/view.php` (the `public/` prefix comes
+from the PR path itself).
+
+**`runUpgrade`:**
+
+- `off` — never run the upgrade.
+- `on` — always run Moodle's upgrade after the overlay.
+- `auto` (default) — run only when a changed file looks upgrade-relevant: `version.php`,
+  `public/version.php`, or any `**/db/{install.xml,install.php,upgrade.php}`.
+
+The upgrade is a **best-effort attempt**. It loads the overlaid `version.php` and runs
+`upgrade_core()` / `upgrade_noncore()`. SQLite-in-WASM has lower schema-upgrade fidelity than a
+full Moodle environment (nested savepoints, ADR-0003), so an upgrade may fail; the failure is
+reported honestly in the boot log and is **non-fatal** (the overlaid files are already in place).
+The preview never fakes a successful upgrade.
+
+**Fetching, CORS, and proxy.** By default the runtime fetches `raw.githubusercontent.com` and (in
+`repo`+`pr` mode) `api.github.com` directly — both send CORS headers for public repositories. The
+browser never fetches `github.com/.../pull/N.diff` HTML endpoints. An optional `proxy` routes
+requests through a caching/token-injecting proxy.
+
+## PR Overlay Preview
+
+`applyPrOverlay` (plus `purgeMoodleCaches`, `deleteFile`, `deleteFiles`) implements a runtime
+**PR Overlay Preview**: boot a prebuilt Moodle base selected from a pull request's target branch,
+then apply the PR's changed files over the in-browser Moodle filesystem. It is inspired by the
+old Gitpod-based Moodle workflow where reviewers could open a tracker issue or PR and get a quickly
+running Moodle instance. No per-PR WASM bundle is built.
+
+### Base selection and freshness
+
+The base bundle is chosen by the blueprint's `preferredVersions`, mapped from the PR target
+branch (`base.ref`):
+
+| Target branch (`base.ref`) | Playground version |
+|----------------------------|--------------------|
+| `MOODLE_404_STABLE`        | 4.4 |
+| `MOODLE_405_STABLE`        | 4.5 |
+| `MOODLE_500_STABLE`        | 5.0 |
+| `MOODLE_501_STABLE`        | 5.1 |
+| `MOODLE_502_STABLE`        | 5.2 |
+| `main` / `master`          | dev (`main`) |
+
+Whole-file overlay assumes the prebuilt base is reasonably close to the branch tip. A scheduled
+workflow (`.github/workflows/scheduled-base-rebuild.yml`) periodically rebuilds the bases to keep
+drift small.
+
+### Fork support
+
+**Forks are supported.** A Moodle core PR's head almost always lives in a contributor's fork
+(e.g. `someone/moodle`), and both overlay modes handle that:
+
+- **`files` manifest mode** — each entry's `rawUrl` points at the PR head repo (the fork) at the
+  head commit, e.g. `https://raw.githubusercontent.com/someone/moodle/<headSha>/<path>`. The action
+  builds these from the PR head repo, so fork content is fetched directly.
+- **`repo` + `pr` mode** — pass the **base** repository the PR was opened against (e.g.
+  `moodle/moodle`) and the PR number. The GitHub API (`/repos/{base}/pulls/{n}/files`) resolves the
+  fork's head commit automatically, so you do not need to know the fork name.
+
+> The GitHub REST API is rate-limited to 60 requests/hour for unauthenticated browser calls, which
+> is enough for an occasional `repo` + `pr` preview. The action's `files` mode avoids runtime API
+> calls entirely.
+
+### Try it live
+
+You can drive `applyPrOverlay` directly against a deployed playground without the action, using the
+compact `repo` + `pr` form (the URL stays tiny regardless of PR size). For example, to preview
+[`moodle/moodle#532`](https://github.com/moodle/moodle/pull/532) (a fork PR targeting `main`):
+
+```json
+{
+  "preferredVersions": { "php": "8.3", "moodle": "dev" },
+  "landingPage": "/admin/index.php",
+  "steps": [
+    { "step": "installMoodle", "options": { "siteName": "Core PR #532 preview", "adminUser": "admin", "adminPass": "password" } },
+    { "step": "applyPrOverlay", "repo": "moodle/moodle", "pr": 532, "baseRef": "main", "runUpgrade": "auto" },
+    { "step": "login", "username": "admin" }
+  ]
+}
+```
+
+base64url-encode that JSON and open `https://<playground-host>/?blueprint=<base64url>`. Swap `pr`
+for any open core PR and `baseRef` for its target branch (the base maps to a version per the table
+above). Admin credentials are `admin` / `password`.
+
+### Limitations
+
+- **SQLite vs. real DB.** Lower fidelity than a full Moodle Docker/Codespaces environment,
+  especially for schema/upgrade-heavy PRs.
+- **Composer / frontend builds.** Changes that require `composer install`, `grunt`, or other
+  generated assets (`amd/build`, compiled CSS) are not reproduced — only the changed source files
+  are overlaid.
+- **Database upgrades.** `runUpgrade=auto` attempts an upgrade but may not fully apply complex
+  schema changes under SQLite/WASM.
+- **Binary / large files.** Bounded by `maxFiles` / `maxFileBytes`.
+- **Base drift.** A base far behind the branch tip may miss files the PR depends on.
+- No in-browser code editor, no Tampermonkey implementation, and no full per-PR bundle builder are
+  part of this feature.
+
+### Tampermonkey button
+
+A [Tampermonkey userscript](tampermonkey-pr-button.md) adds an "Open in Moodle Playground" button on
+Moodle core GitHub PR pages (and on Moodle Tracker issues that link a PR). It prefers an
+Action-generated preview URL when present, and otherwise builds a compact `applyPrOverlay` blueprint
+URL from `repo` + `pr`. The script lives at
+[`scripts/moodle-playground-pr-button.user.js`](../scripts/moodle-playground-pr-button.user.js);
+see [docs/tampermonkey-pr-button.md](tampermonkey-pr-button.md) for installation and configuration.
 
 ## Roles, scales and cohorts
 

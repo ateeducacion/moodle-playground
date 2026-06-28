@@ -104,10 +104,14 @@
               "writeFiles",
               "copyFile",
               "moveFile",
+              "deleteFile",
+              "deleteFiles",
               "unzip",
               "request",
               "runPhpCode",
-              "runPhpScript"
+              "runPhpScript",
+              "purgeMoodleCaches",
+              "applyPrOverlay"
             ]
           }
         },

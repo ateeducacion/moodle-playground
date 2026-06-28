@@ -3,6 +3,7 @@
  */
 import { readZipEntries } from "../../../lib/moodle-loader.js";
 import { escapePhp } from "../php/helpers.js";
+import { checkPhpResult } from "./check-result.js";
 
 export function registerFilesystemSteps(register) {
   register("mkdir", handleMkdir);
@@ -11,6 +12,8 @@ export function registerFilesystemSteps(register) {
   register("writeFiles", handleWriteFiles);
   register("copyFile", handleCopyFile);
   register("moveFile", handleMoveFile);
+  register("deleteFile", handleDeleteFile);
+  register("deleteFiles", handleDeleteFiles);
   register("unzip", handleUnzip);
 }
 
@@ -104,6 +107,32 @@ async function handleMoveFile(step, { php }) {
   const data = await php.readFile(from);
   await php.writeFile(to, data);
   await php.run(`<?php @unlink('${escapePhp(from)}');`);
+}
+
+async function handleDeleteFile(step, { php }) {
+  const path = step.path;
+  if (!path) throw new Error("deleteFile: 'path' is required.");
+
+  // Idempotent: a missing file is not an error (echo skipped), but a real
+  // unlink failure is surfaced via checkPhpResult.
+  const result = await php.run(`<?php
+$p = '${escapePhp(path)}';
+if (!file_exists($p)) { echo json_encode(['ok' => true, 'skipped' => true]); }
+else if (@unlink($p)) { echo json_encode(['ok' => true]); }
+else { echo json_encode(['ok' => false, 'error' => 'Could not delete ' . $p]); }
+`);
+  checkPhpResult(result, "deleteFile");
+}
+
+async function handleDeleteFiles(step, context) {
+  if (!Array.isArray(step.files))
+    throw new Error("deleteFiles: 'files' must be an array.");
+
+  // Each entry may be a string path or an object with a `path` property.
+  for (const entry of step.files) {
+    const path = typeof entry === "string" ? entry : entry?.path;
+    await handleDeleteFile({ path }, context);
+  }
 }
 
 async function handleUnzip(step, { php, resources }) {
