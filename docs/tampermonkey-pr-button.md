@@ -64,10 +64,19 @@ function buildPlaygroundUrl(repo, pr, baseRef) {
 
 Key behaviours:
 
+- **Runs under the page CSP** (`@grant GM_xmlhttpRequest`): GitHub and Atlassian send a strict
+  `Content-Security-Policy` (`script-src 'self'`). With `@grant none` Tampermonkey injects the
+  userscript as a page `<script>`, which that CSP **blocks** (you would see
+  `Loading the script … violates … script-src` in the console and the button never appears).
+  Declaring a real `@grant` makes Tampermonkey run the script in its sandboxed content-script
+  world instead, which is not subject to the page CSP. The badge is a **CSS-only** element (no
+  external `<img>`), so it is also immune to the page's `img-src`.
 - **GitHub PR pages** (`https://github.com/<owner>/moodle/pull/<n>`): reads the owner, repo,
   and PR number from the URL (only repositories **named `moodle`**, so `moodle/moodle` and
-  its forks), resolves the **base branch** from the PR header (or the public REST API),
-  maps it to a base version, and injects the badge in the PR header.
+  its forks), resolves the **base branch** from the PR header branch chips (or the public REST
+  API), maps it to a base version, and injects the badge into the first **visible** header
+  region of GitHub's Primer React `PageHeader` (the title row), with a floating bottom-right
+  button as a last-resort fallback if the header markup changes again.
 - **Action link preference**: if the GitHub Action already posted a preview link in the PR
   description or a comment, the button reuses that (reproducible, pre-resolved) URL instead
   of generating its own — `findExistingActionLink()` compares hosts by parsing the URL, not
@@ -96,8 +105,13 @@ Key behaviours:
 - The button uses the public GitHub REST API only to read the base branch when it is not in
   the page DOM (unauthenticated, ~60 requests/hour). The overlay itself runs entirely in your
   browser.
-- GitHub's and Jira's DOM markup changes over time; if the badge stops appearing, the header
+- GitHub's and Jira's DOM markup changes over time; the script targets GitHub's current Primer
+  React `PageHeader` and falls back to a floating button, but if the badge stops appearing the
   selectors in `ghInsertionPoint()` / the tracker scan may need updating.
+- **Moodle tracker**: the badge only appears next to GitHub `…/moodle/pull/<n>` links that are
+  actually present in the issue. Moodle core development happens mostly through Gerrit
+  (`git.moodle.org`), so a `github.com/moodle/moodle` PR is not always linked from the tracker —
+  in that case no button is shown there. The GitHub PR page is the primary, reliable surface.
 - This previews changed **files** over a prebuilt base; the same
   [limitations as the overlay](blueprint-json.md#limitations) apply (Composer, frontend
   builds, generated assets, DB upgrades, SQLite/WASM fidelity).
