@@ -874,12 +874,14 @@ above). Admin credentials are `admin` / `password`.
 - No in-browser code editor, no Tampermonkey implementation, and no full per-PR bundle builder are
   part of this feature.
 
-### Future work: Tampermonkey
+### Tampermonkey button
 
-A Tampermonkey userscript could add an "Open in Moodle Playground" button on GitHub PR pages and on
-Moodle Tracker issues that link a PR. It should prefer an Action-generated preview URL when present,
-and otherwise build a direct `applyPrOverlay` blueprint URL from `repo` + `pr`. This is separate
-future work and is **not** implemented here.
+A [Tampermonkey userscript](tampermonkey-pr-button.md) adds an "Open in Moodle Playground" button on
+Moodle core GitHub PR pages (and on Moodle Tracker issues that link a PR). It prefers an
+Action-generated preview URL when present, and otherwise builds a compact `applyPrOverlay` blueprint
+URL from `repo` + `pr`. The script lives at
+[`scripts/moodle-playground-pr-button.user.js`](../scripts/moodle-playground-pr-button.user.js);
+see [docs/tampermonkey-pr-button.md](tampermonkey-pr-button.md) for installation and configuration.
 
 ## Roles, scales and cohorts
 
