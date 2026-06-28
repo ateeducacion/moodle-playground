@@ -16,7 +16,6 @@ theme:
     - navigation.top
     - navigation.instant
     - navigation.tracking
-    - navigation.indexes
     - toc.follow
     - search.suggest
     - search.highlight
@@ -45,30 +44,26 @@ extra_css:
 
 nav:
   - Home: index.md
-  - User guide:
-      - Getting started: getting-started.md
-      - Troubleshooting: TROUBLESHOOTING.md
-      - Known issues: KNOWN-ISSUES.md
+  - Getting started:
+      - Quick start: getting-started.md
+      - Run it locally: local-development.md
+  - Using Moodle Playground:
+      - Basic usage: usage.md
+      - URL parameters: url-parameters.md
+      - Browser userscripts: browser-userscripts.md
   - Blueprints:
-      - Blueprint reference: blueprint-json.md
-      - Blueprint gallery: blueprint-gallery.md
-      - Blueprint runtimes: blueprint-runtimes.md
+      - Overview: blueprints/index.md
+      - Examples: blueprints/examples.md
+      - Reference: blueprints/reference.md
+      - Runtime and versions: blueprints/runtime.md
+  - GitHub integration:
+      - PR previews: github/pr-previews.md
+      - Action reference: github/action-reference.md
   - Architecture:
       - Overview: architecture.md
-      - Implementation status: implementation-status.md
-      - Moodle WASM plan: moodle-wasm-plan.md
-      - Plugin install notes: plugin-install-branch-notes.md
-      - SQLite WASM migration: sqlite-wasm-migration-notes.md
-  - Development:
-      - Contributing: development.md
-  - Decision records:
-      - "ADR 0001 — SW-level scoped static asset caching": decisions/0001-sw-level-scoped-static-asset-caching.md
-      - "ADR 0002 — Plugin auto-detection from GitHub URLs": decisions/0002-plugin-auto-detection-from-github-urls.md
-      - "ADR 0003 — Direct DB inserts for course modules": decisions/0003-direct-db-inserts-for-course-modules.md
-      - "ADR 0004 — OPcache tuning and runtime UX defaults": decisions/0004-opcache-tuning-and-runtime-ux-defaults.md
-      - "ADR 0005 — Resilient blueprint step execution": decisions/0005-resilient-blueprint-step-execution.md
-  - Research:
-      - PHP process manager evaluation: research/php-process-manager-evaluation.md
+  - Maintainers:
+      - Contributing: maintainers/contributing.md
+      - Internal notes: maintainers/internal-notes.md
 
 markdown_extensions:
   - abbr
@@ -81,7 +76,11 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span

@@ -13,14 +13,13 @@
     },
     {
       "step": "createCategory",
-      "name": "Blueprint demo",
-      "idnumber": "blueprint-demo"
+      "name": "Blueprint demo"
     },
     {
       "step": "createCourse",
       "fullname": "Blueprint demo course",
       "shortname": "BLUEPRINT101",
-      "category": "blueprint-demo"
+      "category": "Blueprint demo"
     },
     {
       "step": "createUser",
