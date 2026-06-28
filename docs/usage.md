@@ -11,7 +11,8 @@ If you just want the fastest path to a running site, see
 ## Open the playground
 
 1. Go to [https://moodle-playground.com](https://moodle-playground.com)
-   (mirror: `https://ateeducacion.github.io/moodle-playground/`).
+   (mirrors: `https://moodle-playground.pages.dev/` and
+   `https://ateeducacion.github.io/moodle-playground/`).
 2. Wait for the first boot. A full Moodle site is compiled to WebAssembly and
    installed in memory, so the first load takes a few seconds. Boot progress is
    shown in the **Logs** tab.

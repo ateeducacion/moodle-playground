@@ -16,7 +16,6 @@ theme:
     - navigation.top
     - navigation.instant
     - navigation.tracking
-    - navigation.indexes
     - toc.follow
     - search.suggest
     - search.highlight
@@ -60,7 +59,8 @@ nav:
   - GitHub integration:
       - PR previews: github/pr-previews.md
       - Action reference: github/action-reference.md
-  - Architecture: architecture.md
+  - Architecture:
+      - Overview: architecture.md
   - Maintainers:
       - Contributing: maintainers/contributing.md
       - Internal notes: maintainers/internal-notes.md
