@@ -1,14 +1,23 @@
 // ==UserScript==
 // @name         Open in Moodle Playground
 // @namespace    https://github.com/ateeducacion/moodle-playground
-// @version      0.1
+// @version      0.2
 // @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
 // @author       ateeducacion
 // @match        https://github.com/*/pull/*
 // @match        https://moodle.atlassian.net/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=moodle.org
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      api.github.com
+// @run-at       document-idle
 // ==/UserScript==
+
+// IMPORTANT: this script declares a @grant (GM_xmlhttpRequest) on purpose. With
+// `@grant none` Tampermonkey injects the script as a page <script>, which GitHub
+// and Atlassian block via their Content-Security-Policy (script-src 'self'). A
+// real grant makes Tampermonkey run the script in its sandboxed content-script
+// world instead, which is not subject to the page CSP. The badge is also a pure
+// CSS element (no external <img>) so it does not depend on the page's img-src.
 
 (() => {
   // ─────────────────────────────────────────────────────────────────────────
@@ -18,9 +27,8 @@
   // ─────────────────────────────────────────────────────────────────────────
   const PLAYGROUND_HOST = "https://ateeducacion.github.io/moodle-playground";
   const RUN_UPGRADE = "auto"; // off | on | auto
-  const BUTTON_IMG =
-    "https://raw.githubusercontent.com/ateeducacion/moodle-playground/main/assets/playground-preview-button.svg";
   const BUTTON_ID = "moodle-playground-preview-button";
+  const BUTTON_CLASS = "mpp-preview-button";
 
   // Map a PR target branch (base.ref) to a Moodle Playground base version. Kept
   // identical to the action/runtime so the button picks the same base bundle.
@@ -44,6 +52,41 @@
       .replaceAll("+", "-")
       .replaceAll("/", "_")
       .replace(/=+$/u, "");
+  }
+
+  // GET a JSON document, preferring GM_xmlhttpRequest (bypasses the page CSP's
+  // connect-src and CORS), falling back to fetch. Resolves null on any failure.
+  function apiGetJson(url) {
+    return new Promise((resolve) => {
+      const gm =
+        typeof GM_xmlhttpRequest === "function"
+          ? GM_xmlhttpRequest
+          : typeof GM !== "undefined" && GM && GM.xmlHttpRequest;
+      if (gm) {
+        gm({
+          method: "GET",
+          url,
+          headers: { Accept: "application/vnd.github+json" },
+          timeout: 8000,
+          onload: (r) => {
+            try {
+              resolve(JSON.parse(r.responseText));
+            } catch {
+              resolve(null);
+            }
+          },
+          onerror: () => resolve(null),
+          ontimeout: () => resolve(null),
+        });
+      } else if (typeof fetch === "function") {
+        fetch(url, { headers: { Accept: "application/vnd.github+json" } })
+          .then((r) => (r.ok ? r.json() : null))
+          .then(resolve)
+          .catch(() => resolve(null));
+      } else {
+        resolve(null);
+      }
+    });
   }
 
   // Build a compact repo+pr applyPrOverlay blueprint URL. The runtime fetches the
@@ -75,20 +118,33 @@
     return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
   }
 
-  // Build the badge anchor element.
-  function makeButton(url, { block = false } = {}) {
+  // A CSS-only badge (no external image, so it is immune to the page's img-src
+  // CSP). Returns the anchor element.
+  function makeButton(url, { id, block = false } = {}) {
     const a = document.createElement("a");
-    a.id = BUTTON_ID;
+    if (id) a.id = id;
+    a.className = BUTTON_CLASS;
     a.href = url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
+    a.textContent = "▶ Open in Moodle Playground";
     a.title = "Preview this pull request in Moodle Playground";
-    a.style.cssText = `display:inline-block;${block ? "margin-top:8px;" : "margin-left:8px;"}vertical-align:middle;`;
-    const img = document.createElement("img");
-    img.src = BUTTON_IMG;
-    img.alt = "Open in Moodle Playground";
-    img.style.cssText = "height:30px;max-width:100%;";
-    a.appendChild(img);
+    a.style.cssText = [
+      "display:inline-flex",
+      "align-items:center",
+      "gap:6px",
+      block ? "margin-top:8px" : "margin-left:8px",
+      "padding:5px 12px",
+      "border-radius:6px",
+      "font:600 12px/20px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "color:#fff",
+      "background:#f98012",
+      "text-decoration:none",
+      "border:1px solid rgba(27,31,36,.15)",
+      "white-space:nowrap",
+      "vertical-align:middle",
+      "cursor:pointer",
+    ].join(";");
     return a;
   }
 
@@ -107,16 +163,14 @@
   // Prefer a preview link already posted by the GitHub Action (in the PR body or
   // a comment) so the button matches the action-generated, reproducible preview.
   function findExistingActionLink() {
-    for (const a of document.querySelectorAll(
-      ".js-comment-body a, .markdown-body a, .comment-body a",
-    )) {
-      if (isPlaygroundLink(a.href)) return a.href;
+    for (const a of document.querySelectorAll("a[href]")) {
+      if (isPlaygroundLink(a.getAttribute("href"))) return a.href;
     }
     return null;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // GitHub pull request pages
+  // GitHub pull request pages (Primer React PageHeader UI)
   // ─────────────────────────────────────────────────────────────────────────
   function githubPrInfo() {
     const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/u);
@@ -127,38 +181,67 @@
     return { owner, repo, repoFullName: `${owner}/${repo}`, pr };
   }
 
-  // The base branch shown in the PR header ("base ← compare").
-  function readBaseRefFromDom() {
-    const el = document.querySelector(".base-ref, .commit-ref.base-ref");
-    return el ? el.textContent.trim() : null;
+  // Read the PR base branch from the header BranchName chips ("owner:branch").
+  // The base branch is the first BranchName and is prefixed with the base owner.
+  function readBaseRefFromDom(baseOwner) {
+    const chips = [
+      ...document.querySelectorAll(
+        '[data-component="BranchName"], .commit-ref',
+      ),
+    ].map((e) => e.textContent.trim());
+    if (chips.length === 0) return null;
+    const ownerMatch = chips.find((t) =>
+      t.toLowerCase().startsWith(`${baseOwner.toLowerCase()}:`),
+    );
+    const chosen = ownerMatch || chips[0];
+    const colon = chosen.indexOf(":");
+    return colon >= 0 ? chosen.slice(colon + 1) : chosen;
   }
 
   async function resolveBaseRef(info) {
-    const fromDom = readBaseRefFromDom();
+    const fromDom = readBaseRefFromDom(info.owner);
     if (fromDom) return fromDom;
-    // Fall back to the public REST API (unauthenticated, CORS-enabled, 60/hour).
-    try {
-      const res = await fetch(
-        `https://api.github.com/repos/${info.repoFullName}/pulls/${info.pr}`,
-        { headers: { Accept: "application/vnd.github+json" } },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        return data?.base?.ref || null;
+    // Fall back to the public REST API.
+    const data = await apiGetJson(
+      `https://api.github.com/repos/${info.repoFullName}/pulls/${info.pr}`,
+    );
+    return data?.base?.ref || null;
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+  }
+
+  // GitHub's Primer header renders several responsive copies of each region
+  // (some hidden, e.g. PH_Actions is empty when logged out). Pick the first
+  // VISIBLE container; the PR title row is the most reliable anchor.
+  function ghInsertionPoint() {
+    const candidates = [
+      '[data-component="PH_Title"]',
+      '[data-component="PH_Actions"]',
+      '[data-component="PageHeader.Description"]',
+      '[data-component="PageHeader"]',
+      ".gh-header-actions",
+    ];
+    for (const sel of candidates) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (isVisible(el)) return el;
       }
-    } catch {
-      /* offline / rate-limited — fall through */
     }
     return null;
   }
 
-  function ghInsertionPoint() {
-    return (
-      document.querySelector(".gh-header-actions") ||
-      document.querySelector(".gh-header-meta") ||
-      document.querySelector(".gh-header-show") ||
-      null
-    );
+  // Last-resort floating button so the badge always appears even if GitHub's
+  // header markup changes again.
+  function mountFloating(url) {
+    const wrap = document.createElement("div");
+    wrap.id = BUTTON_ID;
+    wrap.style.cssText =
+      "position:fixed;right:16px;bottom:16px;z-index:2147483647;";
+    wrap.appendChild(makeButton(url));
+    document.body.appendChild(wrap);
   }
 
   async function injectGithub() {
@@ -166,17 +249,19 @@
     if (!info) return;
     if (document.getElementById(BUTTON_ID)) return; // already injected
 
-    const target = ghInsertionPoint();
-    if (!target) return; // header not rendered yet; the observer will retry
-
     const baseRef = await resolveBaseRef(info);
-    // Re-check after the await in case another tick already injected it.
-    if (document.getElementById(BUTTON_ID)) return;
+    if (document.getElementById(BUTTON_ID)) return; // re-check after await
 
     const url =
       findExistingActionLink() ||
       buildPlaygroundUrl(info.repoFullName, info.pr, baseRef);
-    target.appendChild(makeButton(url));
+
+    const target = ghInsertionPoint();
+    if (target) {
+      target.appendChild(makeButton(url, { id: BUTTON_ID }));
+    } else {
+      mountFloating(url);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -186,15 +271,15 @@
   // ─────────────────────────────────────────────────────────────────────────
   function injectTracker() {
     for (const a of document.querySelectorAll('a[href*="/pull/"]')) {
-      const m = (() => {
-        try {
-          const u = new URL(a.href, location.href);
-          if (u.host !== "github.com") return null;
-          return u.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/u);
-        } catch {
-          return null;
+      let m = null;
+      try {
+        const u = new URL(a.href, location.href);
+        if (u.host === "github.com") {
+          m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/u);
         }
-      })();
+      } catch {
+        m = null;
+      }
       if (!m) continue;
       const [, owner, repo, pr] = m;
       if (repo.toLowerCase() !== "moodle") continue;
