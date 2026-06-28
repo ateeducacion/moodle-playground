@@ -17,7 +17,9 @@ import {
 } from "../php/helpers.js";
 import {
   applyProxy,
+  buildPrApiUrl,
   buildPrFilesApiUrl,
+  buildRawGithubUrl,
   DEFAULT_MAX_OVERLAY_FILE_BYTES,
   DEFAULT_MAX_OVERLAY_FILES,
   DEFAULT_OVERLAY_ROOT,
@@ -218,6 +220,26 @@ async function fetchBytes(rawUrl, proxy, maxBytes) {
  * pagination. Each entry's raw_url is already pinned to the PR head SHA.
  */
 async function fetchPrFiles(repo, pr, proxy) {
+  // Resolve the PR head repo + SHA first. The pulls/files API's own `raw_url`
+  // is a github.com/.../raw/... redirect that is NOT CORS-accessible from the
+  // browser, so we build raw.githubusercontent.com URLs from the head instead.
+  const prRes = await fetch(applyProxy(buildPrApiUrl(repo, pr), proxy), {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!prRes.ok) {
+    throw new Error(
+      `applyPrOverlay: GitHub API returned HTTP ${prRes.status} for ${repo}#${pr}.`,
+    );
+  }
+  const prData = await prRes.json();
+  const headRepoFullName = prData?.head?.repo?.full_name || repo;
+  const headSha = prData?.head?.sha;
+  if (!headSha) {
+    throw new Error(
+      `applyPrOverlay: could not resolve the head SHA for ${repo}#${pr}.`,
+    );
+  }
+
   const out = [];
   for (let page = 1; page <= 100; page++) {
     const url = applyProxy(buildPrFilesApiUrl(repo, pr, { page }), proxy);
@@ -232,10 +254,13 @@ async function fetchPrFiles(repo, pr, proxy) {
     const batch = await res.json();
     if (!Array.isArray(batch) || batch.length === 0) break;
     for (const f of batch) {
+      const removed = String(f.status || "").toLowerCase() === "removed";
       out.push({
         path: f.filename,
         status: f.status,
-        rawUrl: f.raw_url || null,
+        rawUrl: removed
+          ? null
+          : buildRawGithubUrl(headRepoFullName, headSha, f.filename),
         previousPath: f.previous_filename || null,
         size: null,
       });

@@ -236,6 +236,50 @@ export function buildPrFilesApiUrl(repo, pr, { page = 1, perPage = 100 } = {}) {
 }
 
 /**
+ * Build the GitHub REST API URL for a single pull request (used to resolve the
+ * head repo + head SHA before building raw file URLs).
+ *
+ * @param {string} repo "owner/name"
+ * @param {number|string} pr pull request number
+ * @returns {string}
+ */
+export function buildPrApiUrl(repo, pr) {
+  const prNumber = parseInt(pr, 10);
+  if (!repo || !/^[^/]+\/[^/]+$/u.test(String(repo))) {
+    throw new Error(
+      `applyPrOverlay: invalid repo '${repo}' (expected owner/name).`,
+    );
+  }
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    throw new Error(`applyPrOverlay: invalid pr '${pr}'.`);
+  }
+  return `https://api.github.com/repos/${repo}/pulls/${prNumber}`;
+}
+
+/**
+ * Build a CORS-accessible raw.githubusercontent.com URL for a file at a commit.
+ *
+ * The GitHub pulls/files API returns `raw_url` as a `github.com/<o>/<r>/raw/...`
+ * URL, which is a 302 redirect that browsers CANNOT fetch cross-origin (no CORS
+ * headers). raw.githubusercontent.com serves the same content with
+ * `access-control-allow-origin: *`, including a PR head commit referenced via
+ * either the head (fork) repo or the base repo. Each path segment is URL-encoded
+ * while `/` separators are preserved.
+ *
+ * @param {string} repoFullName "owner/name"
+ * @param {string} sha commit SHA
+ * @param {string} filename repo-relative path
+ * @returns {string}
+ */
+export function buildRawGithubUrl(repoFullName, sha, filename) {
+  const encodedPath = String(filename)
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  return `https://raw.githubusercontent.com/${repoFullName}/${sha}/${encodedPath}`;
+}
+
+/**
  * Optionally route a GitHub URL through a CORS/caching proxy. When no proxy is
  * given the URL is returned unchanged (direct GitHub endpoints are the default
  * and work for public repos). The proxy is expected to accept a URL-passthrough

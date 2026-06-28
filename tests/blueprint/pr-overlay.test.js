@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyProxy,
+  buildPrApiUrl,
   buildPrFilesApiUrl,
+  buildRawGithubUrl,
   DEFAULT_OVERLAY_ROOT,
   joinRoot,
   normalizeOverlayManifest,
@@ -246,6 +248,36 @@ describe("buildPrFilesApiUrl / applyProxy", () => {
   });
 });
 
+describe("buildPrApiUrl / buildRawGithubUrl", () => {
+  it("builds the single-PR API URL", () => {
+    assert.strictEqual(
+      buildPrApiUrl("moodle/moodle", 532),
+      "https://api.github.com/repos/moodle/moodle/pulls/532",
+    );
+    assert.throws(() => buildPrApiUrl("nope", 1), /invalid repo/);
+  });
+
+  it("builds a CORS-accessible raw.githubusercontent.com URL (never github.com/raw)", () => {
+    const url = buildRawGithubUrl(
+      "nadeemmhdm/moodle",
+      "952df34",
+      "public/mod/quiz/view.php",
+    );
+    assert.strictEqual(
+      url,
+      "https://raw.githubusercontent.com/nadeemmhdm/moodle/952df34/public/mod/quiz/view.php",
+    );
+    assert.ok(!url.includes("github.com/")); // must not be the redirect host
+  });
+
+  it("URL-encodes path segments but keeps slashes", () => {
+    assert.strictEqual(
+      buildRawGithubUrl("o/r", "sha", "lang/en/a b.php"),
+      "https://raw.githubusercontent.com/o/r/sha/lang/en/a%20b.php",
+    );
+  });
+});
+
 describe("deleteFile / deleteFiles steps", () => {
   it("deleteFile runs an idempotent unlink", async () => {
     const php = createMockPhp();
@@ -417,6 +449,68 @@ describe("applyPrOverlay step", () => {
     await assert.rejects(
       () => handler({}, { php: createMockPhp() }),
       /provide a 'files' manifest/,
+    );
+  });
+
+  it("repo+pr mode resolves the head and fetches CORS-friendly raw URLs", async () => {
+    const php = createMockPhp();
+    const handler = getStepHandler("applyPrOverlay");
+    const fetched = [];
+    await withFetch(
+      async (url) => {
+        fetched.push(url);
+        if (/\/pulls\/532$/.test(url)) {
+          // The single-PR API call resolves the head repo + SHA.
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return {
+                head: { repo: { full_name: "fork/moodle" }, sha: "deadbeef" },
+              };
+            },
+          };
+        }
+        if (/\/pulls\/532\/files/.test(url)) {
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return [
+                { filename: "public/mod/quiz/view.php", status: "modified" },
+                { filename: "lib/old.php", status: "removed" },
+              ];
+            },
+          };
+        }
+        // Raw file content.
+        return okBytesResponse(new Uint8Array([1, 2, 3]));
+      },
+      () =>
+        handler({ repo: "moodle/moodle", pr: 532, runUpgrade: "off" }, { php }),
+    );
+
+    // The raw fetch must hit raw.githubusercontent.com (NOT github.com/raw,
+    // which 302s without CORS and broke the first live test).
+    const rawFetch = fetched.find((u) =>
+      u.includes("public/mod/quiz/view.php"),
+    );
+    assert.ok(
+      rawFetch.startsWith(
+        "https://raw.githubusercontent.com/fork/moodle/deadbeef/",
+      ),
+      `expected raw.githubusercontent URL, got ${rawFetch}`,
+    );
+    assert.ok(!rawFetch.includes("github.com/fork/moodle/raw"));
+    // Modified file written, removed file deleted.
+    assert.deepStrictEqual(
+      php.writes.map((w) => w.path),
+      ["/www/moodle/public/mod/quiz/view.php"],
+    );
+    assert.ok(
+      php.runCalls.some(
+        (c) => c.includes("@unlink") && c.includes("lib/old.php"),
+      ),
     );
   });
 
