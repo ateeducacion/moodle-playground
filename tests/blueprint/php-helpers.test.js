@@ -604,6 +604,10 @@ describe("PHP helpers: phpPurgeMoodleCaches", () => {
     assert.ok(script.includes("purge_all_caches()"));
     assert.ok(script.includes("core_component::reset()"));
     assert.ok(script.includes("theme_reset_all_caches()"));
+    // OPcache must be reset (and its file cache cleared) so overwritten files
+    // do not keep serving stale bytecode under validate_timestamps=0.
+    assert.ok(script.includes("opcache_reset()"));
+    assert.ok(script.includes("opcache.file_cache"));
     assert.ok(script.includes("set_config('allversionshash', '')"));
     assert.ok(script.includes('"ok"') || script.includes("'ok'"));
   });

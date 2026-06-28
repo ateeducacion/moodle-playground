@@ -52,6 +52,7 @@ function okBytesResponse(bytes) {
   return {
     ok: true,
     status: 200,
+    headers: { get: () => String(bytes.byteLength) },
     async arrayBuffer() {
       return bytes.buffer.slice(
         bytes.byteOffset,
@@ -291,6 +292,7 @@ describe("purgeMoodleCaches step", () => {
     const code = php.runCalls[0];
     assert.match(code, /purge_all_caches/);
     assert.match(code, /core_component::reset/);
+    assert.match(code, /opcache_reset/);
     assert.match(code, /allversionshash/);
   });
 });
@@ -415,6 +417,44 @@ describe("applyPrOverlay step", () => {
     await assert.rejects(
       () => handler({}, { php: createMockPhp() }),
       /provide a 'files' manifest/,
+    );
+  });
+
+  it("skips a single failing file instead of aborting the whole overlay", async () => {
+    const php = createMockPhp();
+    const handler = getStepHandler("applyPrOverlay");
+    // First fetch fails (e.g. 404 from a force-pushed SHA), second succeeds.
+    let call = 0;
+    await withFetch(
+      async () => {
+        call++;
+        if (call === 1) return { ok: false, status: 404 };
+        return okBytesResponse(new Uint8Array([1, 2]));
+      },
+      () =>
+        handler(
+          {
+            runUpgrade: "off",
+            files: [
+              {
+                path: "lib/bad.php",
+                status: "modified",
+                rawUrl: "https://raw/bad",
+              },
+              {
+                path: "lib/good.php",
+                status: "modified",
+                rawUrl: "https://raw/good",
+              },
+            ],
+          },
+          { php },
+        ),
+    );
+    // The good file is still written even though the bad one failed.
+    assert.deepStrictEqual(
+      php.writes.map((w) => w.path),
+      ["/www/moodle/lib/good.php"],
     );
   });
 });

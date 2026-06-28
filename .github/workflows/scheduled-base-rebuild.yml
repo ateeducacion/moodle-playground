@@ -38,8 +38,11 @@ jobs:
       - name: Dispatch CI to rebuild and redeploy base bundles
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pass the untrusted input via env (never inline ${{ ... }} into the
+          # script) to avoid shell injection.
+          REASON: ${{ github.event.inputs.reason }}
         run: |
-          reason="${{ github.event.inputs.reason }}"
+          reason="$REASON"
           if [ -z "$reason" ]; then
             reason="Scheduled base rebuild to keep PR-overlay bases close to branch tips"
           fi

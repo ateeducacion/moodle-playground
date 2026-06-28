@@ -79,27 +79,46 @@ async function handleApplyPrOverlay(step, { php, publish }) {
   }
 
   // 2. Apply each operation. Whole-file replacement handles add/modify/remove/
-  //    rename predictably; paths are validated by joinRoot before any write.
+  //    rename predictably; paths were validated by normalizeOverlayManifest.
+  //    Each file is applied independently: a single unreachable / oversized /
+  //    failed file is skipped with a visible warning rather than aborting the
+  //    whole preview (so the remaining files and the login step still run).
   let written = 0;
   let removed = 0;
+  let skipped = 0;
   for (const op of ops) {
-    if (op.status === "removed") {
-      await deletePath(php, joinRoot(root, op.path));
-      removed++;
-    } else if (op.status === "renamed") {
-      await deletePath(php, joinRoot(root, op.previousPath));
-      const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
-      await writePath(php, joinRoot(root, op.path), bytes);
-      written++;
-    } else {
-      // added | modified
-      const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
-      await writePath(php, joinRoot(root, op.path), bytes);
-      written++;
+    try {
+      if (op.status === "removed") {
+        await deletePath(php, joinRoot(root, op.path));
+        removed++;
+      } else if (op.status === "renamed") {
+        await deletePath(php, joinRoot(root, op.previousPath));
+        const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
+        await writePath(php, joinRoot(root, op.path), bytes);
+        written++;
+      } else {
+        // added | modified
+        const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
+        await writePath(php, joinRoot(root, op.path), bytes);
+        written++;
+      }
+    } catch (err) {
+      skipped++;
+      if (publish) {
+        publish(
+          `Overlay: skipped ${op.path} (${String(err?.message || err).slice(0, 160)})`,
+          0.94,
+        );
+      }
     }
   }
   if (publish) {
-    publish(`Overlay applied: ${written} written, ${removed} removed.`, 0.94);
+    publish(
+      `Overlay applied: ${written} written, ${removed} removed${
+        skipped ? `, ${skipped} skipped` : ""
+      }.`,
+      0.94,
+    );
   }
 
   // 3. Purge caches by default (core files just changed under MUC's feet).
@@ -174,6 +193,16 @@ async function fetchBytes(rawUrl, proxy, maxBytes) {
     throw new Error(
       `applyPrOverlay: failed to fetch ${rawUrl} (HTTP ${res.status}).`,
     );
+  }
+  // Reject oversized files by their declared length before buffering the body,
+  // so a huge blob never gets fully materialized into the worker heap.
+  if (maxBytes) {
+    const declared = Number(res.headers?.get?.("content-length"));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      throw new Error(
+        `applyPrOverlay: ${rawUrl} is ${declared} bytes (> maxFileBytes=${maxBytes}).`,
+      );
+    }
   }
   const bytes = new Uint8Array(await res.arrayBuffer());
   if (maxBytes && bytes.byteLength > maxBytes) {
