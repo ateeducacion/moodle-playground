@@ -257,6 +257,42 @@ export function buildPrApiUrl(repo, pr) {
 }
 
 /**
+ * Build the GitHub REST API URL that compares two refs (`base...head`). This is
+ * the Moodle peer-review case: the tracker links a fork repo plus a base SHA and
+ * a head branch, not a pull request. `base`/`head` may be branch names or SHAs;
+ * `head` may also be `owner:repo:branch` for a cross-fork compare. The response
+ * has the same `files[]` shape as the pulls/files API.
+ *
+ * @param {string} repo "owner/name"
+ * @param {string} base base ref (branch or SHA)
+ * @param {string} head head ref (branch, SHA, or "owner:repo:branch")
+ * @returns {string}
+ */
+export function buildCompareApiUrl(repo, base, head) {
+  if (!repo || !/^[^/]+\/[^/]+$/u.test(String(repo))) {
+    throw new Error(
+      `applyPrOverlay: invalid repo '${repo}' (expected owner/name).`,
+    );
+  }
+  const b = String(base ?? "").trim();
+  const h = String(head ?? "").trim();
+  if (!b || !h) {
+    throw new Error("applyPrOverlay: compare mode requires 'base' and 'head'.");
+  }
+  // Git refs / SHAs / cross-fork "owner:repo:branch" use a restricted charset
+  // (letters, digits, . _ - / :). Validate rather than URL-encode, so '/' in a
+  // branch name and ':' in a cross-fork ref survive; reject '..' so a ref cannot
+  // smuggle a traversal or confuse the `...` range separator.
+  const REF = /^[A-Za-z0-9._/:-]+$/u;
+  if (!REF.test(b) || !REF.test(h) || b.includes("..") || h.includes("..")) {
+    throw new Error(
+      `applyPrOverlay: invalid compare ref(s) '${base}'...'${head}'.`,
+    );
+  }
+  return `https://api.github.com/repos/${repo}/compare/${b}...${h}`;
+}
+
+/**
  * Build a CORS-accessible raw.githubusercontent.com URL for a file at a commit.
  *
  * The GitHub pulls/files API returns `raw_url` as a `github.com/<o>/<r>/raw/...`

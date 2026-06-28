@@ -29,6 +29,8 @@
   const RUN_UPGRADE = "auto"; // off | on | auto
   const BUTTON_ID = "moodle-playground-preview-button";
   const BUTTON_CLASS = "mpp-preview-button";
+  // Unique repo/base/head comparisons already decorated on the tracker.
+  const seenCompares = new Set();
 
   // Map a PR target branch (base.ref) to a Moodle Playground base version. Kept
   // identical to the action/runtime so the button picks the same base bundle.
@@ -41,6 +43,17 @@
     main: "dev",
     master: "dev",
   };
+
+  // Derive a base version from a Moodle peer-review branch suffix. The tracker
+  // names branches like MDL-12345-main / -501 / -500 / -405 / -404, one per
+  // Moodle version. "-main" → dev; "-NNN" → N.(rest), e.g. 501 → 5.1, 405 → 4.5.
+  function branchSuffixToVersion(branch) {
+    const m = String(branch).match(/-(main|master|\d{3})$/u);
+    if (!m) return "dev";
+    const suffix = m[1];
+    if (suffix === "main" || suffix === "master") return "dev";
+    return `${suffix[0]}.${Number(suffix.slice(1))}`;
+  }
 
   // URL-safe base64 (RFC 4648 §5) of a UTF-8 string, matching how the playground
   // decodes the ?blueprint= parameter.
@@ -110,6 +123,36 @@
           repo,
           pr: Number(pr),
           baseRef: baseRef || "main",
+          runUpgrade: RUN_UPGRADE,
+        },
+        { step: "login", username: "admin" },
+      ],
+    };
+    return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
+  }
+
+  // Build a compact compare-mode blueprint URL (Moodle peer-review: repo + base
+  // SHA/branch + head branch). The runtime diffs base...head itself, so the URL
+  // stays small.
+  function buildCompareUrl(repo, base, head) {
+    const version = branchSuffixToVersion(head);
+    const blueprint = {
+      preferredVersions: { php: "8.3", moodle: version },
+      landingPage: "/admin/index.php",
+      steps: [
+        {
+          step: "installMoodle",
+          options: {
+            siteName: `Moodle preview ${head}`,
+            adminUser: "admin",
+            adminPass: "password",
+          },
+        },
+        {
+          step: "applyPrOverlay",
+          repo,
+          base,
+          head,
           runUpgrade: RUN_UPGRADE,
         },
         { step: "login", username: "admin" },
@@ -270,6 +313,7 @@
   // rather than a Gitpod branch, because the overlay previews a pull request.
   // ─────────────────────────────────────────────────────────────────────────
   function injectTracker() {
+    // GitHub PR links (rare for core, but supported).
     for (const a of document.querySelectorAll('a[href*="/pull/"]')) {
       let m = null;
       try {
@@ -286,6 +330,46 @@
       if (a.dataset.mppButton) continue; // already decorated this link
       a.dataset.mppButton = "1";
       const url = buildPlaygroundUrl(`${owner}/${repo}`, pr, null);
+      a.insertAdjacentElement("afterend", makeButton(url, { block: true }));
+    }
+
+    // GitHub compare links — the actual Moodle peer-review format. The tracker's
+    // "Pull … Diff URL" fields render links like
+    // github.com/<owner>/moodle/compare/<base>...<head> (optionally with ?w=1).
+    for (const a of document.querySelectorAll('a[href*="/compare/"]')) {
+      let parsed = null;
+      try {
+        const u = new URL(a.href, location.href);
+        if (u.host === "github.com") {
+          const m = u.pathname.match(
+            /^\/([^/]+)\/([^/]+)\/compare\/(.+?)\.\.\.(.+)$/u,
+          );
+          if (m) {
+            parsed = {
+              owner: m[1],
+              repo: m[2],
+              base: decodeURIComponent(m[3]),
+              head: decodeURIComponent(m[4]),
+            };
+          }
+        }
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) continue;
+      if (parsed.repo.toLowerCase() !== "moodle") continue;
+      if (a.dataset.mppButton) continue;
+      a.dataset.mppButton = "1";
+      // The same comparison is often rendered in several tracker fields; show
+      // only one button per unique repo/base/head.
+      const key = `${parsed.owner}/${parsed.repo}|${parsed.base}|${parsed.head}`;
+      if (seenCompares.has(key)) continue;
+      seenCompares.add(key);
+      const url = buildCompareUrl(
+        `${parsed.owner}/${parsed.repo}`,
+        parsed.base,
+        parsed.head,
+      );
       a.insertAdjacentElement("afterend", makeButton(url, { block: true }));
     }
   }

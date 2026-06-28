@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyProxy,
+  buildCompareApiUrl,
   buildPrApiUrl,
   buildPrFilesApiUrl,
   buildRawGithubUrl,
@@ -279,6 +280,40 @@ describe("buildPrApiUrl / buildRawGithubUrl", () => {
   });
 });
 
+describe("buildCompareApiUrl", () => {
+  it("builds a base...head compare URL (branch with slashes and SHA bases)", () => {
+    assert.strictEqual(
+      buildCompareApiUrl(
+        "muhammadarnaldo/moodle",
+        "746815af49",
+        "MDL-87588-main",
+      ),
+      "https://api.github.com/repos/muhammadarnaldo/moodle/compare/746815af49...MDL-87588-main",
+    );
+    // Refs keep '/' (branch names) and ':' (cross-fork) — not URL-encoded.
+    assert.strictEqual(
+      buildCompareApiUrl("moodle/moodle", "main", "user:moodle:feature/x"),
+      "https://api.github.com/repos/moodle/moodle/compare/main...user:moodle:feature/x",
+    );
+  });
+
+  it("rejects bad repos, missing/empty refs, and traversal", () => {
+    assert.throws(() => buildCompareApiUrl("nope", "a", "b"), /invalid repo/);
+    assert.throws(
+      () => buildCompareApiUrl("o/r", "", "b"),
+      /requires 'base' and 'head'/,
+    );
+    assert.throws(
+      () => buildCompareApiUrl("o/r", "a", "../b"),
+      /invalid compare ref/,
+    );
+    assert.throws(
+      () => buildCompareApiUrl("o/r", "a b", "c"),
+      /invalid compare ref/,
+    );
+  });
+});
+
 describe("deleteFile / deleteFiles steps", () => {
   it("deleteFile runs an idempotent unlink", async () => {
     const php = createMockPhp();
@@ -512,6 +547,67 @@ describe("applyPrOverlay step", () => {
       php.runCalls.some(
         (c) => c.includes("@unlink") && c.includes("lib/old.php"),
       ),
+    );
+  });
+
+  it("compare mode (repo+base+head) fetches the diff and writes CORS-friendly raw URLs", async () => {
+    const php = createMockPhp();
+    const handler = getStepHandler("applyPrOverlay");
+    const fetched = [];
+    await withFetch(
+      async (url) => {
+        fetched.push(url);
+        if (/\/compare\//.test(url)) {
+          // The compare endpoint returns files + the head commit.
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return {
+                commits: [{ sha: "540104c" }],
+                files: [
+                  {
+                    filename: "public/mod/bigbluebuttonbn/version.php",
+                    status: "modified",
+                  },
+                ],
+              };
+            },
+          };
+        }
+        return okBytesResponse(new Uint8Array([1, 2, 3]));
+      },
+      () =>
+        handler(
+          {
+            repo: "muhammadarnaldo/moodle",
+            base: "746815af49",
+            head: "MDL-87588-main",
+            runUpgrade: "off",
+          },
+          { php },
+        ),
+    );
+
+    // It hit the compare endpoint (not pulls).
+    assert.ok(
+      fetched.some((u) =>
+        u.startsWith(
+          "https://api.github.com/repos/muhammadarnaldo/moodle/compare/746815af49...MDL-87588-main",
+        ),
+      ),
+    );
+    // Raw fetch uses raw.githubusercontent.com + the head SHA from the response.
+    const rawFetch = fetched.find((u) => u.includes("version.php"));
+    assert.ok(
+      rawFetch.startsWith(
+        "https://raw.githubusercontent.com/muhammadarnaldo/moodle/540104c/",
+      ),
+      `expected raw.githubusercontent URL, got ${rawFetch}`,
+    );
+    assert.deepStrictEqual(
+      php.writes.map((w) => w.path),
+      ["/www/moodle/public/mod/bigbluebuttonbn/version.php"],
     );
   });
 

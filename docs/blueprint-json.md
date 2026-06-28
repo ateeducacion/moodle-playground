@@ -718,12 +718,17 @@ rename predictably and avoids hunk failures, fuzzy patching, `.rej` files, conte
 binary-diff problems. This is a preview system, not a source-control engine — no diff/patch
 engine is implemented.
 
-Two input modes:
+Three input modes:
 
 1. **Pre-resolved manifest (`files`)** — recommended; reproducible and avoids runtime GitHub
    API calls. The Action emits this.
 2. **Runtime fetch (`repo` + `pr`)** — the step calls the GitHub REST API
    (`/repos/{owner}/{repo}/pulls/{n}/files`) itself. Useful for Tampermonkey/manual URLs.
+3. **Branch compare (`repo` + `base` + `head`)** — the step diffs two refs via the GitHub
+   compare API (`/repos/{owner}/{repo}/compare/{base}...{head}`). This is the **Moodle
+   peer-review** case: the tracker links a fork repo plus a base SHA and a head branch (no
+   pull request). `base`/`head` may be branch names or SHAs; `head` may be `owner:repo:branch`
+   for a cross-fork compare.
 
 ```json
 {
@@ -749,17 +754,25 @@ Two input modes:
 }
 ```
 
-Runtime-fetch form:
+Runtime-fetch form (PR):
 
 ```json
 { "step": "applyPrOverlay", "repo": "moodle/moodle", "pr": 1234, "runUpgrade": "auto" }
 ```
 
+Branch-compare form (Moodle peer-review / tracker):
+
+```json
+{ "step": "applyPrOverlay", "repo": "someone/moodle", "base": "746815af49", "head": "MDL-12345-main", "runUpgrade": "auto" }
+```
+
 | Field | Required | Description |
 |-------|----------|-------------|
-| `files` | one of `files` / `repo`+`pr` | Pre-resolved manifest of changed files (see below). |
-| `repo` | with `pr` | `owner/name` to fetch changed files from at runtime. |
+| `files` | one of `files` / `repo`+`pr` / `repo`+`base`+`head` | Pre-resolved manifest of changed files (see below). |
+| `repo` | with `pr` or `head` | `owner/name` to fetch changed files from at runtime. |
 | `pr` | with `repo` | Pull request number. |
+| `base` | with `repo`+`head` | Base ref (branch or SHA) to diff against. Defaults to `main`. |
+| `head` | with `repo`+`base` | Head ref (branch, SHA, or `owner:repo:branch`) to overlay. |
 | `baseRef` | no | Informational: the PR target branch the base was chosen for. |
 | `runUpgrade` | no | `off`, `on`, or `auto` (default `auto`). See below. |
 | `root` | no | Filesystem root to overlay onto. Defaults to `/www/moodle`. |
