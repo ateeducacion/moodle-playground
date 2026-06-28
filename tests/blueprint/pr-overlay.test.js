@@ -267,7 +267,8 @@ describe("buildPrApiUrl / buildRawGithubUrl", () => {
       url,
       "https://raw.githubusercontent.com/nadeemmhdm/moodle/952df34/public/mod/quiz/view.php",
     );
-    assert.ok(!url.includes("github.com/")); // must not be the redirect host
+    // Must be the CORS-enabled raw host, not the github.com redirect host.
+    assert.strictEqual(new URL(url).host, "raw.githubusercontent.com");
   });
 
   it("URL-encodes path segments but keeps slashes", () => {
@@ -495,13 +496,13 @@ describe("applyPrOverlay step", () => {
     const rawFetch = fetched.find((u) =>
       u.includes("public/mod/quiz/view.php"),
     );
+    assert.strictEqual(new URL(rawFetch).host, "raw.githubusercontent.com");
     assert.ok(
       rawFetch.startsWith(
         "https://raw.githubusercontent.com/fork/moodle/deadbeef/",
       ),
       `expected raw.githubusercontent URL, got ${rawFetch}`,
     );
-    assert.ok(!rawFetch.includes("github.com/fork/moodle/raw"));
     // Modified file written, removed file deleted.
     assert.deepStrictEqual(
       php.writes.map((w) => w.path),
