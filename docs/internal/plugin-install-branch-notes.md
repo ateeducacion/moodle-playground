@@ -72,7 +72,7 @@ Use:
 - `installMoodlePlugin`
 - `installTheme`
 
-See [`blueprint-json.md`](./blueprint-json.md) for the step reference.
+See [the blueprint reference](../blueprints/reference.md) for the step reference.
 
 This is the preferred path for repeatable demos/tests because it avoids manual
 navigation and makes the plugin source explicit.

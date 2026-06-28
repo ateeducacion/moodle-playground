@@ -10,7 +10,7 @@
   </a>
 </p>
 
-[Live demo](https://moodle-playground.com/) · [Documentation](https://moodle-playground.com/docs/) · [Blueprints](https://moodle-playground.com/docs/blueprint-json/)
+[Live demo](https://moodle-playground.com/) · [Documentation](https://moodle-playground.com/docs/) · [Blueprints](https://moodle-playground.com/docs/blueprints/reference/)
 
 > Run a full Moodle site in the browser — no server required.
 
@@ -102,11 +102,11 @@ Blueprints can provision:
 
 Use `constants` for `{{PLACEHOLDER}}` substitution and `resources` for named file references.
 
-See the [Blueprint reference](docs/blueprint-json.md) for the full format, all step types, and examples. A sample blueprint is at [`blueprint-sample.json`](blueprint-sample.json).
+See the [Blueprint reference](docs/blueprints/reference.md) for the full format, all step types, and examples. A sample blueprint is at [`blueprint-sample.json`](blueprint-sample.json).
 
 Schema: [`assets/blueprints/blueprint-schema.json`](assets/blueprints/blueprint-schema.json).
 
-See the [development docs](docs/development.md) and [`AGENTS.md`](AGENTS.md) for the full command reference.
+See the [development docs](docs/maintainers/contributing.md) and [`AGENTS.md`](AGENTS.md) for the full command reference.
 
 ## Sibling Docker runtime: alpine-moodle
 
@@ -119,11 +119,11 @@ This means a plugin or course demo can keep a single declarative `blueprint.json
 - in Moodle Playground for fast browser validation and sharing, or
 - in alpine-moodle for a real Docker-based Moodle environment.
 
-See [`docs/blueprint-runtimes.md`](docs/blueprint-runtimes.md) for compatibility notes and a portable, Docker-compatible example.
+See [`docs/blueprints/runtime.md`](docs/blueprints/runtime.md) for compatibility notes and a portable, Docker-compatible example.
 
 ## Contributing
 
-Contributions are welcome. See the [development docs](docs/development.md) to get started.
+Contributions are welcome. See the [development docs](docs/maintainers/contributing.md) to get started.
 
 ## License
 
