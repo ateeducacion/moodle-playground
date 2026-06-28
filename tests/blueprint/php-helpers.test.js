@@ -9,6 +9,8 @@ import {
   phpCreateUsers,
   phpEnrolUser,
   phpLogin,
+  phpPurgeMoodleCaches,
+  phpRunCoreUpgrade,
   phpSetAdminAccount,
   phpSetConfig,
   phpSetConfigFile,
@@ -592,5 +594,29 @@ describe("PHP helpers: setConfigFiles", () => {
       }),
     );
     assert.ok(script.includes("x\\'y.jpg"));
+  });
+});
+
+describe("PHP helpers: phpPurgeMoodleCaches", () => {
+  it("bootstraps Moodle and purges caches + component registry", () => {
+    const script = phpPurgeMoodleCaches();
+    assert.ok(script.includes("require('/www/moodle/config.php')"));
+    assert.ok(script.includes("purge_all_caches()"));
+    assert.ok(script.includes("core_component::reset()"));
+    assert.ok(script.includes("theme_reset_all_caches()"));
+    assert.ok(script.includes("set_config('allversionshash', '')"));
+    assert.ok(script.includes('"ok"') || script.includes("'ok'"));
+  });
+});
+
+describe("PHP helpers: phpRunCoreUpgrade", () => {
+  it("loads the overlaid version.php and runs core + noncore upgrade", () => {
+    const script = phpRunCoreUpgrade();
+    assert.ok(script.includes("require($CFG->dirroot . '/version.php')"));
+    assert.ok(script.includes("upgrade_core($version, true)"));
+    assert.ok(script.includes("upgrade_noncore(true)"));
+    // Honest reporting: a Throwable becomes ok:false rather than faked success.
+    assert.ok(script.includes("'ok' => false"));
+    assert.ok(script.includes("'ok' => true"));
   });
 });

@@ -419,6 +419,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0013](docs/decisions/0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Accepted |
 | [0014](docs/decisions/0014-production-require-of-tests-files-patch.md) | Patch production code that require_once()s files under tests/ (mlbackend_python) | Accepted |
 | [0015](docs/decisions/0015-firefox-request-body-buffering.md) | Buffer the request body synchronously for Firefox (SW fetch handler) | Accepted |
+| [0016](docs/decisions/0016-runtime-pr-file-overlay.md) | Runtime PR file overlay for Moodle core PR previews (`applyPrOverlay`) | Accepted |
 
 ## Debugging
 

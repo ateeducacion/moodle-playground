@@ -1,0 +1,43 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "preferredVersions": { "php": "8.3", "moodle": "5.1" },
+  "landingPage": "/admin/index.php",
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "siteName": "Moodle core PR #1234 Preview",
+        "adminUser": "admin",
+        "adminPass": "password"
+      }
+    },
+    {
+      "step": "applyPrOverlay",
+      "baseRef": "MOODLE_501_STABLE",
+      "runUpgrade": "auto",
+      "root": "/www/moodle",
+      "files": [
+        {
+          "path": "lib/classes/example.php",
+          "status": "modified",
+          "rawUrl": "https://raw.githubusercontent.com/moodle/moodle/abc123def456/lib/classes/example.php",
+          "size": 12345
+        },
+        {
+          "path": "lib/classes/removed.php",
+          "status": "removed"
+        },
+        {
+          "path": "lib/classes/newname.php",
+          "previousPath": "lib/classes/oldname.php",
+          "status": "renamed",
+          "rawUrl": "https://raw.githubusercontent.com/moodle/moodle/abc123def456/lib/classes/newname.php"
+        }
+      ]
+    },
+    {
+      "step": "login",
+      "username": "admin"
+    }
+  ]
+}

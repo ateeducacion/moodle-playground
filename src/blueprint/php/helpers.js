@@ -234,6 +234,66 @@ const PURGE_CACHES_BLOCK = `if (function_exists('theme_reset_all_caches')) {
 }
 purge_all_caches();`;
 
+// Purge Moodle's caches and reset the component registry after core/plugin files
+// have been overwritten at runtime (see the purgeMoodleCaches step and
+// applyPrOverlay). Overwriting core files leaves MUC, the compiled DI container,
+// theme CSS, and the component cache pointing at stale code, so a purge + reset
+// is required before the next request. Wrapped in the graceful exception handler
+// so a failure echoes JSON instead of die(1)-ing the WASM runtime (ADR-0005).
+export function phpPurgeMoodleCaches() {
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+if (class_exists('core_component')) {
+    \\core_component::reset();
+}
+if (function_exists('theme_reset_all_caches')) {
+    theme_reset_all_caches();
+}
+if (function_exists('purge_all_caches')) {
+    purge_all_caches();
+}
+// Clear the stored version hash so the next request re-detects pending upgrades.
+set_config('allversionshash', '');
+echo json_encode(['ok' => true]);
+`;
+}
+
+// Best-effort Moodle upgrade after a core-file overlay. Mirrors the essential
+// steps of admin/cli/upgrade.php: reset the component cache, load the (overlaid)
+// version.php, run upgrade_core() when the code version is newer than the
+// installed one, then upgrade_noncore(). SQLite/WASM has lower schema-upgrade
+// fidelity than a full Moodle environment (nested savepoints, see ADR-0003), so
+// the inner try/catch reports failures honestly rather than faking success; the
+// caller additionally wraps php.run() in JS try/catch because a DB error can
+// trigger Moodle's default_exception_handler (die(1)) before this catch runs.
+// See ADR-0016. config.php and version.php are loaded by absolute path because
+// php.run() executes without a script file.
+export function phpRunCoreUpgrade() {
+  return `${CLI_HEADER}
+@set_time_limit(0);
+require_once($CFG->libdir . '/upgradelib.php');
+require_once($CFG->libdir . '/adminlib.php');
+require_once($CFG->libdir . '/environmentlib.php');
+\\core_component::reset();
+if (function_exists('purge_all_caches')) { purge_all_caches(); }
+set_config('allversionshash', '');
+$version = null;
+$release = null;
+$branch = null;
+$maturity = null;
+require($CFG->dirroot . '/version.php');
+try {
+    if (isset($version) && $version > $CFG->version) {
+        upgrade_core($version, true);
+    }
+    upgrade_noncore(true);
+    echo json_encode(['ok' => true, 'version' => $version]);
+} catch (\\Throwable $e) {
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+}
+`;
+}
+
 // Build the optional metadata lines for a Moodle file record. Only emitted when
 // provided; each value is escaped for a single-quoted PHP literal.
 function fileMetaEntries({ author, license, source }) {
