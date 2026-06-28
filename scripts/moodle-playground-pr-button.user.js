@@ -173,10 +173,14 @@
     a.textContent = "▶ Open in Moodle Playground";
     a.title = "Preview this pull request in Moodle Playground";
     a.style.cssText = [
-      "display:inline-flex",
+      // Block badges sit on their own line, sized to content (used on the
+      // tracker, after the smart-link wrapper); inline badges sit beside the
+      // PR-header title.
+      block
+        ? "display:flex;width:max-content;margin-top:8px"
+        : "display:inline-flex;margin-left:8px",
       "align-items:center",
       "gap:6px",
-      block ? "margin-top:8px" : "margin-left:8px",
       "padding:5px 12px",
       "border-radius:6px",
       "font:600 12px/20px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
@@ -312,6 +316,18 @@
   // Mirrors Sara Arjona's tracker userscript, but resolves a PR (repo + number)
   // rather than a Gitpod branch, because the overlay previews a pull request.
   // ─────────────────────────────────────────────────────────────────────────
+  // Insert a badge for a tracker link. The tracker renders GitHub URLs as
+  // Atlassian "smart links" wrapped in a hover-card trigger (and the link itself
+  // has overflow:hidden). Insert the badge AFTER that wrapper so it is not
+  // clipped and hovering it does not pop the GitHub hover-card preview.
+  function trackerInsert(a, url) {
+    const anchor =
+      a.closest('[data-testid="hover-card-trigger-wrapper"]') ||
+      a.closest('[data-testid="smart-links-container"]') ||
+      a;
+    anchor.insertAdjacentElement("afterend", makeButton(url, { block: true }));
+  }
+
   function injectTracker() {
     // GitHub PR links (rare for core, but supported).
     for (const a of document.querySelectorAll('a[href*="/pull/"]')) {
@@ -330,7 +346,7 @@
       if (a.dataset.mppButton) continue; // already decorated this link
       a.dataset.mppButton = "1";
       const url = buildPlaygroundUrl(`${owner}/${repo}`, pr, null);
-      a.insertAdjacentElement("afterend", makeButton(url, { block: true }));
+      trackerInsert(a, url);
     }
 
     // GitHub compare links — the actual Moodle peer-review format. The tracker's
@@ -370,7 +386,7 @@
         parsed.base,
         parsed.head,
       );
-      a.insertAdjacentElement("afterend", makeButton(url, { block: true }));
+      trackerInsert(a, url);
     }
   }
 
