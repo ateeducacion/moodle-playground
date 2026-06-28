@@ -262,12 +262,13 @@
   }
 
   // GitHub's Primer header renders several responsive copies of each region
-  // (some hidden, e.g. PH_Actions is empty when logged out). Pick the first
-  // VISIBLE container; the PR title row is the most reliable anchor.
+  // (some hidden). Prefer the actions row (next to the "Code" button) when it is
+  // visible — i.e. when signed in — and fall back to the title row (PH_Actions is
+  // empty/hidden when signed out). Pick the first VISIBLE container.
   function ghInsertionPoint() {
     const candidates = [
-      '[data-component="PH_Title"]',
       '[data-component="PH_Actions"]',
+      '[data-component="PH_Title"]',
       '[data-component="PageHeader.Description"]',
       '[data-component="PageHeader"]',
       ".gh-header-actions",
@@ -321,10 +322,22 @@
   // has overflow:hidden). Insert the badge AFTER that wrapper so it is not
   // clipped and hovering it does not pop the GitHub hover-card preview.
   function trackerInsert(a, url) {
-    const anchor =
+    let anchor =
       a.closest('[data-testid="hover-card-trigger-wrapper"]') ||
       a.closest('[data-testid="smart-links-container"]') ||
       a;
+    // Climb to the bordered field-value box, if one is nearby, so the badge sits
+    // cleanly on its own line BELOW the field instead of squeezed inside the
+    // smart link's clipped, hover-card box.
+    let box = anchor;
+    for (let i = 0; i < 6 && box; i++) {
+      const cs = getComputedStyle(box);
+      if (cs.borderTopWidth !== "0px" && cs.borderTopStyle !== "none") {
+        anchor = box;
+        break;
+      }
+      box = box.parentElement;
+    }
     anchor.insertAdjacentElement("afterend", makeButton(url, { block: true }));
   }
 
