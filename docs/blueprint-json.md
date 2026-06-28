@@ -822,6 +822,44 @@ Whole-file overlay assumes the prebuilt base is reasonably close to the branch t
 workflow (`.github/workflows/scheduled-base-rebuild.yml`) periodically rebuilds the bases to keep
 drift small.
 
+### Fork support
+
+**Forks are supported.** A Moodle core PR's head almost always lives in a contributor's fork
+(e.g. `someone/moodle`), and both overlay modes handle that:
+
+- **`files` manifest mode** — each entry's `rawUrl` points at the PR head repo (the fork) at the
+  head commit, e.g. `https://raw.githubusercontent.com/someone/moodle/<headSha>/<path>`. The action
+  builds these from the PR head repo, so fork content is fetched directly.
+- **`repo` + `pr` mode** — pass the **base** repository the PR was opened against (e.g.
+  `moodle/moodle`) and the PR number. The GitHub API (`/repos/{base}/pulls/{n}/files`) resolves the
+  fork's head commit automatically, so you do not need to know the fork name.
+
+> The GitHub REST API is rate-limited to 60 requests/hour for unauthenticated browser calls, which
+> is enough for an occasional `repo` + `pr` preview. The action's `files` mode avoids runtime API
+> calls entirely.
+
+### Try it live
+
+You can drive `applyPrOverlay` directly against a deployed playground without the action, using the
+compact `repo` + `pr` form (the URL stays tiny regardless of PR size). For example, to preview
+[`moodle/moodle#532`](https://github.com/moodle/moodle/pull/532) (a fork PR targeting `main`):
+
+```json
+{
+  "preferredVersions": { "php": "8.3", "moodle": "dev" },
+  "landingPage": "/admin/index.php",
+  "steps": [
+    { "step": "installMoodle", "options": { "siteName": "Core PR #532 preview", "adminUser": "admin", "adminPass": "password" } },
+    { "step": "applyPrOverlay", "repo": "moodle/moodle", "pr": 532, "baseRef": "main", "runUpgrade": "auto" },
+    { "step": "login", "username": "admin" }
+  ]
+}
+```
+
+base64url-encode that JSON and open `https://<playground-host>/?blueprint=<base64url>`. Swap `pr`
+for any open core PR and `baseRef` for its target branch (the base maps to a version per the table
+above). Admin credentials are `admin` / `password`.
+
 ### Limitations
 
 - **SQLite vs. real DB.** Lower fidelity than a full Moodle Docker/Codespaces environment,
