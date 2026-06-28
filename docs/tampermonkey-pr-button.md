@@ -81,9 +81,14 @@ Key behaviours:
   description or a comment, the button reuses that (reproducible, pre-resolved) URL instead
   of generating its own — `findExistingActionLink()` compares hosts by parsing the URL, not
   by substring.
-- **Moodle tracker** (`https://moodle.atlassian.net/*`): scans the issue for linked GitHub
-  PR URLs and adds a badge next to each — the tracker equivalent of Sara Arjona's button,
-  but for a pull request rather than a Gitpod branch.
+- **Moodle tracker** (`https://moodle.atlassian.net/*`): Moodle's peer review does not use
+  pull requests — an issue's **Pull from Repository** is a GitHub fork and the **Pull … Diff
+  URL** fields render GitHub **compare** links (`…/moodle/compare/<base>...<head>`), one per
+  Moodle version. The script detects those compare links (and any `/pull/` links), derives the
+  base version from the branch suffix (`-main`→dev, `-501`→5.1, `-500`→5.0, …), and adds a badge
+  next to each — the tracker equivalent of Sara Arjona's button. Each unique `repo/base/head` is
+  shown once. (Earlier the script only matched `/pull/` links, so most tracker issues had no
+  button.)
 - **Forks**: fully supported — the overlay resolves the PR head (the fork) from the base
   repo + PR number, so a fork PR against `moodle/moodle` previews the fork's changes.
 - **SPA-safe**: GitHub and Jira are single-page apps, so the script re-runs on DOM mutations
@@ -108,10 +113,11 @@ Key behaviours:
 - GitHub's and Jira's DOM markup changes over time; the script targets GitHub's current Primer
   React `PageHeader` and falls back to a floating button, but if the badge stops appearing the
   selectors in `ghInsertionPoint()` / the tracker scan may need updating.
-- **Moodle tracker**: the badge only appears next to GitHub `…/moodle/pull/<n>` links that are
-  actually present in the issue. Moodle core development happens mostly through Gerrit
-  (`git.moodle.org`), so a `github.com/moodle/moodle` PR is not always linked from the tracker —
-  in that case no button is shown there. The GitHub PR page is the primary, reliable surface.
+- **Moodle tracker**: the badge appears next to the GitHub **compare** links the tracker renders
+  in the "Pull … Diff URL" fields (and any `/pull/` links). Moodle does **not** use Gerrit, and
+  `git.moodle.org` is only the read-only mirror — the actual review branch lives on the fork named
+  in "Pull from Repository". If an issue has no such GitHub link yet (e.g. before peer review is
+  requested), no button is shown there.
 - This previews changed **files** over a prebuilt base; the same
   [limitations as the overlay](blueprint-json.md#limitations) apply (Composer, frontend
   builds, generated assets, DB upgrades, SQLite/WASM fidelity).

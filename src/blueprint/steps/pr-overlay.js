@@ -17,6 +17,7 @@ import {
 } from "../php/helpers.js";
 import {
   applyProxy,
+  buildCompareApiUrl,
   buildPrApiUrl,
   buildPrFilesApiUrl,
   buildRawGithubUrl,
@@ -57,8 +58,10 @@ async function handleApplyPrOverlay(step, { php, publish }) {
     : DEFAULT_MAX_OVERLAY_FILE_BYTES;
   const runUpgrade = normalizeRunUpgrade(step.runUpgrade);
 
-  // 1. Resolve the manifest: an explicit pre-resolved `files` list, or a
-  //    `repo` + `pr` pair fetched from the GitHub API at runtime.
+  // 1. Resolve the manifest, in one of three modes: a pre-resolved `files`
+  //    list; a `repo` + `pr` pair (GitHub pull request); or a `repo` + `base` +
+  //    `head` branch comparison (Moodle peer-review / tracker), all fetched at
+  //    runtime.
   let rawFiles;
   if (Array.isArray(step.files)) {
     rawFiles = step.files;
@@ -67,9 +70,16 @@ async function handleApplyPrOverlay(step, { php, publish }) {
       publish(`Fetching changed files for ${step.repo}#${step.pr}…`, 0.93);
     }
     rawFiles = await fetchPrFiles(step.repo, step.pr, step.proxy);
+  } else if (step.repo && step.head) {
+    // Compare mode (Moodle peer-review / tracker): diff base...head on a branch.
+    const base = step.base || step.baseRef || "main";
+    if (publish) {
+      publish(`Comparing ${step.repo} ${base}…${step.head}…`, 0.93);
+    }
+    rawFiles = await fetchCompareFiles(step.repo, base, step.head, step.proxy);
   } else {
     throw new Error(
-      "applyPrOverlay: provide a 'files' manifest, or both 'repo' and 'pr'.",
+      "applyPrOverlay: provide a 'files' manifest, 'repo'+'pr', or 'repo'+'base'+'head'.",
     );
   }
 
@@ -268,6 +278,55 @@ async function fetchPrFiles(repo, pr, proxy) {
     if (batch.length < 100) break;
   }
   return out;
+}
+
+/**
+ * Fetch the changed-files manifest for a branch comparison (`base...head`) from
+ * the GitHub compare API. This is the Moodle peer-review case (the tracker links
+ * a fork repo + base SHA + head branch, not a PR). The compare response returns
+ * up to 300 files in one page; the `maxFiles` cap in the handler guards larger
+ * diffs. Raw URLs are built from the head SHA so they are CORS-accessible.
+ */
+async function fetchCompareFiles(repo, base, head, proxy) {
+  const url = applyProxy(buildCompareApiUrl(repo, base, head), proxy);
+  const res = await fetch(url, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `applyPrOverlay: GitHub compare API returned HTTP ${res.status} for ${repo} ${base}...${head}.`,
+    );
+  }
+  const data = await res.json();
+  const files = Array.isArray(data?.files) ? data.files : [];
+
+  // Resolve the head SHA to build CORS-friendly raw URLs: prefer the tip of the
+  // compared commits, else the SHA embedded in a file's raw_url.
+  let headSha = data?.commits?.length
+    ? data.commits[data.commits.length - 1].sha
+    : null;
+  if (!headSha && files.length) {
+    const m = String(files[0].raw_url || "").match(
+      /\/raw\/([0-9a-f]{7,40})\//u,
+    );
+    headSha = m ? m[1] : null;
+  }
+  if (!headSha && files.length) {
+    throw new Error(
+      `applyPrOverlay: could not resolve the head SHA for ${repo} ${base}...${head}.`,
+    );
+  }
+
+  return files.map((f) => {
+    const removed = String(f.status || "").toLowerCase() === "removed";
+    return {
+      path: f.filename,
+      status: f.status,
+      rawUrl: removed ? null : buildRawGithubUrl(repo, headSha, f.filename),
+      previousPath: f.previous_filename || null,
+      size: null,
+    };
+  });
 }
 
 /**
