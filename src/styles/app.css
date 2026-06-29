@@ -453,6 +453,12 @@ button.danger:hover {
   margin: 0;
 }
 
+.side-panel__footer-disclaimer {
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
 .side-panel__footer a {
   color: var(--chrome-text);
   text-decoration: none;

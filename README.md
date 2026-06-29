@@ -14,7 +14,7 @@
 
 > Run a full Moodle site in the browser — no server required.
 
-Moodle Playground runs [Moodle](https://moodle.org) entirely in the browser using WebAssembly, powered by [WordPress Playground](https://github.com/WordPress/wordpress-playground)'s `@php-wasm/web` runtime. Every page load boots a fresh Moodle instance with a pre-built SQLite snapshot — nothing is stored on disk and nothing leaves your browser.
+Moodle Playground runs [Moodle™](https://moodle.org) entirely in the browser using WebAssembly, powered by [WordPress Playground](https://github.com/WordPress/wordpress-playground)'s `@php-wasm/web` runtime. Every page load boots a fresh Moodle instance with a pre-built SQLite snapshot — nothing is stored on disk and nothing leaves your browser.
 
 ## Getting Started
 
@@ -128,3 +128,17 @@ Contributions are welcome. See the [development docs](docs/maintainers/contribut
 ## License
 
 See [LICENSE](LICENSE).
+
+## Trademark
+
+"Moodle™" and the Moodle logo are trademarks or registered trademarks of
+[Moodle Pty Ltd](https://moodle.com/) and its associated entities, used here for
+identification and descriptive purposes only.
+
+Moodle Playground is an independent, community-maintained open-source project built by
+[Área de Tecnología Educativa (ATE)](https://www3.gobiernodecanarias.org/medusa/ecoescuela/ate/).
+It is **not** affiliated with, endorsed by, sponsored by, or approved by Moodle Pty Ltd or
+Moodle HQ. It runs the open-source Moodle™ software in the browser for demonstration,
+testing, and educational purposes.
+
+See Moodle's [trademark guidelines](https://moodle.com/trademarks/) for details.
