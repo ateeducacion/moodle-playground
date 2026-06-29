@@ -74,3 +74,7 @@ The shell hosts a scoped runtime iframe; a service worker routes requests to a P
 ---
 
 Made with :material-heart:{ .heart } by [Área de Tecnología Educativa](https://www3.gobiernodecanarias.org/medusa/ecoescuela/ate/)
+
+Moodle™ is a registered trademark of [Moodle Pty Ltd](https://moodle.com/trademarks/).
+Moodle Playground is an independent project and is not affiliated with, endorsed by, or
+sponsored by Moodle Pty Ltd.

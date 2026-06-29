@@ -7,6 +7,11 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 
+copyright: >
+  Moodle&trade; is a registered trademark of
+  <a href="https://moodle.com/trademarks/">Moodle Pty Ltd</a>.
+  Moodle Playground is an independent project and is not affiliated with Moodle Pty Ltd.
+
 theme:
   name: material
   language: en
