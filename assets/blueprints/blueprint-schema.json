@@ -24,6 +24,12 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
+    "phpConstants": {
+      "type": "object",
+      "description": "PHP constants defined in config.php (guarded by !defined and emitted before lib/setup.php) so a plugin blueprint can enable plugin-specific behaviour without the engine knowing the constant names.",
+      "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },
+      "additionalProperties": { "type": ["boolean", "string", "number"] }
+    },
     "resources": {
       "type": "object",
       "additionalProperties": {

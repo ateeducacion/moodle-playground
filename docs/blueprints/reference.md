@@ -32,6 +32,7 @@ boot. Steps run in order.
 | `constants` | object | no | `{{KEY}}` → string map, substituted everywhere before steps run. |
 | `resources` | object | no | Named file descriptors referenced as `@name`. |
 | `runtime` | object | no | Boot-time `config.php` settings: `debug` (`0`/`5`/`15`/`32767`) and `debugdisplay` (`0`/`1`). See [Runtime and versions](runtime.md). |
+| `phpConstants` | object | no | PHP constants defined in `config.php` before `lib/setup.php`. Name → boolean / string / number. See [PHP constants](#php-constants). |
 | `landingPage` | string | no | Path opened after boot. Must start with `/`. |
 | `preferredVersions` | object | no | `{ "php": "8.3", "moodle": "5.0" }` — preferred runtime, subject to compatibility fallback. See [Runtime and versions](runtime.md). |
 | `$schema` | string | no | Informational schema reference. |
@@ -54,6 +55,38 @@ Context constants `{{REPO}}`, `{{OWNER}}`, `{{REF}}` / `{{BRANCH}}` are derived
 from the `repo` / `owner` / `branch` (alias `ref`) URL parameters and merged
 *over* the blueprint's own `constants`. This lets one committed blueprint target
 the branch it is previewed for. See [URL parameters](../url-parameters.md).
+
+## PHP constants
+
+`phpConstants` defines PHP constants in the booted Moodle's `config.php`, before
+`require_once(lib/setup.php)`, so they are available on every request. Each entry is
+emitted as a guarded `define()`:
+
+```json
+{
+  "phpConstants": {
+    "MY_FLAG": true,
+    "MY_LABEL": "demo",
+    "MY_LIMIT": 50
+  }
+}
+```
+
+produces, in `config.php`:
+
+```php
+if (!defined('MY_FLAG')) { define('MY_FLAG', true); }
+if (!defined('MY_LABEL')) { define('MY_LABEL', 'demo'); }
+if (!defined('MY_LIMIT')) { define('MY_LIMIT', 50); }
+```
+
+Values may be boolean, string or number; constant names must match
+`^[A-Z_][A-Z0-9_]*$` (other names are skipped). This lets a plugin's own blueprint
+enable plugin-specific configuration without the playground engine knowing anything
+plugin-specific. For example, `mod_exelearning` declares
+`"phpConstants": { "EXELEARNING_UNSAFE_LEGACY_IFRAME": true }` so its demo renders the
+content iframe same-origin (the php-wasm service worker cannot serve an opaque subframe);
+real Moodle never defines that constant.
 
 ## Resources
 

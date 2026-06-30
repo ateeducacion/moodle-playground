@@ -2567,6 +2567,12 @@ export async function bootstrapMoodle({
     },
     debug: effectiveDebug,
     debugdisplay: effectiveDebugDisplay,
+    // Carry the blueprint's top-level `phpConstants` map into config.php so a
+    // plugin blueprint can declare PHP constants the engine knows nothing about.
+    phpConstants:
+      blueprint?.phpConstants && typeof blueprint.phpConstants === "object"
+        ? blueprint.phpConstants
+        : {},
   };
   const phases = createBootstrapTracker();
 
@@ -2662,6 +2668,8 @@ export async function bootstrapMoodle({
     // Re-enable cachejs only when the manifest advertises the build-time
     // RequireJS combined seed (ADR 0013); legacy bundles keep cachejs=false.
     requirejsSeeded: Boolean(archive.manifest?.snapshot?.requirejs),
+    // Blueprint-declared PHP constants, defined in config.php before setup.php.
+    phpConstants: effectiveConfig.phpConstants,
   });
 
   // Kick off the install snapshot + localcache seed downloads NOW so the
