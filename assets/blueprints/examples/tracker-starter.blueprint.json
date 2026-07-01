@@ -1,0 +1,98 @@
+{
+  "$schema": "../blueprint-schema.json",
+  "landingPage": "/course/view.php?id=2",
+  "constants": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASS": "password",
+    "ADMIN_EMAIL": "admin@example.com"
+  },
+  "steps": [
+    {
+      "step": "installMoodle",
+      "options": {
+        "adminUser": "{{ADMIN_USER}}",
+        "adminPass": "{{ADMIN_PASS}}",
+        "adminEmail": "{{ADMIN_EMAIL}}",
+        "siteName": "Tracker reproduction site"
+      }
+    },
+    {
+      "step": "createCourse",
+      "fullname": "Reproduction course",
+      "shortname": "REPRO",
+      "format": "topics",
+      "numsections": 3,
+      "summary": "Generic course for reproducing Moodle Tracker issues."
+    },
+    {
+      "step": "createUsers",
+      "users": [
+        {
+          "username": "teacher",
+          "password": "password",
+          "email": "teacher@example.com",
+          "firstname": "Test",
+          "lastname": "Teacher"
+        },
+        {
+          "username": "student",
+          "password": "password",
+          "email": "student@example.com",
+          "firstname": "Test",
+          "lastname": "Student"
+        }
+      ]
+    },
+    {
+      "step": "enrolUsers",
+      "enrolments": [
+        { "username": "teacher", "course": "REPRO", "role": "editingteacher" },
+        { "username": "student", "course": "REPRO", "role": "student" }
+      ]
+    },
+    {
+      "step": "addModule",
+      "module": "forum",
+      "course": "REPRO",
+      "section": 1,
+      "name": "Sample forum",
+      "intro": "<p>Forum for reproducing discussion-related issues.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "assign",
+      "course": "REPRO",
+      "section": 1,
+      "name": "Sample assignment",
+      "intro": "<p>Assignment for reproducing submission and grading issues.</p>"
+    },
+    {
+      "step": "addModule",
+      "module": "quiz",
+      "course": "REPRO",
+      "section": 2,
+      "name": "Sample quiz",
+      "intro": "<p>Quiz for reproducing quiz issues. It has no questions yet — add them from the quiz page.</p>",
+      "preferredbehaviour": "deferredfeedback",
+      "browsersecurity": "-",
+      "password": "",
+      "subnet": "",
+      "grade": 10,
+      "questionsperpage": 1
+    },
+    {
+      "step": "addModule",
+      "module": "page",
+      "course": "REPRO",
+      "section": 2,
+      "name": "Sample page",
+      "intro": "<p>Page resource for reproducing content display issues.</p>",
+      "content": "<h3>Sample page</h3><p>This page is part of the generic tracker reproduction site: one course, a teacher and a student (both with password <code>password</code>), a forum, an assignment, a quiz and this page.</p>",
+      "contentformat": 1
+    },
+    {
+      "step": "login",
+      "username": "{{ADMIN_USER}}"
+    }
+  ]
+}
