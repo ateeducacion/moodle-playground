@@ -47,9 +47,7 @@ describe("tracker-starter blueprint", () => {
   it("creates teacher and student users with stable credentials", () => {
     const [create] = steps("createUsers");
     assert.ok(create, "must create users in one batch step");
-    const byName = Object.fromEntries(
-      create.users.map((u) => [u.username, u]),
-    );
+    const byName = Object.fromEntries(create.users.map((u) => [u.username, u]));
     for (const username of ["teacher", "student"]) {
       assert.ok(byName[username], `must create '${username}'`);
       assert.equal(byName[username].password, "password");
