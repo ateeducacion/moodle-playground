@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Open in Moodle Playground
 // @namespace    https://github.com/ateeducacion/moodle-playground
-// @version      0.2
-// @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
+// @version      0.3
+// @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. On tracker issues it also detects an explicit "Moodle Playground Scenario" blueprint block in the description (or offers a starter scenario) so the instance boots preconfigured for reproducing the issue. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
 // @author       ateeducacion
 // @match        https://github.com/*/pull/*
 // @match        https://moodle.atlassian.net/*
@@ -159,6 +159,114 @@
       ],
     };
     return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Moodle Playground Scenario extraction (issue #166, ADR 0017).
+  //
+  // A tracker issue description may embed an explicit blueprint block. Two
+  // documented forms, both detected on plain text (Jira's renderer strips
+  // markdown fences, so detection cannot rely on DOM structure):
+  //   A. a fenced code block:      ```moodle-playground\n{ ...blueprint... }
+  //   B. the marker phrase "Moodle Playground Scenario" (e.g. a heading)
+  //      followed by a code block containing the blueprint JSON object.
+  // Content is parsed with JSON.parse only — never evaluated.
+  // ─────────────────────────────────────────────────────────────────────────
+  const SCENARIO_MARKER_SOURCES = [
+    "```\\s*moodle-playground(?![\\w-])",
+    "moodle\\s+playground\\s+scenario",
+  ];
+
+  // NOTE: the tracker injector falls back to document.body.textContent, which
+  // includes these labels once injected. None of them may match a scenario
+  // marker or the injector would flip-flop between states on every tick
+  // (guarded by a unit test).
+  const TRACKER_BUTTON_LABELS = {
+    scenario: "▶ Open issue scenario in Moodle Playground",
+    starter: "▶ Open in Moodle Playground (starter site)",
+    invalid: "⚠ Moodle Playground: invalid scenario block",
+  };
+
+  // Return the balanced JSON object substring starting at text[start] ("{"),
+  // or null when the braces never balance. String-aware: braces inside JSON
+  // string values (and escaped quotes) are ignored.
+  function scanJsonObject(text, start) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) return text.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
+  // Extract a Moodle Playground scenario blueprint from description text.
+  // Returns { found: false } when there is no scenario block,
+  // { found: true, blueprint } for a valid one, or { found: true, error }
+  // when a block exists but is broken (so the author gets a clear signal).
+  function extractPlaygroundScenario(text) {
+    if (typeof text !== "string" || !text) return { found: false };
+    let marker = null;
+    for (const sourcePattern of SCENARIO_MARKER_SOURCES) {
+      const m = new RegExp(sourcePattern, "iu").exec(text);
+      if (m && (!marker || m.index < marker.index)) marker = m;
+    }
+    if (!marker) return { found: false };
+    const start = text.indexOf("{", marker.index + marker[0].length);
+    // A marker with no JSON after it is a mere mention, not a scenario.
+    if (start === -1) return { found: false };
+    const jsonText = scanJsonObject(text, start);
+    if (jsonText === null) {
+      return {
+        found: true,
+        error: "Scenario block is not a balanced JSON object.",
+      };
+    }
+    let blueprint;
+    try {
+      blueprint = JSON.parse(jsonText);
+    } catch (error) {
+      return {
+        found: true,
+        error: `Scenario block is not valid JSON: ${error.message}`,
+      };
+    }
+    if (
+      !blueprint ||
+      typeof blueprint !== "object" ||
+      Array.isArray(blueprint)
+    ) {
+      return { found: true, error: "Scenario must be a JSON object." };
+    }
+    if (!Array.isArray(blueprint.steps)) {
+      return { found: true, error: "Scenario must have a 'steps' array." };
+    }
+    return { found: true, blueprint };
+  }
+
+  // Encode a scenario blueprint verbatim into a playground URL, using the
+  // same base64url ?blueprint= convention as the PR/compare buttons.
+  function buildScenarioUrl(blueprint) {
+    return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
+  }
+
+  // The starter scenario is a bundled example blueprint (single source of
+  // truth), referenced relative to the playground URL so it works on any
+  // deployment, including subpath hosting.
+  function buildStarterUrl() {
+    return `${PLAYGROUND_HOST}/?blueprint-url=assets/blueprints/examples/tracker-starter.blueprint.json`;
   }
 
   // A CSS-only badge (no external image, so it is immune to the page's img-src
@@ -406,6 +514,29 @@
   function tick() {
     if (location.host === "github.com") injectGithub();
     else if (location.host === "moodle.atlassian.net") injectTracker();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Test hook — tests/scripts/tracker-scenario.test.js evaluates this file in
+  // a node:vm sandbox that defines __MPP_TEST__. Hand over the pure helpers
+  // and skip the DOM wiring below. Tampermonkey never defines this, so the
+  // hook is inert in the browser.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (typeof __MPP_TEST__ === "function") {
+    __MPP_TEST__({
+      PLAYGROUND_HOST,
+      SCENARIO_MARKER_SOURCES,
+      TRACKER_BUTTON_LABELS,
+      branchSuffixToVersion,
+      toBase64Url,
+      buildPlaygroundUrl,
+      buildCompareUrl,
+      scanJsonObject,
+      extractPlaygroundScenario,
+      buildScenarioUrl,
+      buildStarterUrl,
+    });
+    return;
   }
 
   // GitHub and Jira are SPAs: re-run on DOM mutations (debounced) and on a short
