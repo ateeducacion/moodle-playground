@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Open in Moodle Playground
 // @namespace    https://github.com/ateeducacion/moodle-playground
-// @version      0.2
-// @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
+// @version      0.3
+// @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. On tracker issues it also detects an explicit "Moodle Playground Scenario" blueprint block in the description (or offers a starter scenario) so the instance boots preconfigured for reproducing the issue. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
 // @author       ateeducacion
 // @match        https://github.com/*/pull/*
 // @match        https://moodle.atlassian.net/*
@@ -27,7 +27,11 @@
   // ─────────────────────────────────────────────────────────────────────────
   const PLAYGROUND_HOST = "https://ateeducacion.github.io/moodle-playground";
   const RUN_UPGRADE = "auto"; // off | on | auto
+  // Offer a generic starter scenario on tracker issues without an explicit
+  // scenario block (1 course, teacher + student enrolled, sample activities).
+  const STARTER_SCENARIO = true;
   const BUTTON_ID = "moodle-playground-preview-button";
+  const SCENARIO_BUTTON_ID = "moodle-playground-scenario-button";
   const BUTTON_CLASS = "mpp-preview-button";
   // Unique repo/base/head comparisons already decorated on the tracker.
   const seenCompares = new Set();
@@ -161,17 +165,125 @@
     return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Moodle Playground Scenario extraction (issue #166, ADR 0017).
+  //
+  // A tracker issue description may embed an explicit blueprint block. Two
+  // documented forms, both detected on plain text (Jira's renderer strips
+  // markdown fences, so detection cannot rely on DOM structure):
+  //   A. a fenced code block:      ```moodle-playground\n{ ...blueprint... }
+  //   B. the marker phrase "Moodle Playground Scenario" (e.g. a heading)
+  //      followed by a code block containing the blueprint JSON object.
+  // Content is parsed with JSON.parse only — never evaluated.
+  // ─────────────────────────────────────────────────────────────────────────
+  const SCENARIO_MARKER_SOURCES = [
+    "```\\s*moodle-playground(?![\\w-])",
+    "moodle\\s+playground\\s+scenario",
+  ];
+
+  // NOTE: the tracker injector falls back to document.body.textContent, which
+  // includes these labels once injected. None of them may match a scenario
+  // marker or the injector would flip-flop between states on every tick
+  // (guarded by a unit test).
+  const TRACKER_BUTTON_LABELS = {
+    scenario: "▶ Open issue scenario in Moodle Playground",
+    starter: "▶ Open in Moodle Playground (starter site)",
+    invalid: "⚠ Moodle Playground: invalid scenario block",
+  };
+
+  // Return the balanced JSON object substring starting at text[start] ("{"),
+  // or null when the braces never balance. String-aware: braces inside JSON
+  // string values (and escaped quotes) are ignored.
+  function scanJsonObject(text, start) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) return text.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
+  // Extract a Moodle Playground scenario blueprint from description text.
+  // Returns { found: false } when there is no scenario block,
+  // { found: true, blueprint } for a valid one, or { found: true, error }
+  // when a block exists but is broken (so the author gets a clear signal).
+  function extractPlaygroundScenario(text) {
+    if (typeof text !== "string" || !text) return { found: false };
+    let marker = null;
+    for (const sourcePattern of SCENARIO_MARKER_SOURCES) {
+      const m = new RegExp(sourcePattern, "iu").exec(text);
+      if (m && (!marker || m.index < marker.index)) marker = m;
+    }
+    if (!marker) return { found: false };
+    const start = text.indexOf("{", marker.index + marker[0].length);
+    // A marker with no JSON after it is a mere mention, not a scenario.
+    if (start === -1) return { found: false };
+    const jsonText = scanJsonObject(text, start);
+    if (jsonText === null) {
+      return {
+        found: true,
+        error: "Scenario block is not a balanced JSON object.",
+      };
+    }
+    let blueprint;
+    try {
+      blueprint = JSON.parse(jsonText);
+    } catch (error) {
+      return {
+        found: true,
+        error: `Scenario block is not valid JSON: ${error.message}`,
+      };
+    }
+    if (
+      !blueprint ||
+      typeof blueprint !== "object" ||
+      Array.isArray(blueprint)
+    ) {
+      return { found: true, error: "Scenario must be a JSON object." };
+    }
+    if (!Array.isArray(blueprint.steps)) {
+      return { found: true, error: "Scenario must have a 'steps' array." };
+    }
+    return { found: true, blueprint };
+  }
+
+  // Encode a scenario blueprint verbatim into a playground URL, using the
+  // same base64url ?blueprint= convention as the PR/compare buttons.
+  function buildScenarioUrl(blueprint) {
+    return `${PLAYGROUND_HOST}/?blueprint=${toBase64Url(JSON.stringify(blueprint))}`;
+  }
+
+  // The starter scenario is a bundled example blueprint (single source of
+  // truth), referenced relative to the playground URL so it works on any
+  // deployment, including subpath hosting.
+  function buildStarterUrl() {
+    return `${PLAYGROUND_HOST}/?blueprint-url=assets/blueprints/examples/tracker-starter.blueprint.json`;
+  }
+
   // A CSS-only badge (no external image, so it is immune to the page's img-src
   // CSP). Returns the anchor element.
-  function makeButton(url, { id, block = false } = {}) {
+  function makeButton(url, { id, block = false, label, title } = {}) {
     const a = document.createElement("a");
     if (id) a.id = id;
     a.className = BUTTON_CLASS;
     a.href = url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
-    a.textContent = "▶ Open in Moodle Playground";
-    a.title = "Preview this pull request in Moodle Playground";
+    a.textContent = label || "▶ Open in Moodle Playground";
+    a.title = title || "Preview this pull request in Moodle Playground";
     a.style.cssText = [
       // Block badges sit on their own line, sized to content (used on the
       // tracker, after the smart-link wrapper); inline badges sit beside the
@@ -403,9 +515,155 @@
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Moodle tracker — scenario / starter button (issue #166, ADR 0017).
+  //
+  // On issue pages, look for an explicit "Moodle Playground Scenario" block in
+  // the description and offer to open the playground preconfigured with it.
+  // Without one, offer the documented starter scenario instead. The button
+  // floats bottom-right: it needs no Atlassian layout hooks, so tracker markup
+  // changes cannot break it (only the page text is read).
+  // ─────────────────────────────────────────────────────────────────────────
+  function trackerIssueKey() {
+    const m = location.pathname.match(/\/browse\/([A-Za-z][A-Za-z0-9]*-\d+)/u);
+    return m ? m[1] : null;
+  }
+
+  // Concatenated text of a subtree, like textContent, but skipping script,
+  // style, and our own injected button — page scripts may embed marker-like
+  // strings and must never be mistaken for a scenario.
+  function collectVisibleText(root) {
+    if (!root) return "";
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        const tag = parent.tagName;
+        if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (parent.closest(`#${SCENARIO_BUTTON_ID}`)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let text = "";
+    while (walker.nextNode()) text += walker.currentNode.nodeValue;
+    return text;
+  }
+
+  // Prefer the issue description container; fall back to the whole page so an
+  // Atlassian markup change degrades to "scan all page text", not a breakage.
+  function trackerDescriptionText() {
+    const container = document.querySelector(
+      '[data-testid="issue.views.field.rich-text.description"]',
+    );
+    return collectVisibleText(container || document.body);
+  }
+
+  // Grey, non-clickable badge shown when a scenario block exists but cannot be
+  // used; the tooltip carries the parse/validation error for the author.
+  function makeInvalidBadge(detail) {
+    const s = document.createElement("span");
+    s.className = BUTTON_CLASS;
+    s.textContent = TRACKER_BUTTON_LABELS.invalid;
+    s.title = `The scenario block in this issue cannot be used: ${detail}`;
+    s.style.cssText = [
+      "display:flex;width:max-content",
+      "align-items:center",
+      "gap:6px",
+      "padding:5px 12px",
+      "border-radius:6px",
+      "font:600 12px/20px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "color:#fff",
+      "background:#6a737d",
+      "border:1px solid rgba(27,31,36,.15)",
+      "white-space:nowrap",
+      "cursor:help",
+    ].join(";");
+    return s;
+  }
+
+  // What the scenario button should currently show, or null for none (not an
+  // issue page, or no scenario and the starter is disabled).
+  function desiredScenarioState() {
+    const key = trackerIssueKey();
+    if (!key) return null;
+    const result = extractPlaygroundScenario(trackerDescriptionText());
+    if (!result.found) {
+      return STARTER_SCENARIO
+        ? { key, kind: "starter", url: buildStarterUrl() }
+        : null;
+    }
+    if (result.error) return { key, kind: "invalid", detail: result.error };
+    return { key, kind: "scenario", url: buildScenarioUrl(result.blueprint) };
+  }
+
+  function injectTrackerScenario() {
+    const state = desiredScenarioState();
+    const existing = document.getElementById(SCENARIO_BUTTON_ID);
+    if (!state) {
+      if (existing) existing.remove();
+      return;
+    }
+    // Idempotent render: a state stamp makes repeated passes no-ops, while SPA
+    // navigation or a late-loading description swaps the button in place.
+    const stamp = `${state.kind}|${state.key}|${state.url || state.detail}`;
+    if (existing) {
+      if (existing.dataset.mppState === stamp) return;
+      existing.remove();
+    }
+    const wrap = document.createElement("div");
+    wrap.id = SCENARIO_BUTTON_ID;
+    wrap.dataset.mppState = stamp;
+    wrap.style.cssText =
+      "position:fixed;right:16px;bottom:16px;z-index:2147483647;";
+    if (state.kind === "invalid") {
+      wrap.appendChild(makeInvalidBadge(state.detail));
+    } else {
+      wrap.appendChild(
+        makeButton(state.url, {
+          label: TRACKER_BUTTON_LABELS[state.kind],
+          title:
+            state.kind === "scenario"
+              ? `Open Moodle Playground preconfigured with the ${state.key} scenario`
+              : "Open Moodle Playground with a generic reproduction site (course, teacher, student, sample activities)",
+        }),
+      );
+    }
+    document.body.appendChild(wrap);
+  }
+
   function tick() {
     if (location.host === "github.com") injectGithub();
-    else if (location.host === "moodle.atlassian.net") injectTracker();
+    else if (location.host === "moodle.atlassian.net") {
+      injectTracker();
+      injectTrackerScenario();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Test hook — tests/scripts/tracker-scenario.test.js evaluates this file in
+  // a node:vm sandbox that defines __MPP_TEST__. Hand over the pure helpers
+  // and skip the DOM wiring below. Tampermonkey never defines this, so the
+  // hook is inert in the browser.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (typeof __MPP_TEST__ === "function") {
+    __MPP_TEST__({
+      PLAYGROUND_HOST,
+      SCENARIO_MARKER_SOURCES,
+      TRACKER_BUTTON_LABELS,
+      branchSuffixToVersion,
+      toBase64Url,
+      buildPlaygroundUrl,
+      buildCompareUrl,
+      scanJsonObject,
+      extractPlaygroundScenario,
+      buildScenarioUrl,
+      buildStarterUrl,
+    });
+    return;
   }
 
   // GitHub and Jira are SPAs: re-run on DOM mutations (debounced) and on a short

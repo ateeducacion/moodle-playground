@@ -58,9 +58,24 @@ comparison. The button is **not** injected on GitHub `/compare/` pages directly 
 GitHub the script only runs on `/pull/` pages.
 
 !!! note
-    The tracker button only appears when an issue actually links a GitHub compare or
+    The compare/PR badges only appear when an issue actually links a GitHub compare or
     pull-request URL. Before peer review is requested there may be no such link, so no
-    button is shown.
+    badge is shown.
+
+## Tracker scenario button
+
+On tracker **issue pages** the script also adds one floating button at the
+bottom-right that boots a playground preconfigured for reproducing the issue:
+
+- If the issue description contains an explicit **Moodle Playground Scenario**
+  block, the button opens the playground with that scenario.
+- Otherwise it opens the bundled **starter site** (course + teacher + student +
+  sample activities).
+- A scenario block that exists but cannot be parsed shows a warning badge with
+  the error in its tooltip.
+
+See [Moodle Tracker scenarios](tracker-scenarios.md) for the exact scenario
+syntax, the starter site contents, and the limitations.
 
 ## Configure
 
@@ -69,12 +84,15 @@ Edit the constants at the top of the script (via your userscript manager's edito
 ```js
 const PLAYGROUND_HOST = "https://ateeducacion.github.io/moodle-playground";
 const RUN_UPGRADE = "auto"; // off | on | auto
+const STARTER_SCENARIO = true;
 ```
 
 - **`PLAYGROUND_HOST`** — which deployment the button opens. Point it at the production
   host, a GitHub Pages host, or a branch preview.
 - **`RUN_UPGRADE`** — whether the overlay runs the Moodle upgrade after applying the
   changed files: `off`, `on`, or `auto`.
+- **`STARTER_SCENARIO`** — whether tracker issues without a scenario block get the
+  starter-site button. Set to `false` to only show scenario buttons.
 
 ## Permissions and why they are needed
 
@@ -94,8 +112,8 @@ policy does not affect it.
   Plugin and theme PRs are handled by the [GitHub Action](github/pr-previews.md).
 - **DOM-dependent.** GitHub and Jira markup changes over time; if the button stops
   appearing, the script's selectors may need updating.
-- **Tracker needs a GitHub link.** No GitHub compare/PR link in the issue means no
-  button there.
+- **Compare/PR badges need a GitHub link.** No GitHub compare/PR link in the issue
+  means no preview badge there (the scenario/starter button appears regardless).
 - **GitHub API rate limit.** The base-branch lookup is unauthenticated
   (~60 requests/hour). The overlay itself runs entirely in your browser.
 - **Overlay fidelity.** Previews replace changed files whole over a prebuilt base.
@@ -110,5 +128,6 @@ or delete it. No other cleanup is needed.
 
 ## See also
 
+- [Moodle Tracker scenarios](tracker-scenarios.md) — the scenario block format and starter site.
 - [PR previews](github/pr-previews.md) — automated previews for plugin and theme PRs.
 - [Blueprint reference](blueprints/reference.md) — the `applyPrOverlay` step the button uses.
