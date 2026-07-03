@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   buildBlueprintRunUrl,
   createBlueprintValidationResult,
-  encodeBlueprintFallback,
   escapeHtml,
   formatBlueprintText,
   getInitialBlueprintCode,
@@ -153,15 +152,6 @@ describe("createBlueprintValidationResult", () => {
     assert.strictEqual(result.valid, true);
     assert.strictEqual(result.stage, "valid");
     assert.deepStrictEqual(result.blueprint, { steps: [] });
-  });
-});
-
-describe("encodeBlueprintFallback", () => {
-  it("base64-encodes JSON safely, round-tripping non-ASCII content", () => {
-    const blueprint = { steps: [{ step: "login" }], note: "café" };
-    const encoded = encodeBlueprintFallback(blueprint);
-    const decoded = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-    assert.deepStrictEqual(decoded, blueprint);
   });
 });
 

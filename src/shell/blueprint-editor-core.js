@@ -184,18 +184,6 @@ export function createBlueprintValidationResult(rawText, deps) {
 }
 
 /**
- * Base64-encode a blueprint for the `?blueprint=` URL param when
- * `compressBlueprint` (gzip) is unavailable. Mirrors the fallback already
- * used by the Import flow in `src/shell/main.js`.
- *
- * @param {object} blueprint
- * @returns {string}
- */
-export function encodeBlueprintFallback(blueprint) {
-  return btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
-}
-
-/**
  * Build the URL to navigate to in order to run an edited blueprint: sets
  * `blueprint=<encodedBlueprint>` and removes any `blueprint-url` param,
  * preserving everything else on the current URL.

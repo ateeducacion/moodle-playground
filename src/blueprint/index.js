@@ -1,6 +1,10 @@
 export { substituteConstants } from "./constants.js";
 export { executeBlueprint } from "./executor.js";
-export { compressBlueprint, parseBlueprint } from "./parser.js";
+export {
+  compressBlueprint,
+  encodeBlueprintParam,
+  parseBlueprint,
+} from "./parser.js";
 export { resolveBlueprint } from "./resolver.js";
 export { ResourceRegistry } from "./resources.js";
 export { validateBlueprint } from "./schema.js";
