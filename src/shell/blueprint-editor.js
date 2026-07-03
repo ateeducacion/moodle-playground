@@ -1,12 +1,11 @@
 import {
-  compressBlueprint,
+  encodeBlueprintParam,
   parseBlueprint,
   validateBlueprint,
 } from "../blueprint/index.js";
 import {
   buildBlueprintRunUrl,
   createBlueprintValidationResult,
-  encodeBlueprintFallback,
   highlightJson,
 } from "./blueprint-editor-core.js";
 
@@ -129,13 +128,7 @@ export function initBlueprintEditor(elements, options = {}) {
         statusEl.textContent = "Encoding blueprint and restarting playground…";
       }
 
-      let encoded;
-      try {
-        encoded = await compressBlueprint(result.blueprint);
-      } catch {
-        encoded = encodeBlueprintFallback(result.blueprint);
-      }
-
+      const encoded = await encodeBlueprintParam(result.blueprint);
       loc.href = buildBlueprintRunUrl(loc.href, encoded);
     });
   }
