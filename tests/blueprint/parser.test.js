@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   compressBlueprint,
+  encodeBlueprintParam,
   parseBlueprint,
   parseBlueprintParam,
 } from "../../src/blueprint/parser.js";
@@ -129,5 +130,27 @@ describe("compressBlueprint / parseBlueprintParam (gzip round-trip)", () => {
       await parseBlueprintParam(`data:application/json;base64,${b64}`),
       { steps: [] },
     );
+  });
+});
+
+describe("encodeBlueprintParam", () => {
+  it("gzip-compresses like compressBlueprint when available", async () => {
+    const blueprint = { steps: [{ step: "login" }] };
+    const encoded = await encodeBlueprintParam(blueprint);
+    assert.strictEqual(encoded, await compressBlueprint(blueprint));
+  });
+
+  it("falls back to plain base64url when CompressionStream is unavailable, without throwing", async () => {
+    const blueprint = { steps: [{ step: "login" }], note: "café" };
+    const original = globalThis.CompressionStream;
+    globalThis.CompressionStream = undefined;
+    let encoded;
+    try {
+      encoded = await encodeBlueprintParam(blueprint);
+    } finally {
+      globalThis.CompressionStream = original;
+    }
+    const decoded = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    assert.deepStrictEqual(decoded, blueprint);
   });
 });

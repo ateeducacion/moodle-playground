@@ -1,6 +1,6 @@
 import {
   clearBlueprint,
-  compressBlueprint,
+  encodeBlueprintParam,
   parseBlueprint,
   resolveBlueprint,
   validateBlueprint,
@@ -383,12 +383,7 @@ async function importPayload(file) {
   // state from the previous session. Compress with gzip+base64url so large
   // blueprints don't produce huge fragile URLs; fall back to plain base64 when
   // CompressionStream is unavailable (the resolver auto-detects either form).
-  let encoded;
-  try {
-    encoded = await compressBlueprint(blueprint);
-  } catch {
-    encoded = btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
-  }
+  const encoded = await encodeBlueprintParam(blueprint);
   const url = new URL(window.location.href);
   url.searchParams.set("blueprint", encoded);
   url.searchParams.delete("blueprint-url");

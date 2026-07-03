@@ -161,6 +161,23 @@ export async function compressBlueprint(blueprint) {
 }
 
 /**
+ * Encode a blueprint for the `?blueprint=` URL param, self-handling the
+ * fallback so callers never need to catch: gzip+base64url via
+ * {@link compressBlueprint} when `CompressionStream` is available, otherwise
+ * plain base64 of the JSON. Never throws.
+ *
+ * @param {object} blueprint
+ * @returns {Promise<string>}
+ */
+export async function encodeBlueprintParam(blueprint) {
+  try {
+    return await compressBlueprint(blueprint);
+  } catch {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
+  }
+}
+
+/**
  * Async wrapper over {@link parseBlueprint} that also accepts a gzip+base64url
  * value. Detection is by content, not by a new URL param: a base64 value whose
  * decoded bytes start with the gzip magic `0x1f 0x8b` is decompressed; anything
