@@ -530,6 +530,8 @@ button.danger:hover {
 /* ── Panel rows (logs/phpinfo/blueprint headers) ──── */
 .panel__row {
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: var(--space-xs);
   margin-bottom: var(--space-sm);
   font:
     600 11px / 1.2 ui-monospace,
@@ -542,7 +544,16 @@ button.danger:hover {
 
 .panel__row-actions {
   display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  justify-content: flex-end;
   gap: var(--space-xs);
+}
+
+.panel__row-actions button,
+.panel__row-actions label {
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /* ── Log panel ────────────────────────────────────── */

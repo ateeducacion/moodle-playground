@@ -1,0 +1,129 @@
+/* ── Blueprint editor (CodeJar + fallback textarea) ──────────────── */
+.blueprint-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-height: 0;
+  height: 100%;
+}
+
+.blueprint-editor,
+.blueprint-editor-fallback {
+  flex: 1;
+  min-height: 180px;
+  margin: 0;
+}
+
+/* CodeJar mount point. Matches .panel-textarea's dark surface so the
+   fallback and the upgraded editor are visually indistinguishable. */
+.blueprint-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--color-gray-900);
+  color: #e4e8ec;
+  font:
+    12px / 1.5 ui-monospace,
+    "SFMono-Regular",
+    monospace;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.blueprint-editor.is-hidden,
+.blueprint-editor-fallback.is-hidden {
+  display: none;
+}
+
+.blueprint-editor:focus,
+.blueprint-editor:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--color-orange-light);
+}
+
+/* JSON token colors (dark surface) */
+.blueprint-editor .bp-tok-key {
+  color: #7dd3fc;
+}
+
+.blueprint-editor .bp-tok-string {
+  color: #facc15;
+}
+
+.blueprint-editor .bp-tok-number {
+  color: #c4b5fd;
+}
+
+.blueprint-editor .bp-tok-boolean {
+  color: #fb923c;
+  font-weight: 600;
+}
+
+.blueprint-editor .bp-tok-null {
+  color: var(--color-gray-500);
+  font-style: italic;
+}
+
+.blueprint-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  min-height: 1.4em;
+}
+
+.blueprint-status.is-valid {
+  color: var(--color-success);
+}
+
+.blueprint-status.is-invalid {
+  color: var(--color-danger);
+}
+
+.blueprint-status.is-running {
+  color: var(--text-muted);
+}
+
+/* ── Icon buttons: Export/Import/Run/Copy, all in the top row ────── */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.icon-button svg {
+  flex: none;
+}
+
+.icon-button--icon-only {
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.icon-button--wide {
+  min-width: 76px;
+  justify-content: center;
+}
+
+.icon-button--primary {
+  color: var(--color-white);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.icon-button--primary:hover {
+  background: var(--accent-hover);
+}
+
+.icon-button--primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  background: var(--accent);
+}
