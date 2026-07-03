@@ -211,10 +211,31 @@
             <div class="panel__row">
               <span>Blueprint JSON</span>
               <span class="panel__row-actions">
-                <button type="button" id="run-button" class="primary" disabled>Run</button>
-                <button type="button" id="export-button">Export</button>
-                <label class="import-button" for="import-input">Import</label>
+                <button type="button" id="run-button" class="icon-button icon-button--primary icon-button--wide" title="Run blueprint" disabled>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+                    <path d="M4 2.5v11l10-5.5-10-5.5Z"/>
+                  </svg>
+                  <span>Run</span>
+                </button>
+                <button type="button" id="export-button" class="icon-button icon-button--icon-only" title="Export blueprint JSON" aria-label="Export blueprint JSON">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+                    <path d="M8 2v7m0 0L5 6m3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3 11v1.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <label class="import-button icon-button icon-button--icon-only" for="import-input" title="Import blueprint JSON" aria-label="Import blueprint JSON">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+                    <path d="M8 9V2m0 0L5 5m3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3 11v1.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                  </svg>
+                </label>
                 <input id="import-input" type="file" accept="application/json" hidden>
+                <button type="button" id="copy-button" class="icon-button icon-button--icon-only" title="Copy blueprint JSON" aria-label="Copy blueprint JSON">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+                    <rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-5A1.5 1.5 0 0 0 3 3.5v7A1.5 1.5 0 0 0 4.5 12H5" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                  </svg>
+                </button>
               </span>
             </div>
             <div class="blueprint-editor-wrap">

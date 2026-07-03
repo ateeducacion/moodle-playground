@@ -26,12 +26,12 @@ function highlightForCodeJar(editor) {
  * `textarea` stays in sync with the editor content at all times, so any
  * existing code that reads `#blueprint-textarea` keeps working.
  *
- * @param {{mount: HTMLElement|null, textarea: HTMLTextAreaElement, statusEl: HTMLElement|null, runButton: HTMLButtonElement|null}} elements
+ * @param {{mount: HTMLElement|null, textarea: HTMLTextAreaElement, statusEl: HTMLElement|null, runButton: HTMLButtonElement|null, copyButton: HTMLButtonElement|null}} elements
  * @param {{location?: Location}} [options]
  * @returns {{setCode(text: string): void, getCode(): string, getValidationResult(): object, setLocked(locked: boolean): void}}
  */
 export function initBlueprintEditor(elements, options = {}) {
-  const { mount, textarea, statusEl, runButton } = elements;
+  const { mount, textarea, statusEl, runButton, copyButton } = elements;
   const loc = options.location || window.location;
 
   let jar = null;
@@ -89,6 +89,13 @@ export function initBlueprintEditor(elements, options = {}) {
   if (mount) {
     import(/* webpackIgnore: true */ CODEJAR_MODULE_URL)
       .then(({ CodeJar }) => {
+        // The CDN fetch is async, so the user may already be typing in the
+        // fallback textarea by the time this resolves. Carry focus over to
+        // the CodeJar mount so those keystrokes keep landing on the active
+        // editor instead of silently hitting the now-hidden textarea (whose
+        // own input listener turns into a no-op once `jar` is set below).
+        const hadFocus = document.activeElement === textarea;
+
         jar = CodeJar(mount, highlightForCodeJar, { tab: "  " });
         jar.updateCode(currentText, false);
         highlightForCodeJar(mount);
@@ -97,6 +104,9 @@ export function initBlueprintEditor(elements, options = {}) {
         mount.classList.remove("is-hidden");
         if (textarea) {
           textarea.classList.add("is-hidden");
+        }
+        if (hadFocus) {
+          mount.focus();
         }
       })
       .catch(() => {
@@ -127,6 +137,31 @@ export function initBlueprintEditor(elements, options = {}) {
       }
 
       loc.href = buildBlueprintRunUrl(loc.href, encoded);
+    });
+  }
+
+  if (copyButton) {
+    const originalTitle = copyButton.getAttribute("title") || "";
+    const originalAriaLabel = copyButton.getAttribute("aria-label") || "";
+    const originalHtml = copyButton.innerHTML;
+    const checkmarkHtml =
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">' +
+      '<path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+      "</svg>";
+    copyButton.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(getText());
+      } catch {
+        return;
+      }
+      copyButton.innerHTML = checkmarkHtml;
+      copyButton.setAttribute("title", "Copied!");
+      copyButton.setAttribute("aria-label", "Copied!");
+      setTimeout(() => {
+        copyButton.innerHTML = originalHtml;
+        copyButton.setAttribute("title", originalTitle);
+        copyButton.setAttribute("aria-label", originalAriaLabel);
+      }, 1200);
     });
   }
 

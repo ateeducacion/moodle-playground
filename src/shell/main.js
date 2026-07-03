@@ -34,6 +34,7 @@ const els = {
   blueprintTab: document.querySelector("#blueprint-tab"),
   blueprintTextarea: document.querySelector("#blueprint-textarea"),
   clearLogs: document.querySelector("#clear-logs-button"),
+  copyBlueprintButton: document.querySelector("#copy-button"),
   copyLogs: document.querySelector("#copy-logs-button"),
   exportButton: document.querySelector("#export-button"),
   importInput: document.querySelector("#import-input"),
@@ -69,6 +70,7 @@ const blueprintEditor = initBlueprintEditor({
   textarea: els.blueprintTextarea,
   statusEl: els.blueprintStatus,
   runButton: els.runButton,
+  copyButton: els.copyBlueprintButton,
 });
 let config;
 let currentRuntimeId;
