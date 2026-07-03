@@ -150,7 +150,13 @@ describe("encodeBlueprintParam", () => {
     } finally {
       globalThis.CompressionStream = original;
     }
-    const decoded = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-    assert.deepStrictEqual(decoded, blueprint);
+    assert.doesNotMatch(encoded, /[+/=]/u);
+    assert.deepStrictEqual(await parseBlueprintParam(encoded), blueprint);
+  });
+
+  it("rejects clearly when the blueprint cannot be JSON-serialized", async () => {
+    const circular = {};
+    circular.self = circular;
+    await assert.rejects(() => encodeBlueprintParam(circular));
   });
 });

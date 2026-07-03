@@ -161,19 +161,24 @@ export async function compressBlueprint(blueprint) {
 }
 
 /**
- * Encode a blueprint for the `?blueprint=` URL param, self-handling the
- * fallback so callers never need to catch: gzip+base64url via
- * {@link compressBlueprint} when `CompressionStream` is available, otherwise
- * plain base64 of the JSON. Never throws.
+ * Encode a blueprint into the compact base64url payload used in `?blueprint=`
+ * links, self-handling the fallback so callers never need to catch: gzip+
+ * base64url via {@link compressBlueprint} when `CompressionStream` is
+ * available, otherwise plain base64url of the JSON (same alphabet either
+ * way). Never throws due to compression being unavailable — it will still
+ * throw if `blueprint` cannot be JSON-serialized (e.g. a circular reference
+ * or a BigInt), which is checked once upfront so that error surfaces clearly
+ * instead of being masked by the fallback's own catch.
  *
  * @param {object} blueprint
  * @returns {Promise<string>}
  */
 export async function encodeBlueprintParam(blueprint) {
+  const json = JSON.stringify(blueprint);
   try {
     return await compressBlueprint(blueprint);
   } catch {
-    return btoa(unescape(encodeURIComponent(JSON.stringify(blueprint))));
+    return bytesToBase64Url(new TextEncoder().encode(json));
   }
 }
 
