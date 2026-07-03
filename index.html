@@ -46,6 +46,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="stylesheet" href="./src/styles/app.css">
+    <link rel="stylesheet" href="./src/styles/blueprint-editor.css">
 
     <script type="application/ld+json">
     {
@@ -210,12 +211,32 @@
             <div class="panel__row">
               <span>Blueprint JSON</span>
               <span class="panel__row-actions">
+                <button type="button" id="run-button" class="primary" disabled>Run</button>
                 <button type="button" id="export-button">Export</button>
                 <label class="import-button" for="import-input">Import</label>
                 <input id="import-input" type="file" accept="application/json" hidden>
               </span>
             </div>
-            <textarea id="blueprint-textarea" class="panel-textarea" spellcheck="false" readonly></textarea>
+            <div class="blueprint-editor-wrap">
+              <div
+                id="blueprint-editor"
+                class="blueprint-editor is-hidden"
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Blueprint JSON editor"
+                tabindex="0"
+                spellcheck="false"
+              ></div>
+              <textarea
+                id="blueprint-textarea"
+                class="panel-textarea blueprint-editor-fallback"
+                spellcheck="false"
+                aria-label="Blueprint JSON editor"
+              ></textarea>
+              <p id="blueprint-status" class="blueprint-status" role="status" aria-live="polite">
+                Loading blueprint…
+              </p>
+            </div>
           </section>
 
           <footer class="side-panel__footer">
