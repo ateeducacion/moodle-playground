@@ -152,11 +152,38 @@ test("blueprint tab shows the active blueprint JSON", async ({
 
   await page.locator("#panel-toggle-button").click();
   await page.locator("#blueprint-tab").click();
-  await expect(page.locator("#blueprint-textarea")).toBeVisible();
+  // The CodeJar editor visually supersedes the textarea; #blueprint-textarea
+  // stays in the DOM as a hidden compatibility bridge (see
+  // src/shell/blueprint-editor.js), so its value is still readable here.
+  await expect(page.locator("#blueprint-editor")).toBeVisible();
 
   const blueprintText = await page.locator("#blueprint-textarea").inputValue();
   expect(blueprintText).toContain('"steps"');
   expect(blueprintText).toContain('"installMoodle"');
+});
+
+test("blueprint editor validates edits and gates the Run button", async ({
+  page,
+  playground,
+}) => {
+  await playground.open();
+
+  await page.locator("#panel-toggle-button").click();
+  await page.locator("#blueprint-tab").click();
+
+  await expect(page.locator("#run-button")).toBeEnabled();
+  await expect(page.locator("#blueprint-status")).toHaveText(/valid/i);
+
+  const editor = page.locator("#blueprint-editor");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("not json at all");
+
+  await expect(page.locator("#blueprint-status")).toContainText(/invalid/i);
+  await expect(page.locator("#run-button")).toBeDisabled();
+
+  // Invalid content must never trigger a navigation/reload.
+  expect(new URL(page.url()).searchParams.has("blueprint")).toBe(false);
 });
 
 test("info panel hosts the version config with a dirty-state apply", async ({
