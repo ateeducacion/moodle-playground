@@ -64,7 +64,9 @@ if (args.bundle) {
   const stats = statSync(bundlePath);
 
   manifest.bundle = {
-    format: "zip",
+    format: "tar.zst",
+    container: "tar",
+    codec: "zstd",
     path: relative(resolve(manifestPath, ".."), bundlePath).replaceAll(
       "\\",
       "/",

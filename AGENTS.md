@@ -23,7 +23,7 @@ It follows the same product shape as `omeka-s-playground`:
 3. Request routing: `sw.js` and `php-worker.js`
 4. PHP/Moodle runtime: `src/runtime/*` + generated assets under `assets/moodle/`
 
-The Moodle core is extracted from a prebuilt ZIP bundle into Emscripten MEMFS (in-memory)
+The Moodle core is streamed from a prebuilt tar.zst bundle into Emscripten MEMFS (in-memory)
 at boot. All files — core and mutable state — live in writable MEMFS. The runtime is fully
 ephemeral — all state is lost when the browser tab closes or the page is reloaded.
 
@@ -112,7 +112,7 @@ automatically.
 
 ### Generated Assets
 
-- `assets/moodle/`: runtime bundle files (`.zip`, snapshot, manifests)
+- `assets/moodle/`: runtime bundle files (`.tar.zst`, snapshot, manifests)
 - `assets/moodle/snapshot/`: pre-built install snapshot (`install.sq3`)
 - `assets/manifests/`: generated bundle manifests
 - `dist/`: esbuild output (php-worker bundle, WASM files, ICU data)
@@ -198,7 +198,7 @@ WP Playground & php-wasm skill. Key constraints unique to this repo:
   - Owns the PHP runtime instance for a scope
   - Boots Moodle and serves HTTP requests through the bridge
 - `src/runtime/bootstrap.js`
-  - Extracts the Moodle ZIP bundle into writable MEMFS
+  - Streams the Moodle tar.zst bundle into writable MEMFS (zstd decode + incremental tar parse)
   - Writes `config.php` and runtime helper scripts
   - Applies runtime patches to Moodle PHP sources
   - Loads a pre-built install snapshot (or falls back to full CLI install)
@@ -217,7 +217,7 @@ durable browser storage during normal operation. Closing the tab destroys all st
 
 Current layout:
 
-- Moodle core: extracted from ZIP bundle into `/www/moodle` (writable MEMFS)
+- Moodle core: streamed from tar.zst bundle into `/www/moodle` (writable MEMFS)
 - Mutable data: `/persist/moodledata` (MEMFS — the `/persist` name is legacy, not durable)
 - SQLite database: `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php` (MEMFS file)
 - Config and install markers: `/persist/config` (MEMFS)
@@ -421,6 +421,8 @@ so that future contributors (human or AI) understand **why** a choice was made �
 | [0015](docs/decisions/0015-firefox-request-body-buffering.md) | Buffer the request body synchronously for Firefox (SW fetch handler) | Accepted |
 | [0016](docs/decisions/0016-runtime-pr-file-overlay.md) | Runtime PR file overlay for Moodle core PR previews (`applyPrOverlay`) | Accepted |
 | [0017](docs/decisions/0017-tracker-scenario-blueprints.md) | Explicit Moodle Playground scenario blocks in tracker issues (+ starter preset) | Accepted |
+| [0018](docs/decisions/0018-core-bundle-solid-compression-experiment.md) | Solid compression for core bundles (tar.zst) — experiment that led to adoption | Accepted |
+| [0019](docs/decisions/0019-streaming-tar-zstd-core-bundle-extraction.md) | Streaming (bounded-memory) extraction for tar.zst core bundles — now the sole format | Accepted |
 
 ## Debugging
 
