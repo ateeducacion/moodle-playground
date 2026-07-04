@@ -107,6 +107,27 @@ jobs:
       - name: Prepare runtime assets (all branches)
         run: make prepare-all JOBS=2
 
+      # Experimental solid-compressed core-bundle alternatives (ADR 0018/0019) so
+      # the deployed preview can be exercised with ?bundle-format=tar.zst / tar.gz
+      # / auto. Only the runtime candidates (tar.zst + tar.gz) are generated; the
+      # slow brotli build is skipped. Node 20 lacks native zstd, so the zstd CLI
+      # is installed for the fallback path. The ZIP bundle stays the default.
+      - name: Generate experimental tar bundle alternatives (ADR 0018/0019)
+        run: |
+          sudo apt-get update && sudo apt-get install -y zstd
+          for B in MOODLE_404_STABLE MOODLE_405_STABLE MOODLE_500_STABLE MOODLE_501_STABLE MOODLE_502_STABLE main; do
+            if ls assets/moodle/$B/moodle-core-*.zip >/dev/null 2>&1; then
+              echo "::group::alternatives for $B"
+              # Non-fatal per branch: a failure just leaves that branch ZIP-only
+              # (a forced ?bundle-format=tar.zst there fails loud), never breaking
+              # the default ZIP deploy.
+              ( node scripts/experiment-core-bundle-formats.mjs --branch "$B" --formats tar.zst,tar.gz \
+                && node scripts/emit-bundle-alternatives.mjs --branch "$B" --formats tar.zst,tar.gz ) \
+                || echo "::warning::tar alternatives failed for $B; it stays ZIP-only"
+              echo "::endgroup::"
+            fi
+          done
+
       - name: Install docs dependencies
         run: python -m pip install --default-timeout=120 -r requirements-docs.txt
 
@@ -124,7 +145,8 @@ jobs:
             --exclude "node_modules/" \
             --exclude "site/" \
             --exclude "tests/" \
-            --exclude "patches/"
+            --exclude "patches/" \
+            --exclude "artifacts/"
           zensical build --clean
           rsync -a --delete site/ _site/docs/
           rm -rf site

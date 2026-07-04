@@ -13,7 +13,14 @@
 //   node scripts/emit-bundle-alternatives.mjs --branch MOODLE_500_STABLE
 //   node scripts/emit-bundle-alternatives.mjs --branch MOODLE_500_STABLE --formats tar.zst,tar.gz
 
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join, resolve } from "node:path";
 
 function parseArgs(argv) {
@@ -66,6 +73,15 @@ if (!existsSync(manifestPath)) {
 const report = JSON.parse(readFileSync(resultsPath, "utf8"));
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const uncompressedSize = report.tar?.bytes ?? null;
+
+// Clear any previously-staged tar alternatives (and their chunk parts) so a
+// re-run with a different --formats set never leaves an orphan behind — an
+// oversized orphan not referenced by the manifest would fail chunk-bundles.mjs.
+for (const name of readdirSync(assetsDir)) {
+  if (/^moodle-core\.tar(\.|$)/.test(name)) {
+    rmSync(join(assetsDir, name));
+  }
+}
 
 const alternatives = [];
 for (const row of report.results) {
