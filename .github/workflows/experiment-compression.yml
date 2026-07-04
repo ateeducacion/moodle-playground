@@ -1,0 +1,107 @@
+# Experiment: core-bundle solid compression (ADR 0018).
+#
+# Isolated from the normal ci.yml pipeline: manual `workflow_dispatch` only, with
+# `contents: read` permission so it can NEVER touch Pages / deploy. It builds one
+# branch's bundle once, then repacks it into the candidate formats under several
+# build runtimes (Node 20 / 24 / 26 + Bun) and uploads the machine-readable
+# reports as workflow artifacts. Output bytes for a fixed algo+level+library are
+# runtime-independent; the runtime axis measured here is BUILD SPEED and codec
+# API availability (notably: Node 20 has no native zstd -> CLI fallback).
+
+name: experiment-compression
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Moodle branch to build + repack
+        default: MOODLE_500_STABLE
+
+permissions:
+  contents: read
+
+jobs:
+  # Build the branch bundle once (needs PHP + composer + snapshot cache) and share
+  # the zip as an artifact so the matrix legs don't each rebuild it.
+  build-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer
+      - run: npm install
+      - run: npm run build:version
+      - name: Restore snapshot cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/snapshots
+          key: snapshots-${{ hashFiles('patches/**', 'scripts/generate-install-snapshot.sh', 'scripts/patch-moodle-source.sh', 'scripts/generate-component-cache.php') }}
+          restore-keys: |
+            snapshots-
+      - name: Build bundle
+        run: BRANCH=${{ inputs.branch }} npm run bundle
+      - name: Upload built zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: built-zip
+          path: assets/moodle/${{ inputs.branch }}/moodle-core-*.zip
+          retention-days: 1
+
+  # Repack under each Node version. zstd/brotli CLIs are installed so Node 20
+  # (which lacks native node:zlib zstd) can still measure zstd via the CLI path.
+  experiment-node:
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24, 26]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm install
+      - name: Install zstd/brotli CLIs (for the no-native-zstd fallback)
+        run: sudo apt-get update && sudo apt-get install -y zstd brotli
+      - name: Restore built zip
+        uses: actions/download-artifact@v7
+        with:
+          name: built-zip
+          path: assets/moodle/${{ inputs.branch }}
+      - name: Run experiment
+        run: node scripts/experiment-core-bundle-formats.mjs --branch ${{ inputs.branch }} --runtime node
+      - uses: actions/upload-artifact@v7
+        with:
+          name: compression-node-${{ matrix.node }}
+          path: artifacts/compression-experiment/**/*.{json,csv,md}
+          retention-days: 7
+
+  experiment-bun:
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - name: Install zstd/brotli CLIs
+        run: sudo apt-get update && sudo apt-get install -y zstd brotli
+      - name: Restore built zip
+        uses: actions/download-artifact@v7
+        with:
+          name: built-zip
+          path: assets/moodle/${{ inputs.branch }}
+      - name: Run experiment
+        run: bun scripts/experiment-core-bundle-formats.mjs --branch ${{ inputs.branch }} --runtime bun
+      - uses: actions/upload-artifact@v7
+        with:
+          name: compression-bun
+          path: artifacts/compression-experiment/**/*.{json,csv,md}
+          retention-days: 7

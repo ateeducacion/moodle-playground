@@ -1,0 +1,90 @@
+{
+  "environment": {
+    "browser": "Chrome 150.0.0.0",
+    "os": "macOS 10.15.7 (Darwin 25.4.0)",
+    "network": "local http-server (unthrottled, effectively instant)",
+    "note": "Single-run warm-ish boots captured via Claude-in-Chrome. Totals are dominated by WASM refresh + extract + install-snapshot load; the download-size advantage does NOT show on an instant local network and requires throttling (Pass 3 CDP) to materialize. refreshMs varies with WASM compile caching."
+  },
+  "boots": [
+    {
+      "requested": "zip",
+      "bundleFormat": "zip",
+      "container": "zip",
+      "compressedBytes": 73761528,
+      "decodeMs": 0,
+      "downloadWaitMs": 190,
+      "refreshMs": 241,
+      "prepareMs": 1688,
+      "bootstrapMs": 3119,
+      "totalMs": 3365,
+      "result": "Dashboard rendered"
+    },
+    {
+      "requested": "tar.gz",
+      "bundleFormat": "tar.gz",
+      "container": "tar",
+      "compressedBytes": 54020549,
+      "decodeMs": 335,
+      "downloadWaitMs": 0,
+      "refreshMs": 1901,
+      "prepareMs": 993,
+      "bootstrapMs": 2299,
+      "totalMs": 4205,
+      "result": "Dashboard rendered",
+      "decoder": "native DecompressionStream(gzip)"
+    },
+    {
+      "requested": "tar.zst",
+      "bundleFormat": "tar.zst",
+      "container": "tar",
+      "compressedBytes": 36293491,
+      "decodeMs": 285,
+      "downloadWaitMs": 0,
+      "refreshMs": 1634,
+      "prepareMs": 925,
+      "bootstrapMs": 2194,
+      "totalMs": 3834,
+      "result": "Dashboard rendered",
+      "decoder": "zstddec (libzstd WASM); no native zstd in Chrome 150"
+    }
+  ],
+  "nativeDecompressionStreamSupport_Chrome150": {
+    "gzip": true,
+    "deflate": true,
+    "deflate-raw": true,
+    "br": false,
+    "brotli": false,
+    "zstd": false
+  },
+  "firefoxCrossBrowser": {
+    "note": "Firefox boots are ~3x slower (known Firefox WASM + nested-iframe overhead; admin-flows e2e are skipped in CI for the same reason).",
+    "boots": [
+      {
+        "requested": "zip",
+        "totalMs": 13028,
+        "decodeMs": 0,
+        "result": "booted"
+      },
+      {
+        "requested": "tar.gz",
+        "totalMs": 9918,
+        "decodeMs": 410,
+        "result": "booted (native gzip)"
+      },
+      {
+        "requested": "tar.zst",
+        "result": "FAILED to boot within 120s in the automated harness (Firefox nested-iframe flakiness), but see decoderIsolation"
+      }
+    ],
+    "decoderIsolation": {
+      "tool": "Playwright Firefox, standalone",
+      "test": "import zstddec + decode the real 36MB tar.zst frame",
+      "size": 262742016,
+      "sha256": "8a9dbc5b6021deabd3ac7fd3a3b146c13fbcf7e4715a45925228c13d9d4209d4",
+      "byteExact": true,
+      "initMs": 9,
+      "decodeMs": 1087,
+      "conclusion": "zstddec decodes byte-exactly in Firefox in ~1.1s; the codec is cross-browser. The tar.zst boot failure is Firefox nested-iframe boot flakiness, NOT the tar/zstd path."
+    }
+  }
+}

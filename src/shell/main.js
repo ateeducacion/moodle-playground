@@ -80,6 +80,8 @@ let currentAddonProxyUrl = null;
 let currentPhpCorsProxyUrl = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
+// Experimental core-bundle format selector (ADR 0018); null keeps the ZIP default.
+let currentBundleFormat = null;
 let currentPath = "/";
 let channel;
 let serviceWorkerReady = null;
@@ -183,6 +185,7 @@ async function updateFrame() {
     phpCorsProxyUrl: currentPhpCorsProxyUrl,
     debug: currentDebugParam,
     profile: currentProfileParam,
+    bundleFormat: currentBundleFormat,
   });
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
@@ -597,6 +600,7 @@ async function main() {
   });
   currentDebugParam = urlParams.debug;
   currentProfileParam = urlParams.profile;
+  currentBundleFormat = urlParams.bundleFormat;
   currentAddonProxyUrl = urlParams.addonProxyUrl;
   currentPhpCorsProxyUrl = urlParams.phpCorsProxyUrl;
   applyRuntimeSelection(selection);

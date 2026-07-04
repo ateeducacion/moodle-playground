@@ -509,6 +509,8 @@ async function bootstrapRemote() {
   const phpCorsProxyUrl = url.searchParams.get("phpCorsProxyUrl") || null;
   const debug = url.searchParams.get("debug") || null;
   const profile = url.searchParams.get("profile") || null;
+  // Experimental core-bundle format selector (ADR 0018); null keeps the ZIP default.
+  const bundleFormat = url.searchParams.get("bundle-format") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   let blueprint = loadBlueprint(scopeId);
@@ -596,6 +598,9 @@ async function bootstrapRemote() {
     if (profile) {
       workerUrl.searchParams.set("profile", profile);
     }
+    if (bundleFormat) {
+      workerUrl.searchParams.set("bundle-format", bundleFormat);
+    }
     traceRuntimeSelection(
       scopeId,
       debug,
@@ -638,6 +643,17 @@ async function bootstrapRemote() {
     if (msg?.kind === "error") {
       setRemoteProgress(msg.detail);
     }
+    if (msg?.kind === "boot-metrics") {
+      // ADR 0018 benchmark hook: expose structured boot timings so a Playwright
+      // harness can read exact numbers (window.__bootMetrics) or a console marker
+      // instead of scraping the progress overlay. Inert for normal usage.
+      try {
+        window.__bootMetrics = msg.metrics;
+      } catch {
+        // Ignore — benchmarking hook only.
+      }
+      console.log(`[boot-metrics] ${JSON.stringify(msg.metrics)}`);
+    }
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
       // If bootstrap returns a readyPath (e.g. "/my/" after auto-login),
@@ -672,6 +688,7 @@ async function bootstrapRemote() {
       phpCorsProxyUrl,
       debug,
       profile,
+      bundleFormat,
       forceCleanBoot: cleanBoot,
     },
   });

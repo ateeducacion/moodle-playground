@@ -2,9 +2,14 @@ import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
 import {
   buildCoreExtractScript,
+  buildTarExtractScript,
   fetchAssetWithCache,
   fetchBundleWithCache,
 } from "../../lib/moodle-loader.js";
+import {
+  createDecodedTarStream,
+  extractTarStreamToPhp,
+} from "../../lib/streaming-tar-extract.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
   DEFAULT_MOODLE_BRANCH,
@@ -1787,6 +1792,32 @@ async function patchRuntimePhpSources(php, webRoot) {
   ]);
 }
 
+// Post-extraction tripwire (ADR 0019): a few runtime files that must exist after
+// the core is mounted, tolerant of the 5.1+ `public/` docroot layout. Guards the
+// streaming path against a silently short/garbled extraction.
+async function assertRequiredCoreFiles(php) {
+  const groups = [
+    ["lib/requirejs.php", "public/lib/requirejs.php"],
+    ["lib/behat/lib.php", "public/lib/behat/lib.php"],
+    ["lang/en/moodle.php", "public/lang/en/moodle.php"],
+  ];
+  for (const group of groups) {
+    let found = false;
+    for (const rel of group) {
+      const info = await php.analyzePath(`${MOODLE_ROOT}/${rel}`);
+      if (info?.exists) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      throw new Error(
+        `Required core file missing after extraction: ${group[0]}`,
+      );
+    }
+  }
+}
+
 async function prepareMoodleRuntime({
   php,
   archive,
@@ -1821,35 +1852,100 @@ async function prepareMoodleRuntime({
 
   const tMount = performance.now();
   publish("Writing Moodle bundle into MEMFS.", 0.58);
-  // Extract the core with PHP's native ZipArchive instead of decompressing the
-  // whole ~179 MB / ~29 000-file archive in JS. libzip inflates + writes one
-  // entry at a time (fast at any file count, ~one-entry peak), avoiding both the
-  // fflate `unzipSync` heap OOM and the per-entry DecompressionStream overhead
-  // of `decodeZip` (which made boot exceed the 150s readiness gate and regressed
-  // the Firefox e2e suite). Write the zip to MEMFS, run the extractor, then fail
-  // loud if ext/zip is missing or it errors — there is no JS fallback by design
-  // (ext/zip is confirmed present; Moodle already uses ZipArchive).
-  const tmpZip = `${TEMP_ROOT}/moodle-core.zip`;
+  // Extraction dispatch. Three paths, all first-party + SHA-256-pinned:
+  //   - ZIP (default + fallback): PHP native ZipArchive — libzip inflates + writes
+  //     one entry at a time (fast, ~one-entry peak). No JS fallback by design.
+  //   - tar STREAMING (ADR 0019, default for tar.*): decode the compressed tar as
+  //     a stream and write each entry into MEMFS incrementally, so the ~250 MB
+  //     uncompressed tar is NEVER materialized (peak JS heap ≈ largest file).
+  //   - tar FULL (ADR 0018, `?bundle-format=…-full`): the loader already decoded
+  //     the whole tar; extract it with PharData. Kept only for A/B benchmarking.
+  // On a non-forced tar failure (decode/extract/parity), fall back to ZIP.
+  const descriptor = archive.descriptor || {};
+  const isTar = descriptor.container === "tar";
+  const streaming = isTar && descriptor.extraction === "streaming";
+  const forced = Boolean(descriptor.forced);
   const stage = `${TEMP_ROOT}/moodle-core-stage`;
-  await php.writeFile(tmpZip, archive.bytes);
-  // Drop the JS reference to the compressed buffer now that MEMFS has its own
-  // copy, so the GC can reclaim it while ZipArchive extracts.
-  archive.bytes = null;
-  const extractResult = await php.run(
-    buildCoreExtractScript(tmpZip, stage, MOODLE_ROOT),
-  );
-  const extractOut = (
-    extractResult.text ??
-    textDecoder.decode(extractResult.bytes || new Uint8Array())
-  ).trim();
-  if (!extractOut.startsWith("INSTALL_OK")) {
-    throw new Error(
-      `Moodle core extraction failed: ${extractOut.slice(0, 200)} ` +
-        "(PHP ext/zip is required to mount the core).",
+
+  const runNativeExtract = async (bytes, container) => {
+    const tmpArchive = `${TEMP_ROOT}/moodle-core.${container}`;
+    await php.writeFile(tmpArchive, bytes);
+    const result = await php.run(
+      container === "tar"
+        ? buildTarExtractScript(tmpArchive, stage, MOODLE_ROOT)
+        : buildCoreExtractScript(tmpArchive, stage, MOODLE_ROOT),
     );
+    const out = (
+      result.text ?? textDecoder.decode(result.bytes || new Uint8Array())
+    ).trim();
+    if (!out.startsWith("INSTALL_OK")) {
+      throw new Error(
+        `Moodle core extraction failed: ${out.slice(0, 200)} ` +
+          `(PHP ext/${container === "tar" ? "phar" : "zip"} is required to mount the core).`,
+      );
+    }
+    return { fileCount: Number(out.split(" ")[1]) || null };
+  };
+
+  let extractionMode = streaming ? "streaming" : isTar ? "full" : "zip";
+  let extractStats = null;
+  let extractWriteMs = 0;
+  const decodeMs = archive.decodeMs || 0;
+
+  try {
+    if (streaming) {
+      const tExtract = performance.now();
+      const tarStream = await createDecodedTarStream(
+        archive.bytes,
+        descriptor.codec,
+      );
+      extractStats = await extractTarStreamToPhp(tarStream, php, MOODLE_ROOT);
+      extractWriteMs = Math.round(performance.now() - tExtract);
+      archive.bytes = null;
+      // Parity: extracted file count must match the manifest's advertised count.
+      if (
+        descriptor.fileCount &&
+        extractStats.fileCount !== descriptor.fileCount
+      ) {
+        throw new Error(
+          `tar file-count parity mismatch: extracted ${extractStats.fileCount}, manifest ${descriptor.fileCount}`,
+        );
+      }
+      await assertRequiredCoreFiles(php);
+    } else {
+      // ZIP or full-tar: the loader already produced the (de)compressed bytes.
+      extractStats = await runNativeExtract(
+        archive.bytes,
+        isTar ? "tar" : "zip",
+      );
+      archive.bytes = null;
+    }
+  } catch (error) {
+    if (forced) throw error;
+    publish(
+      `Core extraction (${extractionMode}) failed: ${String(error?.message || error).slice(0, 120)}; falling back to ZIP.`,
+      0.6,
+    );
+    const zipBytes = await fetchBundleWithCache(archive.manifest, () => {});
+    extractStats = await runNativeExtract(zipBytes, "zip");
+    extractionMode = "zip-fallback";
   }
+
   publish("Published Moodle core into MEMFS.", 0.78);
   const mountMs = Math.round(performance.now() - tMount);
+  // Surface extraction metrics on the shared archive object so bootstrapMoodle
+  // can fold them into the structured boot-metrics (ADR 0019).
+  archive.extractionMeta = {
+    extractionMode,
+    fileCount: extractStats?.fileCount ?? null,
+    directoryCount: extractStats?.dirCount ?? 0,
+    phpCount: extractStats?.phpCount ?? null,
+    decodedBytes: extractStats?.bytesWritten ?? null,
+    maxBufferedBytes: extractStats?.maxBuffered ?? null,
+    decodeMs,
+    extractWriteMs,
+    mountMs,
+  };
 
   const tComponentCache = performance.now();
   const bundledComponentCachePath = `${MOODLE_ROOT}/.playground/core_component.php`;
@@ -2454,6 +2550,7 @@ export async function startArchiveResolution({
   moodleBranch,
   appBaseUrl,
   publish,
+  bundleFormat = null,
 }) {
   const resolvedBranch = moodleBranch || DEFAULT_MOODLE_BRANCH;
   const manifestUrl = await resolveManifestUrl(
@@ -2462,7 +2559,7 @@ export async function startArchiveResolution({
   );
   let lastDownloadPct;
   return resolveBootstrapArchive(
-    { manifestUrl },
+    { manifestUrl, bundleFormat },
     ({ ratio, cached, phase, detail }) => {
       if (phase === "manifest") {
         publish(detail, 0.16);
@@ -3167,6 +3264,21 @@ export async function bootstrapMoodle({
     timings: {
       downloadWaitMs: archiveMs,
       prepareMs,
+      // ADR 0018/0019 experiment signals: which core-bundle format actually
+      // booted (after any fallback), the extraction mode, decode/extract split,
+      // file/dir counts, and the compressed download size.
+      bundleFormat: archive.descriptor?.format || "zip",
+      requestedBundleFormat: archive.descriptor?.requestedFormat || "zip",
+      bundleContainer: archive.descriptor?.container || "zip",
+      extractionMode: archive.extractionMeta?.extractionMode || "zip",
+      decodeMs: archive.extractionMeta?.decodeMs ?? archive.decodeMs ?? 0,
+      extractWriteMs: archive.extractionMeta?.extractWriteMs ?? 0,
+      fileCount: archive.extractionMeta?.fileCount ?? null,
+      directoryCount: archive.extractionMeta?.directoryCount ?? 0,
+      phpCount: archive.extractionMeta?.phpCount ?? null,
+      decodedBytes: archive.extractionMeta?.decodedBytes ?? null,
+      maxBufferedBytes: archive.extractionMeta?.maxBufferedBytes ?? null,
+      compressedBytes: archive.compressedBytes || archive.descriptor?.size || 0,
     },
   };
 }

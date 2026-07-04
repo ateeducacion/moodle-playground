@@ -1,0 +1,9 @@
+browser,format,extractionMode,ok,sizeBytes,deltaVsZipPct,chunks,buildMs,decodeMs,extractWriteMs,peakJsBufferBytes,coldTotalMs,warmTotalMs,modelDownloadFast3gMs,modelDownloadCableMs
+chromium,zip,zip,true,73761528,0,3,,0,0,,3946,3172,368808,118018
+chromium,tar.zst,streaming,true,36293491,-50.8,2,46864,0,526,6897152,2879,2356,181467,58070
+chromium,tar.zst-full,full,true,36293491,-50.8,2,46864,195,0,,3122,2667,181467,58070
+chromium,tar.gz,streaming,true,54020549,-26.76,3,9421,0,583,6897152,2899,2621,270103,86433
+firefox,zip,zip,true,73761528,0,3,,0,0,,13267,12567,368808,118018
+firefox,tar.zst,streaming,true,36293491,-50.8,2,46864,0,1663,6897152,9985,8834,181467,58070
+firefox,tar.zst-full,,false,36293491,-50.8,2,46864,,,,,,181467,58070
+firefox,tar.gz,streaming,true,54020549,-26.76,3,9421,0,913,6897152,9118,7765,270103,86433

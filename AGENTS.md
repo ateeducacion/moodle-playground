@@ -421,6 +421,8 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0015](docs/decisions/0015-firefox-request-body-buffering.md) | Buffer the request body synchronously for Firefox (SW fetch handler) | Accepted |
 | [0016](docs/decisions/0016-runtime-pr-file-overlay.md) | Runtime PR file overlay for Moodle core PR previews (`applyPrOverlay`) | Accepted |
 | [0017](docs/decisions/0017-tracker-scenario-blueprints.md) | Explicit Moodle Playground scenario blocks in tracker issues (+ starter preset) | Accepted |
+| [0018](docs/decisions/0018-core-bundle-solid-compression-experiment.md) | Experimental solid compression for core bundles (tar.zst/tar.br via `?bundle-format=`) | Proposed / Experimental |
+| [0019](docs/decisions/0019-streaming-tar-zstd-core-bundle-extraction.md) | Streaming (bounded-memory) extraction for tar.zst core bundles | Proposed / Experimental |
 
 ## Debugging
 

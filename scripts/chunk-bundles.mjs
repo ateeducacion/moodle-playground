@@ -121,38 +121,70 @@ const rewritten = [];
 try {
   for (const manifestFile of manifestFiles) {
     const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+    let changed = false;
+
     const bundle = manifest.bundle;
-    if (!bundle || !bundle.path || bundle.format === "zip-parts") continue;
+    if (bundle?.path && bundle.format !== "zip-parts") {
+      const zipAbs = resolve(dirname(manifestFile), bundle.path);
+      const size = fileSize(zipAbs);
+      if (size > MAX_FILE) {
+        const {
+          parts,
+          totalSize,
+          sha256: overall,
+        } = splitZip(zipAbs, bundle.path, bundle.sha256);
+        const newBundle = {
+          format: "zip-parts",
+          fileName: bundle.fileName ?? basename(bundle.path),
+          size: totalSize,
+          totalSize,
+          sha256: overall,
+          partSize: PART_SIZE,
+          parts,
+        };
+        if (bundle.fileCount !== undefined)
+          newBundle.fileCount = bundle.fileCount;
+        manifest.bundle = newBundle;
+        zipsToDelete.add(zipAbs);
+        rewritten.push({
+          manifest: basename(manifestFile),
+          parts: parts.length,
+          mib: totalSize / MIB,
+        });
+        changed = true;
+      }
+    }
 
-    const zipAbs = resolve(dirname(manifestFile), bundle.path);
-    const size = fileSize(zipAbs);
-    if (size < 0 || size <= MAX_FILE) continue; // missing or small enough
+    // ADR 0018: split oversized solid-compressed alternatives the same way. The
+    // whole-artifact sha256 is preserved (the loader reassembles and re-verifies
+    // it), so the runtime decode path is unaffected by chunking.
+    if (Array.isArray(manifest.bundleAlternatives)) {
+      for (const alt of manifest.bundleAlternatives) {
+        if (!alt.path || alt.parts) continue;
+        const altAbs = resolve(dirname(manifestFile), alt.path);
+        const size = fileSize(altAbs);
+        if (size < 0 || size <= MAX_FILE) continue;
+        const {
+          parts,
+          totalSize,
+          sha256: overall,
+        } = splitZip(altAbs, alt.path, alt.sha256);
+        alt.parts = parts;
+        alt.totalSize = totalSize;
+        alt.partSize = PART_SIZE;
+        alt.sha256 = overall;
+        zipsToDelete.add(altAbs);
+        rewritten.push({
+          manifest: `${basename(manifestFile)}:${alt.format}`,
+          parts: parts.length,
+          mib: totalSize / MIB,
+        });
+        changed = true;
+      }
+    }
 
-    const {
-      parts,
-      totalSize,
-      sha256: overall,
-    } = splitZip(zipAbs, bundle.path, bundle.sha256);
-
-    const newBundle = {
-      format: "zip-parts",
-      fileName: bundle.fileName ?? basename(bundle.path),
-      size: totalSize,
-      totalSize,
-      sha256: overall,
-      partSize: PART_SIZE,
-      parts,
-    };
-    if (bundle.fileCount !== undefined) newBundle.fileCount = bundle.fileCount;
-    manifest.bundle = newBundle;
-
-    writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
-    zipsToDelete.add(zipAbs);
-    rewritten.push({
-      manifest: basename(manifestFile),
-      parts: parts.length,
-      mib: totalSize / MIB,
-    });
+    if (changed)
+      writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 
   for (const zip of zipsToDelete) rmSync(zip);

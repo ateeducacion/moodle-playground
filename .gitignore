@@ -17,3 +17,14 @@ playwright-report/
 playwright-artifacts/
 .omc/
 .claude/projects/
+
+# Compression experiment (ADR 0018): commit the text reports
+# (results.json / results.csv / summary.md), never the large binary archives.
+artifacts/**/*.tar
+artifacts/**/*.tar.*
+artifacts/**/*.zip
+artifacts/**/*.zip.*
+artifacts/**/*.zst
+artifacts/**/*.br
+artifacts/**/*.gz
+artifacts/**/*.part-*

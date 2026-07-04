@@ -25,6 +25,7 @@ export function resolveRemoteUrl(
     phpCorsProxyUrl,
     debug,
     profile,
+    bundleFormat,
   } = {},
 ) {
   const url = new URL("./remote.html", window.location.href);
@@ -48,6 +49,9 @@ export function resolveRemoteUrl(
   }
   if (profile) {
     url.searchParams.set("profile", profile);
+  }
+  if (bundleFormat) {
+    url.searchParams.set("bundle-format", bundleFormat);
   }
   return url;
 }

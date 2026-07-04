@@ -378,6 +378,8 @@ export function parseQueryParams(urlOrSearchParams) {
     phpCorsProxyUrl: params.get("phpCorsProxyUrl") || null,
     debug: params.get("debug") || null,
     profile: params.get("profile") || null,
+    // Experimental core-bundle format selector (ADR 0018).
+    bundleFormat: params.get("bundle-format") || null,
   };
 }
 

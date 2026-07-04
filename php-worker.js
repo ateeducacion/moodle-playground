@@ -32,6 +32,9 @@ let moodleBranch = selection.moodleBranch;
 let phpCorsProxyUrlOverride = workerUrl.searchParams.get("phpCorsProxyUrl") || null;
 let debug = workerUrl.searchParams.get("debug") || null;
 let profile = workerUrl.searchParams.get("profile") || null;
+// Experimental core-bundle format selector (ADR 0018): null/"zip" keep the
+// default ZIP boot; "tar.zst"/"tar.br"/"tar.gz"/"auto" select an alternative.
+let bundleFormat = workerUrl.searchParams.get("bundle-format") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 // The ready PHP instance, exposed for the static fast path (see
@@ -543,6 +546,7 @@ async function getRuntimeState() {
       moodleBranch,
       appBaseUrl: appRootUrl,
       publish,
+      bundleFormat,
     });
     archivePromise.catch(() => {});
 
@@ -608,6 +612,32 @@ async function getRuntimeState() {
       title: "Boot timing summary",
       detail: `Config: ${configMs}ms | PHP refresh: ${refreshMs}ms | Bootstrap: ${bootstrapMs}ms${downloadWaitDetail} | Total: ${totalMs}ms`,
       progress: 0.95,
+    });
+    // Structured boot metrics for the ADR 0018 bundle-format benchmark. Emitted
+    // alongside the human-readable summary so a Playwright harness can read exact
+    // numbers instead of parsing the progress string. Inert for normal boots.
+    postShell({
+      kind: "boot-metrics",
+      metrics: {
+        bundleFormat: t.bundleFormat || "zip",
+        bundleContainer: t.bundleContainer || "zip",
+        requestedBundleFormat: t.requestedBundleFormat || bundleFormat || "zip",
+        extractionMode: t.extractionMode || "zip",
+        compressedBytes: t.compressedBytes || 0,
+        decodedBytes: t.decodedBytes ?? null,
+        fileCount: t.fileCount ?? null,
+        directoryCount: t.directoryCount ?? 0,
+        phpCount: t.phpCount ?? null,
+        maxBufferedBytes: t.maxBufferedBytes ?? null,
+        configMs,
+        refreshMs,
+        bootstrapMs,
+        downloadWaitMs: typeof t.downloadWaitMs === "number" ? t.downloadWaitMs : null,
+        decodeMs: typeof t.decodeMs === "number" ? t.decodeMs : 0,
+        extractWriteMs: typeof t.extractWriteMs === "number" ? t.extractWriteMs : null,
+        prepareMs: typeof t.prepareMs === "number" ? t.prepareMs : null,
+        totalMs,
+      },
     });
 
     // Restore saved DB snapshot if recovering from a crash.
@@ -874,6 +904,7 @@ function installMessageListener() {
       }
       if (params.debug !== undefined) debug = params.debug;
       if (params.profile !== undefined) profile = params.profile;
+      if (params.bundleFormat !== undefined) bundleFormat = params.bundleFormat;
       // Reset any cached runtime state so it boots with the new params.
       // Discard any pending crash snapshot too: it was hydrated from the
       // previous runtime/scope and must never be restored onto this freshly
