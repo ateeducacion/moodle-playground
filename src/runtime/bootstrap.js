@@ -1830,8 +1830,14 @@ async function prepareMoodleRuntime({
   // tar is never materialized (peak JS buffer ≈ the largest single file). This
   // replaced the PHP ZipArchive path and needs no `phar`/`zip`; it writes via the
   // raw Emscripten module (`php._php`). See lib/streaming-tar-extract.js.
-  const stream = await createDecodedTarStream(archive.bytes, "zstd");
-  // Drop the JS reference to the compressed buffer now that the stream owns it.
+  const codec = archive.manifest?.bundle?.codec ?? "zstd";
+  const stream = await createDecodedTarStream(archive.bytes, codec);
+  // Drop our alias to the compressed buffer. This only frees memory on the
+  // native DecompressionStream path (gzip/brotli), where the piped stream can
+  // release the source as it drains. On the zstd path — the one actually taken
+  // here — zstddec's decodeStreaming([compressed]) keeps its own reference to
+  // the whole buffer until extraction completes, so nulling this alias frees
+  // nothing there.
   archive.bytes = null;
   const extractStats = await extractTarStreamToPhp(stream, php, MOODLE_ROOT);
   // Parity tripwire: the streamed file count must match the manifest's.

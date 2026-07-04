@@ -1,3 +1,8 @@
+// CANONICAL SOURCE — this file is the shared USTAR tar toolchain, maintained
+// here in moodle-playground and copied VERBATIM into the sibling *-playground
+// repos (omeka-s / facturascripts / nextcloud). Keep the copies in sync; land
+// changes here first.
+//
 // tar-ustar.mjs — a small, deterministic USTAR tar writer + reader.
 //
 // Why hand-rolled: the compression experiment needs a byte-for-byte reproducible

@@ -2,8 +2,17 @@
 
 ## Status
 
-Proposed / Experimental (2026-07-04). Branch `experiment/core-bundle-solid-compression`.
-No default behaviour change: the ZIP path remains the untouched default and fallback.
+Accepted (2026-07-05). This ADR records the format evaluation; ADR 0019 records the
+shipped streaming design.
+
+The experiment concluded in favour of `tar.zst`, and **ADR 0019 made it the sole
+core-bundle format**. The ZIP path and its PHP `ZipArchive` extractor were removed
+entirely from the core boot: there is **no `?bundle-format=` flag, no
+`bundleAlternatives` manifest field, and no ZIP fallback**. The build produces a
+single `tar.zst` per branch; the runtime streams it and **fails loud** on a
+file-count parity mismatch. (ZIP is still used, unchanged, for untrusted
+plugin/blueprint archives via `lib/moodle-loader.js`, and as a build-time
+intermediate — see Implementation Notes.)
 
 ## Context and Problem
 
@@ -43,10 +52,11 @@ happen in JS; PHP then extracts the resulting `.tar`. Two approaches:
 * **(a) decode → full `.tar` in MEMFS → `PharData::extractTo()`.** Reuses proven native
   extraction (fast at any file count), minimal new code. Cost: the **uncompressed** tar
   (~250 MB, larger than the 74 MB zip) sits in the worker heap and MEMFS — a peak-memory
-  increase. This prototype implements (a).
+  increase. The ADR 0018 prototype measured (a).
 * **(b) streaming JS tar parse writing each entry to MEMFS off the decode stream.** Bounded
-  memory, but ~23k JS→WASM writes (the historically slow dimension). Documented as the
-  memory-fix path if (a)'s peak is unacceptable.
+  memory, but ~23k JS→WASM writes (the historically slow dimension). **This is the path that
+  shipped** (ADR 0019): it resolved (a)'s peak-memory blocker, so the runtime never
+  materializes the full tar and needs neither `PharData` nor `phar`/`zip`.
 
 A subtle but decisive finding shaped the tar **format**: PHP `PharData` **ignores PAX `path`
 extended headers** and writes long-named files under their truncated 100-byte name, colliding
@@ -74,18 +84,20 @@ evaluated candidates against the real 36 MB → 250 MB windowLog-27 frame:
   byte-exact on the frame, ~230 ms decode, self-contained (no separate `.wasm` fetch / CSP
   issue), has a streaming API to cap memory.
 * **brotli-dec-wasm** (208 KB) / **brotli-wasm** (1.06 MB) — correct but heavier; brotli's
-  frame is barely smaller than zstd's. `tar.br` is therefore kept **storage-only** in this
-  prototype (no brotli decoder wired); the runtime reports it unsupported and falls back to ZIP.
+  frame is barely smaller than zstd's. `tar.br` was therefore measured for **size only** (no
+  brotli decoder wired) and not carried forward; only `tar.zst` shipped.
 
 ### Build-runtime evaluation (Node 20 vs 24 LTS vs 26 vs Bun)
 
 Compressed **output bytes are runtime-independent** for a fixed algo + level + codec-library
 version; the runtime axis is **build speed, codec API availability, and CI risk**:
 
-* **Node 20** (current CI pin): `node:zlib` has **no zstd** (added in 22.15 / 23.8). The
-  experiment falls back to the `zstd` CLI there — an argument against Node 20 if native zstd
-  bundling is ever wanted.
-* **Node 24 LTS**: native zstd + brotli; the safe upgrade target.
+* **Node 20** (the CI pin *before* this work): `node:zlib` has **no zstd** (added in
+  22.15 / 23.8), which is why building `tar.zst` with the native encoder needed a newer
+  Node. **Adopting `tar.zst` moved the CI pin to Node 24 LTS** (`.github/workflows/ci.yml`);
+  `scripts/build-tar-zst-from-zip.mjs` uses `node:zlib` zstd directly and hard-errors on
+  Node < 22.15.
+* **Node 24 LTS**: native zstd + brotli; the chosen (and now shipped) build target.
 * **Node 26**: native zstd + brotli (used for all local measurements here); a non-LTS Current
   runtime — more risk to pin in production CI.
 * **Bun 1.3**: native zstd via `node:zlib`; fast, but a larger toolchain bet.
@@ -93,16 +105,23 @@ version; the runtime axis is **build speed, codec API availability, and CI risk*
 Build times (Node 26, 250 MB tar): zstd L19 ≈ 47 s, zstd L22 ≈ 75 s, **brotli q11 ≈ 207 s**
 (≈4× zstd for ~0.2 % less), gzip L9 ≈ 9 s. Brotli's build cost is a strike against it.
 
-The experiment ships an isolated `workflow_dispatch` matrix (`experiment-compression.yml`,
-Node 20/24/26 + Bun) to capture build-speed and the Node-20-no-zstd fact in CI without touching
-normal CI/deploy.
+These build-speed and Node-20-no-zstd measurements were taken on the
+`experiment/core-bundle-solid-compression` branch. The exploratory build/benchmark
+matrix and its scripts were experiment-only and did **not** merge; the shipped build
+simply runs `scripts/build-tar-zst-from-zip.mjs` on Node 24 in the normal CI `build` job.
 
 ## Decision
 
-**Proposed / Experimental.** Implement, behind a `?bundle-format=` flag, the full pipeline —
-build (`tar.zst`/`tar.br`/`tar.gz`), additive manifest `bundleAlternatives[]`, runtime
-selection with fail-loud-when-forced / fall-back-to-ZIP-when-auto, `zstddec` decode, and
-`PharData` extraction — and measure it. **The default ZIP boot is unchanged.**
+**Accepted: adopt `tar.zst` as the sole core-bundle format** (via the ADR 0019 streaming
+extractor). The multi-format exploration here (`tar.zst` / `tar.br` / `tar.gz`, secondary
+`zip.zst` / `zip.br`) settled the format question decisively in favour of `tar.zst`: best
+size/decoder trade, and `zstddec` exposes a true streaming generator that makes
+bounded-memory extraction possible. Having settled it, the shipped implementation keeps
+**only** `tar.zst` — there is no `?bundle-format=` flag, no `bundleAlternatives` manifest
+array, and no ZIP fallback. The build emits one `tar.zst` per branch and the runtime streams
+it; a file-count parity mismatch **fails loud** rather than silently falling back. The
+`tar.br` and `tar.gz` variants and the full-buffer (`PharData`) extraction path were
+measured (below) but **not shipped**.
 
 ## Results
 
@@ -113,7 +132,7 @@ runtime measured on **Chrome 150** (local, unthrottled). Modeled download uses
 
 | Format | Build runtime | Build time | Bundle size | Chunks @24 MiB | Δ vs ZIP | Model DL Fast-3G | Decode/extract | Total cold boot | Peak JS heap (est.) | Peak WASM/MEMFS (est.) | Chrome | Firefox | Notes |
 |--------|--------------|-----------:|------------:|:--------------:|---------:|-----------------:|---------------:|----------------:|--------------------:|-----------------------:|:------:|:-------:|-------|
-| **zip** (baseline) | prebuilt | — | 73,761,528 (70.3 MiB) | 3 | 0 % | ~369 s | 0 ms decode | ~3.4 s | ~74 MB zip | ~74 MB zip + tree | ✅ | ✅ | current default |
+| **zip** (baseline) | prebuilt | — | 73,761,528 (70.3 MiB) | 3 | 0 % | ~369 s | 0 ms decode | ~3.4 s | ~74 MB zip | ~74 MB zip + tree | ✅ | ✅ | former default — now removed from core boot |
 | tar (uncompressed) | Node 26 | 0.07 s | 262,742,016 | 11 | +256 % | — | — | — | — | — | — | — | intermediate only |
 | **tar.zst** (L19+ldm+wlog27) | Node 26 | 47 s | 36,293,491 (34.6 MiB) | **2** | **−50.8 %** | **~181 s** | 285 ms (zstddec) | ~3.8 s | ~250 MB tar + ~640 MB decoder¹ | ~250 MB tar + tree | ✅ | ⚠️² | needs zstddec (no native); decoder verified on FF |
 | tar.zst (L22+ldm+wlog27) | Node 26 | 75 s | 35,792,501 (34.1 MiB) | 2 | −51.5 % | ~179 s | — | — | — | — | — | — | +0.7 % for +60 % build time |
@@ -131,11 +150,13 @@ nested-iframe boot flakiness (the `admin-flows` e2e is skipped in CI for the sam
 Firefox boots are ~3× slower: zip ~13 s, tar.gz ~10 s here). So the codec works on Firefox;
 confirming the end-to-end boot there needs a local retry, not a code change.
 
-**Verified end-to-end in Chrome 150** (each booted to the Moodle Dashboard): `?bundle-format=zip`
+**Verified end-to-end in Chrome 150** (each booted to the Moodle Dashboard). These formats
+were compared on the experiment branch via a since-removed `?bundle-format=` selector: `zip`
 (decodeMs 0), `tar.gz` (native gzip, decodeMs ~335), `tar.zst` (zstddec, decodeMs ~285).
 On Firefox, `zip` and `tar.gz` booted (~13 s / ~10 s); `tar.zst` decoding was verified in
 isolation (byte-exact, ~1.1 s) while the full boot flaked on Firefox's nested-iframe path.
-`PharData` extracted 23,324 files with full parity vs the ZIP baseline.
+The ADR 0018 `PharData` probe extracted 23,324 files with full parity vs the ZIP baseline;
+the shipped streaming parser (ADR 0019) keeps that same parity.
 
 ### Acceptance criteria — assessment
 
@@ -146,65 +167,69 @@ isolation (byte-exact, ~1.1 s) while the full boot flaked on Firefox's nested-if
 | No peak-memory regression | **NOT met by approach (a)** — the uncompressed ~250 MB tar + ~640 MB decoder RSS exceed the zip path; needs streaming (approach b) |
 | Chrome **and** Firefox both work | Chrome **met** (zip/tar.gz/tar.zst all boot); Firefox: zip + tar.gz boot, and the zstddec decoder is byte-exact on Firefox (~1.1 s), but the tar.zst end-to-end boot flaked on Firefox's known nested-iframe path — **needs a local retry to fully confirm** |
 | No loss of checksum verification | **Met** — whole-artifact + per-part SHA-256 over the compressed artifact, reusing `verifyBundle` |
-| No deploy regression with chunked assets | **Met** — `chunk-bundles.mjs` splits oversized alternatives; loader reassembles + re-verifies |
-| File-count / PHP-count parity | **Met** — 23,324-file parity (PharData with USTAR-prefix + GNU longlink; PAX would drop 32) |
+| No deploy regression with chunked assets | **Met** — `chunk-bundles.mjs` splits the oversized `tar.zst` into `.part-NNN`; `lib/moodle-loader.js` reassembles + re-verifies |
+| File-count / PHP-count parity | **Met** — 23,324-file parity via USTAR prefix/name split + GNU longlink (read by both the ADR 0018 `PharData` probe and the shipped JS streaming parser; PAX would drop 32) |
 | Maintainable decoder (no fragile lib) | **Met for zstd** (zstddec, 856k dl/wk, MIT); **fzstd rejected** (corrupts large frames) |
 
 ### Recommendation
 
-**Defer — lean Adopt for `tar.zst` once peak memory is bounded.** The storage/download win is
-the single largest lever this project has found (**−51 % download, 3 → 2 hosted chunks**), the
-runtime path works end-to-end, checksum + parity are preserved, and the decoder question has a
-sound answer (zstddec, not fzstd). The **one** unmet criterion is peak memory: the memory-simple
-approach (a) inflates the whole ~250 MB tar. Before adopting, switch extraction to **approach
-(b)** (zstddec **streaming** → incremental USTAR parse → MEMFS, which the reference reader in
-`tar-ustar.mjs` already models) to cap peak memory, and validate cold boot on a **throttled
-network** and a **memory-constrained mobile browser**. `tar.br` is **not** recommended (heavier
-decoder, 4× build time, ~0.2 % smaller than zstd). `tar.gz` is a viable, zero-new-dependency
-**cross-browser-safe** middle option (−27 %, native decode) if the zstd decoder or memory
-profile proves problematic. If a future measurement shows the throttled-boot win does not
-materialize, keep ZIP and target smaller assets (e.g. `install.sq3`).
+**Adopt `tar.zst`.** The storage/download win is the single largest lever this project has
+found (**−51 % download, 3 → 2 hosted chunks**), checksum + parity are preserved, and the
+decoder question has a sound answer (zstddec, not fzstd). The **one** unmet criterion here was
+peak memory — approach (a) inflates the whole ~250 MB tar — and **ADR 0019 resolved it** by
+switching extraction to **approach (b)** (zstddec **streaming** → incremental USTAR parse →
+MEMFS), which caps the peak JS buffer at the largest single file (~6.6 MiB) and, unlike the
+full-buffer path, boots on Firefox. Building on that, the ZIP core path was removed and
+`tar.zst` became the sole format. `tar.br` was **not** adopted (heavier decoder, 4× build time,
+~0.2 % smaller than zstd); `tar.gz` was **not** adopted (only −27 %, and it stays at 3 chunks),
+though it remains the zero-dependency cross-browser fallback to reach for if the zstd decoder
+ever proves problematic.
 
 ## Consequences
 
 ### Positive
-* −51 % core-bundle download (tar.zst) and one fewer hosted chunk; −27 % with a zero-dependency
-  cross-browser `tar.gz`.
-* A reusable, deterministic tar toolchain (`scripts/lib/tar-ustar.mjs`) and a reproducible
-  storage + boot benchmark (`experiment-*` / `benchmark-*` scripts, CI matrix).
-* The runtime gains a clean, additive format-dispatch seam that leaves the ZIP path untouched.
+* −51 % core-bundle download (tar.zst) and one fewer hosted chunk (3 → 2).
+* A reusable, deterministic tar toolchain (`scripts/lib/tar-ustar.mjs`) shared verbatim with
+  the sibling `*-playground` repos.
+* One code path: the core boot always streams `tar.zst`, so there is no format-selection
+  branching, no flag threading, and no ZIP/tar divergence to keep in sync.
 
 ### Negative / Risks
-* **Peak memory** under approach (a) is the main blocker (see above).
-* A new runtime dependency (`zstddec` WASM, ~76 KB) bundled into the worker (lazy-imported, so
-  the default ZIP boot loads zero extra bytes).
-* Producing alternatives adds build steps (currently a separate helper, not the default build)
-  and the `chunk-bundles.mjs` alternative-splitting path.
-* `PharData`/tar path is used **only** for the first-party, SHA-256-pinned core bundle — never
-  for untrusted plugin/blueprint archives.
+* A new runtime dependency (`zstddec` WASM, ~76 KB) bundled into the worker (lazy-imported at
+  the extraction site).
+* The build now needs Node ≥ 22.15 for native `node:zlib` zstd (CI pins Node 24) and a `zip`
+  intermediate is still produced then discarded (it remains the source of truth for the
+  exclusion list + PHP-parity/required-file tripwires — see `scripts/build-moodle-bundle.sh`).
+* The tar core path is used **only** for the first-party, SHA-256-pinned core bundle — never
+  for untrusted plugin/blueprint archives, which still use the ZIP path in `lib/moodle-loader.js`.
 
 ## Implementation Notes
 
-* Build: `scripts/experiment-core-bundle-formats.mjs` (+ `scripts/lib/tar-ustar.mjs`,
-  `scripts/lib/compression-metrics.mjs`), `scripts/emit-bundle-alternatives.mjs`,
-  `scripts/chunk-bundles.mjs` (alternative splitting), `.github/workflows/experiment-compression.yml`.
-* Runtime (behind `?bundle-format=`, ZIP default untouched): `selectBundleDescriptor` /
-  `decodeToTar` / `buildTarExtractScript` + `bundleAlternatives` resolution in
-  `lib/moodle-loader.js`; container dispatch + boot timings in `src/runtime/bootstrap.js`; the
-  4-hop flag threading (`src/shared/version-resolver.js` → `src/shared/paths.js` →
-  `src/remote/main.js` → `php-worker.js`); structured `boot-metrics` message. Requires
-  `npm run build-worker` (the loader is bundled into the worker).
-* Benchmark: `scripts/benchmark-core-bundle-formats.mjs` (Playwright, reads `window.__bootMetrics`).
-* Adopting for real would additionally wire alternatives into `build-moodle-bundle.sh` /
-  `generate-manifest.mjs` and switch to streaming extraction (approach b).
+The shipped design lives in **ADR 0019**; the exploratory multi-format build/benchmark scripts
+and the `?bundle-format=` flag prototyped on the experiment branch did **not** merge. As shipped:
+
+* Build: `scripts/build-tar-zst-from-zip.mjs` converts the trimmed, tripwire-verified core ZIP
+  into the deterministic `tar.zst` (`scripts/lib/tar-ustar.mjs` for USTAR + GNU longlink;
+  `node:zlib` zstd L19 + LDM, windowLog 24). Driven by `scripts/build-moodle-bundle.sh`, which
+  discards the ZIP afterwards. `scripts/chunk-bundles.mjs` splits an oversized `tar.zst` into
+  `.part-NNN`; `scripts/generate-manifest.mjs` records `bundle.format="tar.zst"`,
+  `bundle.container="tar"`, `bundle.codec="zstd"`, `bundle.fileCount`, size + SHA-256.
+* Runtime: `lib/streaming-tar-extract.js` (`createDecodedTarStream`, `extractTarStreamToPhp`,
+  `StreamingTarParser`, `sanitizeTarPath`) decodes with `zstddec/stream` and writes each entry
+  into MEMFS. `src/runtime/bootstrap.js` drives it (`archive.manifest.bundle.codec` → decoder)
+  and enforces the file-count parity tripwire (throws on mismatch). `lib/moodle-loader.js`
+  fetches/reassembles/verifies the (possibly chunked) compressed artifact. Requires
+  `npm run build-worker` (the loader + extractor are bundled into the worker).
+* Tests: `tests/scripts/tar-ustar.test.js`, `tests/runtime/streaming-tar-extract.test.js`.
 
 ## Review Criteria
 
 * Revisit when a browser ships native `DecompressionStream("zstd")` — the zstddec dependency
   could then be dropped for that browser (keep it as the Firefox/older-Chrome fallback).
-* Revisit the memory verdict once streaming extraction (approach b) is implemented and measured
-  on a memory-constrained device.
-* Revisit if the build runtime moves off Node 20 (native zstd would let the build produce
-  alternatives without the CLI fallback).
+* Streaming extraction (approach b) shipped in ADR 0019; the remaining follow-up is measuring
+  the (now windowLog-24) zstd decode window on a memory-constrained mobile browser and a
+  throttled network — tracked in ADR 0019's Review Criteria.
+* The build now runs on Node 24 with native `node:zlib` zstd (no CLI fallback); revisit the
+  build codec/level/window if the Moodle tree's cross-file redundancy shifts materially.
 * Re-measure whenever the Moodle bundle's size or file count changes materially (a new branch),
   since the storage delta and chunk boundary (the 48–50 MB 2-vs-3-chunk edge) can shift.

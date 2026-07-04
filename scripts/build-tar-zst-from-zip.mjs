@@ -8,7 +8,8 @@
 // tripwires exactly as they are — the ZIP is still the source of truth, we only
 // re-container it. The tar is deterministic USTAR + GNU longlink (never PAX,
 // which the streaming parser + PharData do not read), zstd level 19 with
-// long-distance matching (windowLog 27) for strong cross-file dedup.
+// long-distance matching (windowLog 24) for strong cross-file dedup while
+// keeping the client-side decode window small (see ADR 0019).
 //
 // Requires Node >= 22.15 (native node:zlib zstd); CI builds on Node 24 LTS.
 //
@@ -40,7 +41,12 @@ const compressed = zlib.zstdCompressSync(tar, {
   params: {
     [zlib.constants.ZSTD_c_compressionLevel]: 19,
     [zlib.constants.ZSTD_c_enableLongDistanceMatching]: 1,
-    [zlib.constants.ZSTD_c_windowLog]: 27,
+    // windowLog 24 (16 MiB) rather than 27 (128 MiB): measured on the 250.6 MiB
+    // MOODLE_500_STABLE tree, wlog 24 costs only +0.90% size (34.61 -> 34.92 MiB)
+    // in exchange for an 8x smaller zstd decode window that the zstddec decoder
+    // must allocate on EVERY client (Firefox/Safari, where native
+    // DecompressionStream("zstd") is absent). See ADR 0019.
+    [zlib.constants.ZSTD_c_windowLog]: 24,
   },
 });
 writeFileSync(outPath, compressed);
