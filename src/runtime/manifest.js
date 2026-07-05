@@ -20,6 +20,21 @@ export async function fetchManifest(manifestUrl) {
   return response.json();
 }
 
+/**
+ * Extract the leading version from a manifest `release` string, dropping the
+ * " (Build: ...)" / "+" noise Moodle's version.php appends, e.g.
+ * "5.1.5+ (Build: 20260630)" -> "5.1.5", "5.3dev+ (Build: ...)" -> "5.3dev".
+ * Returns the input unchanged if it doesn't start with a version number (or
+ * isn't a string).
+ */
+export function parseReleaseVersion(release) {
+  if (typeof release !== "string") {
+    return release;
+  }
+  const match = release.match(/^[\d.]+[a-zA-Z0-9]*/);
+  return match ? match[0] : release;
+}
+
 export function buildManifestState(manifest, runtimeId, bundleVersion) {
   return {
     runtimeId,
