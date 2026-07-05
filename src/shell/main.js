@@ -5,6 +5,11 @@ import {
   resolveBlueprint,
   validateBlueprint,
 } from "../blueprint/index.js";
+import {
+  fetchManifest,
+  parseReleaseVersion,
+  resolveManifestUrl,
+} from "../runtime/manifest.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
@@ -58,6 +63,7 @@ const els = {
   configApply: document.querySelector("#config-apply"),
   runtimeIdChip: document.querySelector("#runtime-id-chip"),
   runtimeIdValue: document.querySelector("#runtime-id-value"),
+  moodleReleaseValue: document.querySelector("#moodle-release-value"),
   infoPanel: document.querySelector("#info-panel"),
   infoTab: document.querySelector("#info-tab"),
   sidePanel: document.querySelector("#side-panel"),
@@ -545,6 +551,27 @@ function updateConfigState() {
   refreshDirtyState();
 }
 
+// Purely informational: shows the exact Moodle point-release (e.g. "5.1.5")
+// for the active branch in the Info panel, alongside Runtime ID. Fetched
+// separately from the shell rather than piped up from the worker's own
+// manifest fetch, to avoid new cross-context messaging plumbing for a
+// display-only value. Never blocks boot or the address bar.
+async function updateMoodleReleaseInfo(moodleBranch) {
+  if (!els.moodleReleaseValue) {
+    return;
+  }
+  try {
+    const appBaseUrl = new URL("../../", import.meta.url).href;
+    const manifestUrl = await resolveManifestUrl(moodleBranch, appBaseUrl);
+    const manifest = await fetchManifest(manifestUrl);
+    const release = manifest.release;
+    els.moodleReleaseValue.textContent = parseReleaseVersion(release) ?? "-";
+    els.moodleReleaseValue.title = release || "";
+  } catch (error) {
+    console.debug("Unable to load Moodle release info:", error);
+  }
+}
+
 function applyConfigAndReset() {
   const newBranch = els.infoMoodleVersion?.value;
   const newPhp = els.infoPhpVersion?.value;
@@ -620,6 +647,7 @@ async function main() {
 
   populateConfigSelects();
   updateConfigState();
+  updateMoodleReleaseInfo(currentMoodleBranch);
 
   // Configuration (Info panel) event listeners
   if (els.infoMoodleVersion) {
