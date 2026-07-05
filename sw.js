@@ -67,7 +67,6 @@ const STATIC_PREFIXES = [
   "/assets/",
   "/dist/",
   "/src/",
-  "/vendor/",
   "/php-worker.js",
   "/sw.js",
   "/remote.html",
