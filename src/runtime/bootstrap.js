@@ -1,10 +1,13 @@
 import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
 import {
-  buildCoreExtractScript,
   fetchAssetWithCache,
   fetchBundleWithCache,
 } from "../../lib/moodle-loader.js";
+import {
+  createDecodedTarStream,
+  extractTarStreamToPhp,
+} from "../../lib/streaming-tar-extract.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import {
   DEFAULT_MOODLE_BRANCH,
@@ -1821,31 +1824,28 @@ async function prepareMoodleRuntime({
 
   const tMount = performance.now();
   publish("Writing Moodle bundle into MEMFS.", 0.58);
-  // Extract the core with PHP's native ZipArchive instead of decompressing the
-  // whole ~179 MB / ~29 000-file archive in JS. libzip inflates + writes one
-  // entry at a time (fast at any file count, ~one-entry peak), avoiding both the
-  // fflate `unzipSync` heap OOM and the per-entry DecompressionStream overhead
-  // of `decodeZip` (which made boot exceed the 150s readiness gate and regressed
-  // the Firefox e2e suite). Write the zip to MEMFS, run the extractor, then fail
-  // loud if ext/zip is missing or it errors — there is no JS fallback by design
-  // (ext/zip is confirmed present; Moodle already uses ZipArchive).
-  const tmpZip = `${TEMP_ROOT}/moodle-core.zip`;
-  const stage = `${TEMP_ROOT}/moodle-core-stage`;
-  await php.writeFile(tmpZip, archive.bytes);
-  // Drop the JS reference to the compressed buffer now that MEMFS has its own
-  // copy, so the GC can reclaim it while ZipArchive extracts.
+  // Mount the core by STREAMING the compressed tar.zst into MEMFS (ADR 0018/0019):
+  // zstddec decodes the bundle as a stream and an incremental USTAR/GNU-longlink
+  // parser writes each entry into MEMFS as it arrives, so the ~250 MB uncompressed
+  // tar is never materialized (peak JS buffer ≈ the largest single file). This
+  // replaced the PHP ZipArchive path and needs no `phar`/`zip`; it writes via the
+  // raw Emscripten module (`php._php`). See lib/streaming-tar-extract.js.
+  const codec = archive.manifest?.bundle?.codec ?? "zstd";
+  const stream = await createDecodedTarStream(archive.bytes, codec);
+  // Drop our alias to the compressed buffer. This only frees memory on the
+  // native DecompressionStream path (gzip/brotli), where the piped stream can
+  // release the source as it drains. On the zstd path — the one actually taken
+  // here — zstddec's decodeStreaming([compressed]) keeps its own reference to
+  // the whole buffer until extraction completes, so nulling this alias frees
+  // nothing there.
   archive.bytes = null;
-  const extractResult = await php.run(
-    buildCoreExtractScript(tmpZip, stage, MOODLE_ROOT),
-  );
-  const extractOut = (
-    extractResult.text ??
-    textDecoder.decode(extractResult.bytes || new Uint8Array())
-  ).trim();
-  if (!extractOut.startsWith("INSTALL_OK")) {
+  const extractStats = await extractTarStreamToPhp(stream, php, MOODLE_ROOT);
+  // Parity tripwire: the streamed file count must match the manifest's.
+  const manifestFileCount = archive.manifest?.bundle?.fileCount;
+  if (manifestFileCount && extractStats.fileCount !== manifestFileCount) {
     throw new Error(
-      `Moodle core extraction failed: ${extractOut.slice(0, 200)} ` +
-        "(PHP ext/zip is required to mount the core).",
+      `Moodle core tar file-count parity mismatch: extracted ${extractStats.fileCount}, ` +
+        `manifest ${manifestFileCount}.`,
     );
   }
   publish("Published Moodle core into MEMFS.", 0.78);

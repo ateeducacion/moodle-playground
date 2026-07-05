@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  buildCoreExtractScript,
-  extractZipEntries,
-  sanitizeArchivePath,
-} from "../../lib/moodle-loader.js";
-import { strToU8, zipSync } from "../../vendor/fflate.js";
+import { sanitizeArchivePath } from "../../lib/moodle-loader.js";
 
 describe("sanitizeArchivePath", () => {
   it("passes a normal relative path through unchanged", () => {
@@ -33,102 +28,5 @@ describe("sanitizeArchivePath", () => {
       /path traversal/i,
     );
     assert.throws(() => sanitizeArchivePath("a/../../b"), /path traversal/i);
-  });
-});
-
-describe("extractZipEntries directory handling", () => {
-  it("skips directory entries so they do not leak as bare file paths", () => {
-    // Regression: sanitizeArchivePath strips trailing slashes, so a directory
-    // entry like "moodle/.git/" used to survive as a file ".git", colliding
-    // with the real ".git/config" file and breaking extraction with
-    // "Not a directory". Directory entries must be skipped before sanitizing.
-    const zip = zipSync({
-      "moodle/.git/": new Uint8Array(0),
-      "moodle/.git/config": strToU8("[core]\n"),
-      "moodle/.git/hooks/": new Uint8Array(0),
-      "moodle/lib/setup.php": strToU8("<?php\n"),
-    });
-
-    const entries = extractZipEntries(zip);
-    const paths = entries.map((e) => e.path);
-
-    // The single common leading folder "moodle/" is stripped.
-    assert.ok(!paths.includes(".git"), "directory entry leaked as a file");
-    assert.ok(
-      !paths.includes(".git/hooks"),
-      "nested dir entry leaked as a file",
-    );
-    assert.ok(
-      paths.includes(".git/config"),
-      "real file inside dir was dropped",
-    );
-    assert.ok(paths.includes("lib/setup.php"), "regular file was dropped");
-
-    // No extracted file path may also be a parent directory of another path.
-    for (const p of paths) {
-      for (const q of paths) {
-        assert.ok(
-          !(q.length > p.length && q.startsWith(`${p}/`)),
-          `path "${p}" collides with "${q}" (directory written as a file)`,
-        );
-      }
-    }
-  });
-
-  it("rejects ZIP-slip traversal entries while keeping safe files", () => {
-    const zip = zipSync({
-      "pkg/lib/ok.php": strToU8("<?php\n"),
-      "pkg/../../evil.php": strToU8("<?php /* escape */\n"),
-    });
-
-    const entries = extractZipEntries(zip);
-    const paths = entries.map((e) => e.path);
-
-    assert.ok(
-      paths.every((p) => !p.includes("..")),
-      "a traversal entry was not stripped",
-    );
-    assert.ok(
-      paths.some((p) => p.endsWith("ok.php")),
-      "the safe file should still be extracted",
-    );
-  });
-});
-
-describe("buildCoreExtractScript", () => {
-  const script = buildCoreExtractScript(
-    "/tmp/moodle/moodle-core.zip",
-    "/tmp/moodle/moodle-core-stage",
-    "/www/moodle",
-  );
-
-  it("extracts the core with PHP ZipArchive into the target root", () => {
-    assert.ok(script.startsWith("<?php"));
-    assert.match(script, /new ZipArchive\(\)/);
-    assert.match(script, /->extractTo\(\$stage\)/);
-    assert.match(script, /\$zipPath = '\/tmp\/moodle\/moodle-core\.zip'/);
-    assert.match(script, /\$target = '\/www\/moodle'/);
-  });
-
-  it("descends into a lone wrapping folder, then moves it into place", () => {
-    assert.match(script, /count\(\$top\) === 1 && is_dir/);
-    assert.match(script, /@rename\(\$src, \$target\)/);
-  });
-
-  it("declares the sentinel contract and probes ext/zip", () => {
-    assert.match(script, /class_exists\('ZipArchive'\)/);
-    assert.match(script, /return 'NO_ZIP_EXT'/);
-    assert.match(script, /return 'INSTALL_OK ' \. \$count/);
-    assert.match(script, /INSTALL_ERR/);
-  });
-
-  it("removes the temp zip on success", () => {
-    assert.match(script, /@unlink\(\$zipPath\)/);
-  });
-
-  it("escapes single quotes in paths to keep the PHP literal safe", () => {
-    const evil = buildCoreExtractScript("/tmp/a'b.zip", "/tmp/s", "/www/x");
-    assert.match(evil, /\/tmp\/a\\'b\.zip'/);
-    assert.doesNotMatch(evil, /\/tmp\/a'b\.zip'/);
   });
 });
