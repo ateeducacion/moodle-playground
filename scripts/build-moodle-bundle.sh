@@ -242,6 +242,17 @@ for REQUIRED_RE in \
   fi
 done
 
+# Re-container the trimmed, tripwire-verified ZIP as the streaming tar.zst bundle
+# the runtime extracts (ADR 0018/0019). The ZIP remains the source of truth for
+# the exclusion list + PHP-parity/required-file tripwires above; here we only
+# change the container (tar) + codec (zstd), then drop the ZIP so only the
+# tar.zst ships. FILE_COUNT (derived from the ZIP listing) matches the tar.
+TAR_BUNDLE_NAME="moodle-core-$SAFE_RELEASE.tar.zst"
+TAR_BUNDLE_PATH="$DIST_DIR/$TAR_BUNDLE_NAME"
+echo "Converting $BUNDLE_NAME -> $TAR_BUNDLE_NAME" >&2
+node "$SCRIPT_DIR/build-tar-zst-from-zip.mjs" "$BUNDLE_PATH" "$TAR_BUNDLE_PATH"
+rm -f "$BUNDLE_PATH"
+
 SNAPSHOT_ARGS=""
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
   SNAPSHOT_ARGS="--snapshot $SNAPSHOT_DIR/install.sq3"
@@ -260,7 +271,7 @@ if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
 fi
 
 node "$SCRIPT_DIR/generate-manifest.mjs" \
-  --bundle "$BUNDLE_PATH" \
+  --bundle "$TAR_BUNDLE_PATH" \
   --channel "${BRANCH:-$CHANNEL}" \
   --manifest "$MANIFEST_PATH" \
   --runtimeVersion "$RUNTIME_VERSION" \
@@ -269,7 +280,7 @@ node "$SCRIPT_DIR/generate-manifest.mjs" \
   --sourceUrl "$SOURCE_URL" \
   $SNAPSHOT_ARGS
 
-echo "Bundle written to $BUNDLE_PATH" >&2
+echo "Bundle written to $TAR_BUNDLE_PATH" >&2
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
   echo "Snapshot written to $SNAPSHOT_DIR/install.sq3" >&2
 fi

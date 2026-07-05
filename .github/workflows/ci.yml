@@ -38,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -52,6 +52,7 @@ jobs:
           node --check sw.js
           node --check php-worker.js
           node --check lib/moodle-loader.js
+          node --check lib/streaming-tar-extract.js
           node --check src/runtime/bootstrap.js
           node --check src/runtime/php-loader.js
           node --check src/runtime/php-compat.js
@@ -59,6 +60,7 @@ jobs:
           node --check src/shell/main.js
           node --check src/remote/main.js
           node --check src/blueprint/index.js
+          node --check scripts/lib/tar-ustar.mjs
 
       - name: Run unit tests
         run: make test
@@ -78,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - uses: actions/setup-python@v6
@@ -216,7 +218,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -267,7 +269,7 @@ jobs:
     steps:
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Download site artifact
         uses: actions/download-artifact@v8
