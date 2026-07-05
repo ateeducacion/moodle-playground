@@ -1,0 +1,110 @@
+# Check for new Moodle stable branches
+#
+# This project builds rolling bundles from a hardcoded set of Moodle stable
+# branches (see `MOODLE_BRANCHES` in src/shared/version-resolver.js and the
+# bundle-* targets in Makefile). Patch releases on an already-tracked branch
+# are absorbed automatically by scheduled-base-rebuild.yml — but nothing
+# notices when Moodle HQ cuts a brand-new stable branch (e.g. a future
+# MOODLE_503_STABLE). This workflow only detects that and opens an issue; it
+# never builds or tags anything, since adding real support for a new branch
+# requires manual work (patches, install snapshot, SQLite compatibility —
+# see the moodle-internals and blueprint-provisioning skills).
+name: Check for new Moodle stable branch
+
+on:
+  schedule:
+    # Daily. Cheap (a couple of GitHub API calls), and new stable branches
+    # are rare, so cadence just needs to be "soon enough", not tight.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+# Least privilege: only enough to read this repo and open an issue.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-new-moodle-branch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List currently tracked branches
+        id: tracked
+        run: |
+          TRACKED=$(node -e "
+            import('./src/shared/version-resolver.js').then((m) => {
+              for (const b of m.MOODLE_BRANCHES) {
+                console.log(b.branch);
+              }
+            });
+          ")
+          echo "Tracked branches:"
+          echo "$TRACKED"
+          {
+            echo "branches<<EOF"
+            echo "$TRACKED"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find new upstream stable branches
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACKED: ${{ steps.tracked.outputs.branches }}
+        run: |
+          UPSTREAM=$(gh api repos/moodle/moodle/branches --paginate --jq '.[].name' \
+            | grep -E '^MOODLE_[0-9]+_STABLE$' || true)
+
+          NEW_BRANCHES=""
+          for branch in $UPSTREAM; do
+            if ! grep -qxF "$branch" <<< "$TRACKED"; then
+              NEW_BRANCHES="$NEW_BRANCHES $branch"
+            fi
+          done
+          NEW_BRANCHES=$(echo "$NEW_BRANCHES" | xargs)
+
+          if [ -z "$NEW_BRANCHES" ]; then
+            echo "No new Moodle stable branches found."
+          else
+            echo "New Moodle stable branches found: $NEW_BRANCHES"
+          fi
+          echo "new_branches=$NEW_BRANCHES" >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue for each new branch
+        if: steps.diff.outputs.new_branches != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_BRANCHES: ${{ steps.diff.outputs.new_branches }}
+        run: |
+          for branch in $NEW_BRANCHES; do
+            title="New Moodle stable branch detected: $branch"
+
+            existing=$(gh issue list --state open --search "$title in:title" --json title \
+              --jq ".[] | select(.title == \"$title\") | .title")
+            if [ -n "$existing" ]; then
+              echo "Issue already open for $branch, skipping."
+              continue
+            fi
+
+            body_lines=(
+              "Moodle has a new stable branch upstream: [\`$branch\`](https://github.com/moodle/moodle/tree/$branch)."
+              ""
+              "It is not yet tracked in this repo. To add support:"
+              ""
+              "- Add an entry for it to \`MOODLE_BRANCHES\` in \`src/shared/version-resolver.js\`."
+              "- Add a \`bundle-$branch\` target to \`Makefile\` (and include it in \`bundle-all\`)."
+              "- Generate patches and an install snapshot for it, following the \`moodle-internals\`"
+              "  and \`blueprint-provisioning\` skills."
+              ""
+              "This issue was opened automatically by \`check-new-moodle-branch.yml\`. It does not"
+              "build or tag anything — adding real support needs manual verification."
+            )
+            body=$(printf '%s\n' "${body_lines[@]}")
+
+            gh issue create --title "$title" --body "$body"
+          done

@@ -4,6 +4,7 @@ import {
   buildFallbackManifestUrl,
   buildManifestState,
   fetchManifest,
+  parseReleaseVersion,
   resolveManifestUrl,
 } from "../../src/runtime/manifest.js";
 
@@ -65,6 +66,35 @@ describe("buildManifestState", () => {
     const manifest = { release: "2024-01-01" };
     const state = buildManifestState(manifest, "runtime1", "1.0");
     assert.strictEqual(state.sha256, null);
+  });
+});
+
+describe("parseReleaseVersion", () => {
+  it("strips the build suffix from a stable release string", () => {
+    assert.strictEqual(
+      parseReleaseVersion("5.1.5+ (Build: 20260630)"),
+      "5.1.5",
+    );
+  });
+
+  it("keeps a dev qualifier but strips the build suffix", () => {
+    assert.strictEqual(
+      parseReleaseVersion("5.3dev+ (Build: 20260705)"),
+      "5.3dev",
+    );
+  });
+
+  it("returns a plain release string unchanged", () => {
+    assert.strictEqual(parseReleaseVersion("5.0.7"), "5.0.7");
+  });
+
+  it("returns the input unchanged when it has no leading version number", () => {
+    assert.strictEqual(parseReleaseVersion("unknown"), "unknown");
+  });
+
+  it("returns non-string input unchanged", () => {
+    assert.strictEqual(parseReleaseVersion(null), null);
+    assert.strictEqual(parseReleaseVersion(undefined), undefined);
   });
 });
 
