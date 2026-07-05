@@ -580,3 +580,92 @@ describe("buildScopedCacheKey", () => {
     );
   });
 });
+
+// Replicate markExternalAnchorsBlank from sw.js. External links (e.g. the Moodle
+// plugin directory) can't be shown inside the playground iframe because those
+// sites send X-Frame-Options: sameorigin, so we re-target them to a new tab.
+function markExternalAnchorsBlank(html, origin) {
+  return html.replace(/<a\b([^>]*)>/giu, (match, attrs) => {
+    if (/\btarget\s*=/iu.test(attrs)) {
+      return match;
+    }
+    const hrefMatch = attrs.match(/\bhref\s*=\s*(["'])([^"']*)\1/iu);
+    if (!hrefMatch) {
+      return match;
+    }
+    const href = decodeHtmlAttributeEntities(hrefMatch[2]);
+    if (!href) {
+      return match;
+    }
+    let absolute;
+    try {
+      absolute = new URL(href, origin);
+    } catch {
+      return match;
+    }
+    if (absolute.protocol !== "http:" && absolute.protocol !== "https:") {
+      return match;
+    }
+    if (absolute.origin === origin) {
+      return match;
+    }
+    return `<a${attrs} target="_blank" rel="noopener noreferrer">`;
+  });
+}
+
+describe("markExternalAnchorsBlank", () => {
+  const origin = "https://ateeducacion.github.io";
+
+  it("opens the plugin directory link in a new tab", () => {
+    const html =
+      '<a href="https://marketplace.moodle.com/?site=eyJ4IjoxfQ%3D%3D">Browse new plugins</a>';
+    assert.strictEqual(
+      markExternalAnchorsBlank(html, origin),
+      '<a href="https://marketplace.moodle.com/?site=eyJ4IjoxfQ%3D%3D" target="_blank" rel="noopener noreferrer">Browse new plugins</a>',
+    );
+  });
+
+  it("re-targets moodle.org links too", () => {
+    const html = '<a class="btn" href="https://moodle.org/plugins/">dir</a>';
+    assert.strictEqual(
+      markExternalAnchorsBlank(html, origin),
+      '<a class="btn" href="https://moodle.org/plugins/" target="_blank" rel="noopener noreferrer">dir</a>',
+    );
+  });
+
+  it("leaves same-origin links untouched", () => {
+    const html =
+      '<a href="https://ateeducacion.github.io/admin/index.php">Home</a>';
+    assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+
+  it("leaves relative links untouched", () => {
+    const html = '<a href="../course/view.php?id=2">Course</a>';
+    assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+
+  it("ignores mailto:, tel: and #fragment links", () => {
+    const html =
+      '<a href="mailto:a@b.com">m</a><a href="tel:+1">t</a><a href="#top">up</a>';
+    assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+
+  it("respects an existing target attribute", () => {
+    const html = '<a target="_self" href="https://moodle.org/">x</a>';
+    assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+
+  it("decodes HTML entities before checking the origin", () => {
+    const html =
+      '<a href="https://marketplace.moodle.com/?a=1&amp;b=2">plugins</a>';
+    assert.strictEqual(
+      markExternalAnchorsBlank(html, origin),
+      '<a href="https://marketplace.moodle.com/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">plugins</a>',
+    );
+  });
+
+  it("does not match unrelated tags like <area> or <abbr>", () => {
+    const html = '<area href="https://moodle.org/"><abbr>a</abbr>';
+    assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+});
