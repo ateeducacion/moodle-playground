@@ -36,6 +36,11 @@ if (!zipPath || !outPath) {
 }
 
 const entries = normalizeEntries(unzipSync(readFileSync(zipPath)));
+// fileCount stays files-only for parity with the ZIP listing (grep -cv '/$' in
+// build-moodle-bundle.sh) and the runtime tripwire (extractStats.fileCount);
+// preserved empty directories are reported separately as dirCount.
+const fileCount = entries.reduce((n, e) => n + (e.type === "dir" ? 0 : 1), 0);
+const dirCount = entries.length - fileCount;
 const tar = createUstarTar(entries, { mtime: 0 });
 const compressed = zlib.zstdCompressSync(tar, {
   params: {
@@ -52,7 +57,8 @@ const compressed = zlib.zstdCompressSync(tar, {
 writeFileSync(outPath, compressed);
 console.log(
   JSON.stringify({
-    fileCount: entries.length,
+    fileCount,
+    dirCount,
     bytes: compressed.length,
     sha256: createHash("sha256").update(compressed).digest("hex"),
   }),

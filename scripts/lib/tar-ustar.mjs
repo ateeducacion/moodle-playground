@@ -21,15 +21,17 @@
 // the USTAR prefix split and GNU longlink correctly, and so do bsdtar / GNU tar,
 // so this format keeps full file-count parity with the ZIP baseline.
 //
-// Determinism policy: entries are emitted files-only (no directory members, which
-// the runtime reconstructs anyway) in a fixed byte-wise sort, with mtime=0,
-// uid=gid=0, empty uname/gname, and a fixed mode.
+// Determinism policy: entries are emitted in a fixed byte-wise sort, with
+// mtime=0, uid=gid=0, empty uname/gname, and fixed modes. Files use typeflag '0';
+// semantically-meaningful empty directories (those no file re-creates — see
+// normalizeEntries) use typeflag '5' so Moodle's empty plugin-type roots survive.
 //
 // Reused semantics: entry-name sanitization mirrors sanitizeArchivePath() in
 // lib/moodle-loader.js (reject "..", strip leading "/", drop "." segments) so the
 // tar cannot carry a path-traversal entry — parity with the ZIP boot path.
 
 const BLOCK = 512;
+const EMPTY_DATA = new Uint8Array(0);
 
 // --- name sanitization (parity with lib/moodle-loader.js) --------------------
 
@@ -49,16 +51,28 @@ export function sanitizeArchivePath(name) {
 
 /**
  * Turn a { path -> Uint8Array } map (as produced by fflate `unzipSync`) into a
- * sorted, sanitized, files-only entry list ready for createUstarTar(). Directory
- * keys (trailing "/") are dropped; unsafe paths are skipped. The sort is a stable
- * byte-wise comparison on the sanitized name so two runs over the same input
- * yield an identical archive.
+ * sorted, sanitized entry list ready for createUstarTar(). Each entry is tagged
+ * `{ type: "file", name, data }` or `{ type: "dir", name }`.
+ *
+ * Directory members (trailing "/") are preserved ONLY when no file will create
+ * them implicitly — i.e. semantically-meaningful empty directories. This keeps
+ * Moodle's plugin-type roots alive after the docs trim empties them: e.g.
+ * `local/` ships only readme.txt + upgrade.txt (both excluded by the bundle
+ * trim), yet Moodle's plugin installer requires `<dirroot>/local` to exist or it
+ * fails with "Plugin type location does not exist!". Directories implied by a
+ * file (every ancestor path of a kept file) are NOT emitted as redundant members
+ * — the streaming extractor reconstructs them from each file's parent path.
+ *
+ * Unsafe paths (".." traversal) are skipped for both files and directories. The
+ * sort is a stable byte-wise comparison on the sanitized name so two runs over
+ * the same input yield an identical archive.
  */
 export function normalizeEntries(fileMap) {
-  const entries = [];
+  const files = [];
+  const dirCandidates = [];
   for (const rawName of Object.keys(fileMap)) {
     const normalized = normalizeArchiveName(rawName);
-    if (normalized.endsWith("/")) continue; // directory member, skip
+    const isDir = normalized.endsWith("/");
     let name;
     try {
       name = sanitizeArchivePath(normalized);
@@ -66,8 +80,31 @@ export function normalizeEntries(fileMap) {
       continue; // path traversal — drop, never write outside root
     }
     if (!name) continue;
-    entries.push({ name, data: fileMap[rawName] });
+    if (isDir) dirCandidates.push(name);
+    else files.push({ type: "file", name, data: fileMap[rawName] });
   }
+
+  // Every ancestor directory of a kept file is created implicitly by the
+  // extractor; collect them so we never emit a redundant directory member.
+  const impliedDirs = new Set();
+  for (const file of files) {
+    let idx = file.name.lastIndexOf("/");
+    while (idx > 0) {
+      const dir = file.name.slice(0, idx);
+      if (impliedDirs.has(dir)) break;
+      impliedDirs.add(dir);
+      idx = dir.lastIndexOf("/");
+    }
+  }
+
+  const seenDir = new Set();
+  const entries = files;
+  for (const name of dirCandidates) {
+    if (impliedDirs.has(name) || seenDir.has(name)) continue;
+    seenDir.add(name);
+    entries.push({ type: "dir", name });
+  }
+
   // Byte-wise (codepoint) sort — NOT localeCompare, which is locale-sensitive
   // and would make the archive non-reproducible across environments.
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -161,18 +198,36 @@ function padToBlock(chunks, byteLength) {
  * Options pin the metadata (mtime/uid/gid/mode) so output is reproducible.
  */
 export function createUstarTar(entries, options = {}) {
-  const { mtime = 0, uid = 0, gid = 0, mode = 0o644 } = options;
+  const {
+    mtime = 0,
+    uid = 0,
+    gid = 0,
+    mode = 0o644,
+    dirMode = 0o755,
+  } = options;
   const chunks = [];
 
   for (const entry of entries) {
+    const isDir = entry.type === "dir";
+    // Directory members carry a trailing slash (USTAR convention) and no body;
+    // the trailing slash + typeflag '5' both signal "directory" to the reader.
+    const entryName = isDir
+      ? entry.name.endsWith("/")
+        ? entry.name
+        : `${entry.name}/`
+      : entry.name;
     const data =
-      entry.data instanceof Uint8Array ? entry.data : Buffer.from(entry.data);
-    const split = splitTarName(entry.name);
+      isDir || entry.data == null
+        ? EMPTY_DATA
+        : entry.data instanceof Uint8Array
+          ? entry.data
+          : Buffer.from(entry.data);
+    const split = splitTarName(entryName);
 
     if (split.longLink) {
       // GNU `././@LongLink`: an 'L'-type entry whose body is the full name + NUL,
       // applied to the next entry.
-      const longName = Buffer.from(`${entry.name}\0`, "utf8");
+      const longName = Buffer.from(`${entryName}\0`, "utf8");
       chunks.push(
         headerBlock({
           name: "././@LongLink",
@@ -196,12 +251,14 @@ export function createUstarTar(entries, options = {}) {
         mtime,
         uid,
         gid,
-        mode,
-        typeflag: "0",
+        mode: isDir ? dirMode : mode,
+        typeflag: isDir ? "5" : "0",
       }),
     );
-    chunks.push(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
-    padToBlock(chunks, data.length);
+    if (data.length > 0) {
+      chunks.push(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+      padToBlock(chunks, data.length);
+    }
   }
 
   // Two zero blocks mark end-of-archive.
@@ -221,9 +278,11 @@ function readOctal(block, offset, length) {
 
 /**
  * Minimal tar reader that understands USTAR entries (incl. the prefix/name
- * split) and GNU `././@LongLink` names. Returns [{ name, data }]. Used by tests
- * to prove round-trip fidelity and as a reference for the runtime streaming
- * extractor prototype.
+ * split) and GNU `././@LongLink` names. Returns file entries as
+ * `{ name, data }` and directory entries (typeflag '5' or a trailing-slash name)
+ * as `{ name, type: "dir" }` — the directory name is returned without its
+ * trailing slash. Used by tests to prove round-trip fidelity and as a reference
+ * for the runtime streaming extractor.
  */
 export function readUstarTar(buffer) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
@@ -249,10 +308,16 @@ export function readUstarTar(buffer) {
       pendingName = data.toString("utf8").replace(/\0.*$/, "");
       continue;
     }
-    if (typeflag !== "0" && typeflag !== "\0") continue; // ignore non-file types
 
     const name = pendingName ?? (prefix ? `${prefix}/${rawName}` : rawName);
     pendingName = null;
+
+    if (typeflag === "5" || name.endsWith("/")) {
+      entries.push({ name: name.replace(/\/+$/, ""), type: "dir" });
+      continue;
+    }
+    if (typeflag !== "0" && typeflag !== "\0") continue; // ignore exotic types
+
     entries.push({ name, data: Uint8Array.prototype.slice.call(data) });
   }
   return entries;
