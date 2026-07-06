@@ -490,6 +490,51 @@ function rewriteHtmlAttributeUrl(rawValue, scope) {
   }
 }
 
+// Anchors that point to a different origin — most notably the Moodle plugin
+// directory ("Browse new plugins" -> marketplace.moodle.com / moodle.org) —
+// cannot be shown inside the playground's nested iframe: those sites send
+// `X-Frame-Options: sameorigin` (and `frame-ancestors 'self'`), so the browser
+// refuses to frame them and logs "Refused to display '…' in a frame". A Service
+// Worker never sees these navigations (they target an out-of-scope origin), so
+// the only place we can intervene is the same-origin HTML Moodle serves. Force
+// cross-origin links to open in a new top-level tab, which is exactly what a
+// normal Moodle does anyway — the plugin directory is meant to open in the
+// browser, not be embedded. Same-origin links are left untouched so scoped
+// in-iframe navigation and Moodle's own JS keep working.
+function markExternalAnchorsBlank(html, origin) {
+  return html.replace(/<a\b([^>]*)>/giu, (match, attrs) => {
+    // Respect an explicit target the markup already set.
+    if (/\btarget\s*=/iu.test(attrs)) {
+      return match;
+    }
+    const hrefMatch = attrs.match(/\bhref\s*=\s*(["'])([^"']*)\1/iu);
+    if (!hrefMatch) {
+      return match;
+    }
+    const href = decodeHtmlAttributeEntities(hrefMatch[2]);
+    if (!href) {
+      return match;
+    }
+    let absolute;
+    try {
+      absolute = new URL(href, origin);
+    } catch {
+      // Relative URLs and unparsable values resolve against `origin`, so a throw
+      // here means the value isn't a navigable link — leave it alone.
+      return match;
+    }
+    // Only re-target real cross-origin web links; leave mailto:/tel:/#fragments,
+    // and any same-origin (scoped) navigation, exactly as they are.
+    if (absolute.protocol !== "http:" && absolute.protocol !== "https:") {
+      return match;
+    }
+    if (absolute.origin === origin) {
+      return match;
+    }
+    return `<a${attrs} target="_blank" rel="noopener noreferrer">`;
+  });
+}
+
 function rewriteHtmlDocument(html, scope) {
   const { origin, scopeId, runtimeId } = scope;
   const scopedBasePath = getScopedBasePath(scopeId, runtimeId);
@@ -557,6 +602,10 @@ function rewriteHtmlDocument(html, scope) {
     `"apibase":"${jsonEscapedOrigin}\\/r.php\\/api"`,
     `"apibase":"${jsonEscapedBase}\\/r.php\\/api"`,
   );
+
+  // External links (plugin directory, docs, etc.) can't be framed — open them
+  // in a new top-level tab instead of failing with X-Frame-Options.
+  result = markExternalAnchorsBlank(result, origin);
 
   return result;
 }
