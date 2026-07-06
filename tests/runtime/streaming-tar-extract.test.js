@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  extractTarStreamToPhp,
   StreamingTarParser,
   sanitizeTarPath,
 } from "../../lib/streaming-tar-extract.js";
@@ -187,5 +188,56 @@ describe("StreamingTarParser", () => {
     const parser = new StreamingTarParser({ onEntry: () => {} });
     parser.push(tar.subarray(0, 512 + 400)); // header + partial data
     assert.throws(() => parser.end(), /Truncated/);
+  });
+
+  it("11. surfaces an empty directory written by createUstarTar", () => {
+    // End-to-end regression for the tar.zst core bundle: an empty plugin-type
+    // root such as `local/` must survive the production writer -> streaming
+    // extractor path (see tar-ustar.test.js for the writer-side assertions).
+    const tar = Buffer.from(
+      createUstarTar(
+        normalizeEntries({ "local/": enc(""), "a.txt": enc("a") }),
+      ),
+    );
+    const { entries, stats } = collect(tar, 64);
+    assert.equal(stats.dirCount, 1);
+    const dir = entries.find((e) => e.type === "dir" && e.path === "local");
+    assert.ok(dir, "empty local/ directory must survive writer -> extractor");
+  });
+});
+
+describe("extractTarStreamToPhp", () => {
+  it("creates an empty directory on the filesystem via mkdirTree", async () => {
+    const tar = Buffer.from(
+      createUstarTar(
+        normalizeEntries({
+          "local/": enc(""),
+          "mod/quiz/version.php": enc("<?php"),
+        }),
+      ),
+    );
+    const mkdirs = [];
+    const writes = [];
+    const fakePhp = {
+      _php: {
+        mkdirTree: (d) => mkdirs.push(d),
+        writeFile: (p) => writes.push(p),
+      },
+    };
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(tar);
+        controller.close();
+      },
+    });
+    const stats = await extractTarStreamToPhp(stream, fakePhp, "/www/moodle");
+    // The empty plugin-type root is materialized even though it holds no file.
+    assert.ok(
+      mkdirs.includes("/www/moodle/local"),
+      `expected /www/moodle/local to be created; got ${JSON.stringify(mkdirs)}`,
+    );
+    assert.ok(writes.includes("/www/moodle/mod/quiz/version.php"));
+    assert.equal(stats.dirCount, 1);
+    assert.equal(stats.fileCount, 1);
   });
 });

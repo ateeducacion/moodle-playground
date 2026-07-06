@@ -423,6 +423,7 @@ so that future contributors (human or AI) understand **why** a choice was made �
 | [0017](docs/decisions/0017-tracker-scenario-blueprints.md) | Explicit Moodle Playground scenario blocks in tracker issues (+ starter preset) | Accepted |
 | [0018](docs/decisions/0018-core-bundle-solid-compression-experiment.md) | Solid compression for core bundles (tar.zst) — experiment that led to adoption | Accepted |
 | [0019](docs/decisions/0019-streaming-tar-zstd-core-bundle-extraction.md) | Streaming (bounded-memory) extraction for tar.zst core bundles — now the sole format | Accepted |
+| [0020](docs/decisions/0020-preserve-empty-directories-in-tar-bundle.md) | Preserve empty plugin-type-root directories in the tar.zst bundle (fixes "Plugin type location does not exist!") | Accepted |
 
 ## Debugging
 
