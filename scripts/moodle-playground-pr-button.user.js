@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Open in Moodle Playground
 // @namespace    https://github.com/ateeducacion/moodle-playground
-// @version      0.3
+// @version      0.4
 // @description  Add an "Open in Moodle Playground" button on Moodle core GitHub pull requests (and Moodle tracker issues that link a PR) to preview the PR with a runtime file overlay. On tracker issues it also detects an explicit "Moodle Playground Scenario" blueprint block in the description (or offers a starter scenario) so the instance boots preconfigured for reproducing the issue. Inspired by Sara Arjona's "Open in Gitpod" tracker userscript.
 // @author       ateeducacion
 // @match        https://github.com/*/pull/*
@@ -33,8 +33,6 @@
   const BUTTON_ID = "moodle-playground-preview-button";
   const SCENARIO_BUTTON_ID = "moodle-playground-scenario-button";
   const BUTTON_CLASS = "mpp-preview-button";
-  // Unique repo/base/head comparisons already decorated on the tracker.
-  const seenCompares = new Set();
 
   // Map a PR target branch (base.ref) to a Moodle Playground base version. Kept
   // identical to the action/runtime so the button picks the same base bundle.
@@ -433,6 +431,7 @@
   // Atlassian "smart links" wrapped in a hover-card trigger (and the link itself
   // has overflow:hidden). Insert the badge AFTER that wrapper so it is not
   // clipped and hovering it does not pop the GitHub hover-card preview.
+  // Returns the inserted button element so the caller can track its liveness.
   function trackerInsert(a, url) {
     let anchor =
       a.closest('[data-testid="hover-card-trigger-wrapper"]') ||
@@ -450,8 +449,22 @@
       }
       box = box.parentElement;
     }
-    anchor.insertAdjacentElement("afterend", makeButton(url, { block: true }));
+    const button = makeButton(url, { block: true });
+    anchor.insertAdjacentElement("afterend", button);
+    return button;
   }
+
+  // Track the badge actually inserted for each link/comparison, instead of a
+  // plain "already handled" boolean on the anchor's dataset. Atlassian's smart
+  // links re-render asynchronously (e.g. once link-preview metadata resolves)
+  // and can replace a wrapper's children wholesale, removing our badge while
+  // leaving the original anchor node in place with its dataset intact — a
+  // stale boolean would then permanently skip reinjection. Checking
+  // `button.isConnected` on every pass makes injection self-healing: a badge
+  // that Jira (or anything else) removed from the DOM gets reinserted on the
+  // next tick, regardless of why it went missing.
+  const prButtons = new WeakMap(); // anchor element -> its badge element
+  const compareButtons = new Map(); // "owner/repo|base|head" -> its badge element
 
   function injectTracker() {
     // GitHub PR links (rare for core, but supported).
@@ -468,10 +481,9 @@
       if (!m) continue;
       const [, owner, repo, pr] = m;
       if (repo.toLowerCase() !== "moodle") continue;
-      if (a.dataset.mppButton) continue; // already decorated this link
-      a.dataset.mppButton = "1";
+      if (prButtons.get(a)?.isConnected) continue; // badge already live
       const url = buildPlaygroundUrl(`${owner}/${repo}`, pr, null);
-      trackerInsert(a, url);
+      prButtons.set(a, trackerInsert(a, url));
     }
 
     // GitHub compare links — the actual Moodle peer-review format. The tracker's
@@ -499,19 +511,16 @@
       }
       if (!parsed) continue;
       if (parsed.repo.toLowerCase() !== "moodle") continue;
-      if (a.dataset.mppButton) continue;
-      a.dataset.mppButton = "1";
       // The same comparison is often rendered in several tracker fields; show
-      // only one button per unique repo/base/head.
+      // only one live button per unique repo/base/head.
       const key = `${parsed.owner}/${parsed.repo}|${parsed.base}|${parsed.head}`;
-      if (seenCompares.has(key)) continue;
-      seenCompares.add(key);
+      if (compareButtons.get(key)?.isConnected) continue;
       const url = buildCompareUrl(
         `${parsed.owner}/${parsed.repo}`,
         parsed.base,
         parsed.head,
       );
-      trackerInsert(a, url);
+      compareButtons.set(key, trackerInsert(a, url));
     }
   }
 

@@ -209,6 +209,51 @@ ${JSON.stringify(VALID_SCENARIO)}
     ).toEqual(VALID_SCENARIO);
   });
 
+  test("reinserts a compare badge Jira removed while keeping the link (issue #168)", async ({
+    page,
+  }) => {
+    const extraHtml = `
+      <div data-testid="hover-card-trigger-wrapper">
+        <a href="https://github.com/someone/moodle/compare/abc123...MDL-77777-501">
+          https://github.com/someone/moodle/compare/abc123...MDL-77777-501
+        </a>
+      </div>`;
+    await openIssue(
+      page,
+      issuePage({ description: "<p>No scenario here.</p>", extraHtml }),
+    );
+
+    const compareBadge = page.locator(COMPARE_BADGE);
+    await expect(compareBadge).toHaveCount(1);
+
+    // Atlassian's smart-link wrapper can re-render asynchronously (e.g. once
+    // link-preview metadata resolves) and wipe sibling nodes it does not own,
+    // while leaving the original <a> node in place with its dataset intact —
+    // the reported symptom of issue #168 (button visible, then gone). A stale
+    // "already handled" marker on that surviving anchor must not permanently
+    // block reinjection.
+    await page.evaluate((sel) => {
+      document.querySelector(sel)?.remove();
+    }, COMPARE_BADGE);
+    await expect(compareBadge).toHaveCount(0);
+
+    // The next injection pass must notice the badge is gone and redraw it.
+    await expect(compareBadge).toHaveCount(1, { timeout: 5000 });
+    const compare = decodeBlueprintParam(
+      await compareBadge.getAttribute("href"),
+    );
+    const overlay = compare.steps.find((s) => s.step === "applyPrOverlay");
+    expect(overlay).toMatchObject({
+      repo: "someone/moodle",
+      base: "abc123",
+      head: "MDL-77777-501",
+    });
+
+    // And it never grows a second, duplicate badge for the same comparison.
+    await page.waitForTimeout(2500);
+    await expect(compareBadge).toHaveCount(1);
+  });
+
   test("falls back to page text when the description container is missing", async ({
     page,
   }) => {
