@@ -12,7 +12,7 @@ const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 const bytes = (s) => new Uint8Array(Buffer.from(s));
 
 describe("tar-ustar normalizeEntries", () => {
-  it("drops directory members, sanitizes, and sorts byte-wise", () => {
+  it("preserves empty directory members, sanitizes, and sorts byte-wise", () => {
     const map = {
       "b/second.txt": bytes("2"),
       "a/first.txt": bytes("1"),
@@ -20,10 +20,14 @@ describe("tar-ustar normalizeEntries", () => {
       "z.txt": bytes("z"),
     };
     const entries = normalizeEntries(map);
+    // `dir/` has no file descendant, so it is kept as an explicit directory
+    // member (see the empty-directory-preservation block below); `a/` and `b/`
+    // are implied by their files and are NOT emitted as redundant members.
     assert.deepEqual(
       entries.map((e) => e.name),
-      ["a/first.txt", "b/second.txt", "z.txt"],
+      ["a/first.txt", "b/second.txt", "dir", "z.txt"],
     );
+    assert.equal(entries.find((e) => e.name === "dir").type, "dir");
   });
 
   it("rejects path-traversal entries", () => {
@@ -106,5 +110,111 @@ describe("tar-ustar createUstarTar", () => {
     const deep = back.find((e) => e.name === longName);
     assert.ok(deep, "unsplittable path should round-trip via GNU longlink");
     assert.ok(Buffer.from(deep.data).equals(Buffer.from(bytes("gnu"))));
+  });
+});
+
+describe("tar-ustar empty directory preservation", () => {
+  // Regression (issue: "Plugin type location does not exist!"): the docs trim in
+  // scripts/build-moodle-bundle.sh empties Moodle's plugin-type roots — `local/`
+  // ships only readme.txt + upgrade.txt, both matched by `*/readme*` and
+  // `*/upgrade.txt`. The trimmed core ZIP still carries an explicit `local/`
+  // directory member, but the files-only tar writer used to drop it, so
+  // `<dirroot>/local` never existed at runtime and installing ANY `local` plugin
+  // (e.g. local_accessibility) failed Moodle's validate_target_location().
+
+  it("preserves an explicit empty directory (no file descendant)", () => {
+    const entries = normalizeEntries({
+      "local/": bytes(""),
+      "mod/quiz/version.php": bytes("<?php"),
+    });
+    const dir = entries.find((e) => e.name === "local");
+    assert.ok(dir, "empty local/ directory must be preserved");
+    assert.equal(dir.type, "dir");
+    // Directories implied by a file are NOT emitted as redundant members —
+    // the streaming extractor reconstructs them from each file's parent path.
+    assert.ok(!entries.some((e) => e.type === "dir" && e.name === "mod"));
+    assert.ok(!entries.some((e) => e.type === "dir" && e.name === "mod/quiz"));
+  });
+
+  it("emits a USTAR directory header (typeflag 5, size 0) that round-trips", () => {
+    const tar = createUstarTar(
+      normalizeEntries({ "local/": bytes(""), "a.txt": bytes("a") }),
+      { mtime: 0 },
+    );
+    // Locate the directory header in the raw bytes: typeflag byte at offset 156.
+    const back = readUstarTar(tar);
+    const dir = back.find((e) => e.name === "local");
+    assert.ok(dir, "directory entry should round-trip via the reader");
+    assert.equal(dir.type, "dir");
+    assert.equal(dir.data, undefined);
+    // Files still round-trip alongside directories.
+    const file = back.find((e) => e.name === "a.txt");
+    assert.ok(file && Buffer.from(file.data).equals(Buffer.from(bytes("a"))));
+  });
+
+  it("does not count directories as files", () => {
+    const entries = normalizeEntries({
+      "local/": bytes(""),
+      "a.txt": bytes("a"),
+      "b.txt": bytes("b"),
+    });
+    assert.equal(entries.filter((e) => e.type !== "dir").length, 2);
+    assert.equal(entries.filter((e) => e.type === "dir").length, 1);
+  });
+
+  it("drops populated directory members that a file recreates (real fflate shape)", () => {
+    // fflate's unzipSync() yields an EXPLICIT trailing-slash member for EVERY
+    // directory in the ZIP, including populated ones — this is the real input
+    // shape build-tar-zst-from-zip.mjs feeds normalizeEntries(). Only the truly
+    // empty `local/` must survive; `mod/`, `mod/quiz/`, `lib/` are recreated by
+    // their files and MUST be dropped (invariant: no redundant directory
+    // members, else the tar gains thousands of typeflag-5 entries and dirCount
+    // and the sha256 drift). Guards the impliedDirs dedup, which is otherwise
+    // never exercised by the empty-only maps in the tests above.
+    const entries = normalizeEntries({
+      "mod/": bytes(""),
+      "mod/quiz/": bytes(""),
+      "mod/quiz/version.php": bytes("<?php"),
+      "lib/": bytes(""),
+      "lib/setup.php": bytes("<?php"),
+      "local/": bytes(""),
+    });
+    const dirs = entries.filter((e) => e.type === "dir").map((e) => e.name);
+    assert.deepEqual(dirs, ["local"]);
+  });
+
+  it("preserves a nested empty directory but not those implied by files", () => {
+    // Mirrors a plugin subtype root: widgets/ is empty; lang/en holds a file.
+    const entries = normalizeEntries({
+      "local/accessibility/version.php": bytes("<?php"),
+      "local/accessibility/lang/en/local_accessibility.php": bytes("<?php"),
+      "local/accessibility/widgets/": bytes(""),
+    });
+    const dirs = entries.filter((e) => e.type === "dir").map((e) => e.name);
+    assert.deepEqual(dirs, ["local/accessibility/widgets"]);
+  });
+
+  it("skips unsafe directory paths (path traversal)", () => {
+    const entries = normalizeEntries({
+      "../evil/": bytes(""),
+      "local/accessibility/../../evil/": bytes(""),
+      "ok/": bytes(""),
+    });
+    const dirs = entries.filter((e) => e.type === "dir").map((e) => e.name);
+    assert.deepEqual(dirs, ["ok"]);
+  });
+
+  it("is deterministic with directory entries (stable sha256 across two builds)", () => {
+    const map = {
+      "local/": bytes(""),
+      "admin/tool/": bytes(""),
+      "mod/quiz/version.php": bytes("<?php"),
+      "z.txt": bytes("z"),
+    };
+    const a = createUstarTar(normalizeEntries(map), { mtime: 0 });
+    const b = createUstarTar(normalizeEntries(map), { mtime: 0 });
+    assert.ok(Buffer.from(a).equals(Buffer.from(b)));
+    assert.equal(sha256(a), sha256(b));
+    assert.equal(a.length % 512, 0);
   });
 });
