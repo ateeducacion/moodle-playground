@@ -3,6 +3,11 @@
 ## Status
 
 Accepted (2026-07-05). Continues (and supersedes the "keep experimental" verdict of) ADR 0018.
+**Amended by [ADR 0020](0020-preserve-empty-directories-in-tar-bundle.md)** (2026-07-06): the
+"files-only (no directory members)" policy below is relaxed — the writer now also emits directory
+entries for the few directories that ship empty after the build trim (e.g. `local/`), so Moodle's
+empty plugin-type roots survive. `bundle.fileCount` stays files-only, so the parity tripwire is
+unchanged.
 
 **`tar.zst` streaming is now the sole core-bundle format.** The ZIP core path and its PHP
 `ZipArchive` extractor were removed: there is **no `?bundle-format=` flag, no `bundleAlternatives`

@@ -9,6 +9,16 @@
 # never builds or tags anything, since adding real support for a new branch
 # requires manual work (patches, install snapshot, SQLite compatibility —
 # see the moodle-internals and blueprint-provisioning skills).
+#
+# "New" means numerically newer than the highest branch we already track
+# (moodle/moodle's branch numbers, e.g. 404, 405, 500, increase monotonically,
+# so a plain integer comparison is enough). Comparing against plain list
+# membership instead of this threshold flags every EOL branch moodle/moodle
+# has ever cut (MOODLE_13_STABLE .. MOODLE_403_STABLE at time of writing) as
+# "new" on every run — that bug flooded the tracker with 33 duplicate issues
+# on two separate days (#181-213, #216-248) before it was fixed here. At most
+# one consolidated issue is opened per run, listing every new branch found,
+# instead of one issue per branch.
 name: Check for new Moodle stable branch
 
 on:
@@ -60,9 +70,21 @@ jobs:
           UPSTREAM=$(gh api repos/moodle/moodle/branches --paginate --jq '.[].name' \
             | grep -E '^MOODLE_[0-9]+_STABLE$' || true)
 
+          # Highest branch number we already track (ignore `main`, which has
+          # no numeric suffix).
+          MAX_TRACKED=0
+          while IFS= read -r branch; do
+            num=$(echo "$branch" | grep -oE '^MOODLE_([0-9]+)_STABLE$' | grep -oE '[0-9]+' || true)
+            if [ -n "$num" ] && [ "$num" -gt "$MAX_TRACKED" ]; then
+              MAX_TRACKED=$num
+            fi
+          done <<< "$TRACKED"
+          echo "Highest tracked branch number: $MAX_TRACKED"
+
           NEW_BRANCHES=""
           for branch in $UPSTREAM; do
-            if ! grep -qxF "$branch" <<< "$TRACKED"; then
+            num=$(echo "$branch" | grep -oE '[0-9]+')
+            if [ "$num" -gt "$MAX_TRACKED" ]; then
               NEW_BRANCHES="$NEW_BRANCHES $branch"
             fi
           done
@@ -75,36 +97,40 @@ jobs:
           fi
           echo "new_branches=$NEW_BRANCHES" >> "$GITHUB_OUTPUT"
 
-      - name: Open an issue for each new branch
+      - name: Open an issue for new branches
         if: steps.diff.outputs.new_branches != ''
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_BRANCHES: ${{ steps.diff.outputs.new_branches }}
         run: |
+          title="New Moodle stable branch(es) detected"
+
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json title \
+            --jq ".[] | select(.title == \"$title\") | .title")
+          if [ -n "$existing" ]; then
+            echo "A notification issue is already open, skipping."
+            exit 0
+          fi
+
+          body_lines=(
+            "Moodle has new stable branch(es) upstream that are not yet tracked in this repo:"
+            ""
+          )
           for branch in $NEW_BRANCHES; do
-            title="New Moodle stable branch detected: $branch"
-
-            existing=$(gh issue list --state open --search "$title in:title" --json title \
-              --jq ".[] | select(.title == \"$title\") | .title")
-            if [ -n "$existing" ]; then
-              echo "Issue already open for $branch, skipping."
-              continue
-            fi
-
-            body_lines=(
-              "Moodle has a new stable branch upstream: [\`$branch\`](https://github.com/moodle/moodle/tree/$branch)."
-              ""
-              "It is not yet tracked in this repo. To add support:"
-              ""
-              "- Add an entry for it to \`MOODLE_BRANCHES\` in \`src/shared/version-resolver.js\`."
-              "- Add a \`bundle-$branch\` target to \`Makefile\` (and include it in \`bundle-all\`)."
-              "- Generate patches and an install snapshot for it, following the \`moodle-internals\`"
-              "  and \`blueprint-provisioning\` skills."
-              ""
-              "This issue was opened automatically by \`check-new-moodle-branch.yml\`. It does not"
-              "build or tag anything — adding real support needs manual verification."
-            )
-            body=$(printf '%s\n' "${body_lines[@]}")
-
-            gh issue create --title "$title" --body "$body"
+            body_lines+=("- [\`$branch\`](https://github.com/moodle/moodle/tree/$branch)")
           done
+          body_lines+=(
+            ""
+            "To add support for each:"
+            ""
+            "- Add an entry to \`MOODLE_BRANCHES\` in \`src/shared/version-resolver.js\`."
+            "- Add a \`bundle-<branch>\` target to \`Makefile\` (and include it in \`bundle-all\`)."
+            "- Generate patches and an install snapshot for it, following the \`moodle-internals\`"
+            "  and \`blueprint-provisioning\` skills."
+            ""
+            "This issue was opened automatically by \`check-new-moodle-branch.yml\`. It does not"
+            "build or tag anything — adding real support needs manual verification."
+          )
+          body=$(printf '%s\n' "${body_lines[@]}")
+
+          gh issue create --title "$title" --body "$body"
