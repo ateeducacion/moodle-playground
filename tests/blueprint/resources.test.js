@@ -100,4 +100,84 @@ describe("ResourceRegistry", () => {
       /Malformed data: URL/,
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // URL resources: retry transient failures (issue #249)
+  // ---------------------------------------------------------------------------
+
+  function okResponse(text) {
+    return {
+      ok: true,
+      status: 200,
+      async arrayBuffer() {
+        return new TextEncoder().encode(text).buffer;
+      },
+    };
+  }
+  function errResponse(status) {
+    return {
+      ok: false,
+      status,
+      async arrayBuffer() {
+        return new ArrayBuffer(0);
+      },
+    };
+  }
+
+  it("retries a transient network error and then succeeds", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls++;
+      if (calls === 1) throw new Error("connection reset");
+      return okResponse("recovered");
+    };
+    const registry = new ResourceRegistry(
+      { r: { url: "https://h/x" } },
+      { fetchImpl, retryDelayMs: 0 },
+    );
+    assert.strictEqual(await registry.resolveText("@r"), "recovered");
+    assert.strictEqual(calls, 2);
+  });
+
+  it("retries a transient 503 and then succeeds", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls++;
+      return calls < 3 ? errResponse(503) : okResponse("ok");
+    };
+    const registry = new ResourceRegistry(
+      { r: { url: "https://h/x" } },
+      { fetchImpl, retryDelayMs: 0 },
+    );
+    assert.strictEqual(await registry.resolveText("@r"), "ok");
+    assert.strictEqual(calls, 3);
+  });
+
+  it("gives up after the retry budget on a persistent failure", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls++;
+      throw new Error("down");
+    };
+    const registry = new ResourceRegistry(
+      { r: { url: "https://h/x" } },
+      { fetchImpl, retryAttempts: 3, retryDelayMs: 0 },
+    );
+    await assert.rejects(() => registry.resolve("@r"));
+    assert.strictEqual(calls, 3);
+  });
+
+  it("does not retry a permanent 404", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls++;
+      return errResponse(404);
+    };
+    const registry = new ResourceRegistry(
+      { r: { url: "https://h/x" } },
+      { fetchImpl, retryAttempts: 3, retryDelayMs: 0 },
+    );
+    await assert.rejects(() => registry.resolve("@r"), /404/);
+    assert.strictEqual(calls, 1);
+  });
 });

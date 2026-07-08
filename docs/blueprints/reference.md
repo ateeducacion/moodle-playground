@@ -117,9 +117,11 @@ from a step with the string `"@name"`, or inline the descriptor directly.
 
 !!! note "Legend"
     **(HTTP)** runs over an HTTP request (for session cookies); all other PHP
-    steps run via CLI. **(marker)** does no work itself. **(non-fatal)** reports
-    a failure but does not abort the rest of the blueprint. Unmarked steps abort
-    the blueprint on error. Batch steps take an array under the named field.
+    steps run via CLI. **(marker)** does no work itself. Step failures are
+    **non-fatal by default**: a failing step is reported and the rest of the
+    blueprint still runs (the steps tagged **(non-fatal)** below also handle
+    PHP-level errors gracefully). Add `"critical": true` to a step to abort the
+    blueprint on its failure. Batch steps take an array under the named field.
 
 ### Install and auth
 
@@ -416,9 +418,16 @@ defaults to `main`. See [PR previews](../github/pr-previews.md).
 - Steps run **sequentially** in array order.
 - Most steps run PHP in `CLI_SCRIPT` mode. `login`, `request`, and
   `runPhpScript` run over HTTP; `installMoodle` and `setLandingPage` are markers.
-- By default a failing step **stops** the blueprint and reports the error.
-- **Non-fatal steps** report the failure and continue: `restoreCourse` and
-  `installLanguagePack`. For `applyPrOverlay`, an unreachable or oversized
+- Step failures are **non-fatal by default** (ADR-0005 / ADR-0023): a failing
+  step is reported (progress log + `[blueprint-perf]` `status: "failed"`) and
+  execution continues, so one transient error (e.g. a resource download) does
+  not discard the whole playground. Add `"critical": true` to a step to abort
+  the blueprint on its failure.
+- URL resources are fetched with **retry on transient failure** (network errors
+  and HTTP 5xx/429, with backoff); permanent errors (4xx, over the 50 MB cap)
+  fail fast.
+- **Non-fatal steps** also handle PHP-level failures gracefully: `restoreCourse`
+  and `installLanguagePack`. For `applyPrOverlay`, an unreachable or oversized
   individual file is skipped, and the cache-purge and upgrade phases are
   best-effort — but manifest resolution and the `maxFiles` cap still abort.
 - The `createRole` / `createScale` / `createCohort` / `importRoles` generators
