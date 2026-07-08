@@ -213,4 +213,68 @@ describe("executeBlueprint", () => {
     assert.strictEqual(result.timings[0].label, "make a student");
     assert.strictEqual(result.timings[0].status, "success");
   });
+
+  // ---------------------------------------------------------------------------
+  // Resilient execution: non-fatal by default, `critical` opt-in (ADR-0005)
+  // ---------------------------------------------------------------------------
+
+  it("continues after a non-critical step failure and runs later steps", async () => {
+    const php = createMockPhp();
+    const result = await executeBlueprint(
+      {
+        steps: [
+          { step: "installMoodle" },
+          { step: "createUser" }, // missing username -> throws (non-critical)
+          { step: "setLandingPage", path: "/after/" },
+        ],
+      },
+      { php, publish: () => {} },
+    );
+
+    // The blueprint reports the failure but did NOT abort: the later step ran.
+    assert.strictEqual(result.success, false);
+    assert.ok(result.failedStep.includes("createUser"));
+    assert.strictEqual(result.landingPage, "/after/");
+    assert.strictEqual(result.timings.length, 3);
+    assert.strictEqual(result.timings[1].status, "failed");
+    assert.strictEqual(result.timings[2].status, "success");
+  });
+
+  it("halts on a step marked critical", async () => {
+    const php = createMockPhp();
+    const result = await executeBlueprint(
+      {
+        steps: [
+          { step: "installMoodle" },
+          { step: "createUser", critical: true }, // throws + critical -> halt
+          { step: "setLandingPage", path: "/after/" },
+        ],
+      },
+      { php, publish: () => {} },
+    );
+
+    assert.strictEqual(result.success, false);
+    assert.ok(result.failedStep.includes("createUser"));
+    // The later step did NOT run.
+    assert.strictEqual(result.landingPage, null);
+    assert.strictEqual(result.timings.length, 2);
+  });
+
+  it("continues past an unknown step type (non-fatal) and runs later steps", async () => {
+    const php = createMockPhp();
+    const result = await executeBlueprint(
+      {
+        steps: [
+          { step: "nonExistentStep" },
+          { step: "setLandingPage", path: "/after/" },
+        ],
+      },
+      { php, publish: () => {} },
+    );
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error.includes("Unknown step type"));
+    assert.strictEqual(result.landingPage, "/after/");
+    assert.strictEqual(result.timings.length, 2);
+    assert.strictEqual(result.timings[0].status, "failed");
+  });
 });

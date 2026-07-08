@@ -426,6 +426,7 @@ so that future contributors (human or AI) understand **why** a choice was made â
 | [0020](docs/decisions/0020-preserve-empty-directories-in-tar-bundle.md) | Preserve empty plugin-type-root directories in the tar.zst bundle (fixes "Plugin type location does not exist!") | Accepted |
 | [0021](docs/decisions/0021-blueprint-per-step-timing-diagnostics.md) | Blueprint per-step timing instrumentation + `[blueprint-perf]` diagnostics channel | Accepted |
 | [0022](docs/decisions/0022-browser-side-course-backup-download.md) | Browser-side course backup (.mbz) download with progress (restore ~31s â†’ ~3s) | Accepted |
+| [0023](docs/decisions/0023-resilient-resource-fetch-and-non-fatal-steps.md) | Resilient resource fetching (retry) + non-fatal-by-default steps (`critical` opt-in) | Accepted |
 
 ## Debugging
 

@@ -51,6 +51,10 @@ export async function executeBlueprint(blueprint, context) {
   const t0 = now();
   /** @type {import("./timing.js").StepTiming[]} */
   const timings = [];
+  // First failure encountered (reported back), while execution keeps going —
+  // step failures are non-fatal by default (ADR-0005). A step with
+  // `critical: true` aborts the remaining blueprint on failure.
+  let firstFailure = null;
   const recordTiming = (index, stepName, label, startMs, status) => {
     const endMs = Math.round(now() - t0);
     timings.push({
@@ -77,13 +81,15 @@ export async function executeBlueprint(blueprint, context) {
     const handler = getStepHandler(stepName);
     if (!handler) {
       recordTiming(i + 1, stepName, label, startMs, "failed");
-      return {
-        success: false,
-        landingPage,
-        failedStep: `${i + 1}:${stepName}`,
-        error: `Unknown step type: ${stepName}`,
-        timings,
-      };
+      const error = `Unknown step type: ${stepName}`;
+      publish(`Blueprint step ${stepName} skipped: ${error}`, progress);
+      if (!firstFailure) {
+        firstFailure = { failedStep: `${i + 1}:${stepName}`, error };
+      }
+      if (step.critical) {
+        return { success: false, landingPage, ...firstFailure, timings };
+      }
+      continue;
     }
 
     try {
@@ -107,19 +113,22 @@ export async function executeBlueprint(blueprint, context) {
       recordTiming(i + 1, stepName, label, startMs, "failed");
       const message = error?.message || String(error);
       publish(`Blueprint step ${stepName} failed: ${message}`, progress);
-      return {
-        success: false,
-        landingPage,
-        failedStep: `${i + 1}:${stepName}`,
-        error: message,
-        timings,
-      };
+      if (!firstFailure) {
+        firstFailure = { failedStep: `${i + 1}:${stepName}`, error: message };
+      }
+      // Non-fatal by default (ADR-0005): keep provisioning the remaining steps
+      // so one transient failure (e.g. a resource download) does not discard
+      // the whole playground. `critical: true` opts a step into aborting.
+      if (step.critical) {
+        return { success: false, landingPage, ...firstFailure, timings };
+      }
     }
   }
 
   return {
-    success: true,
+    success: !firstFailure,
     landingPage,
+    ...(firstFailure || {}),
     timings,
   };
 }
