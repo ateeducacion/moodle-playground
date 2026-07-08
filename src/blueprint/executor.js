@@ -1,6 +1,7 @@
 import { substituteConstants } from "./constants.js";
 import { ResourceRegistry } from "./resources.js";
 import { getStepHandler } from "./steps/index.js";
+import { defaultNow, deriveStepStatus, sanitizeStepLabel } from "./timing.js";
 
 const PROGRESS_START = 0.92;
 const PROGRESS_END = 0.95;
@@ -16,14 +17,16 @@ const PROGRESS_END = 0.95;
  * @param {string} context.webRoot
  * @param {string} context.scopeId
  * @param {string} context.runtimeId
- * @returns {Promise<{success: boolean, landingPage?: string, failedStep?: string, error?: string}>}
+ * @param {Function} [context.now] - Monotonic clock override (ms), for testing.
+ * @returns {Promise<{success: boolean, landingPage?: string, failedStep?: string, error?: string, timings?: import("./timing.js").StepTiming[]}>}
  */
 export async function executeBlueprint(blueprint, context) {
   if (!blueprint?.steps?.length) {
-    return { success: true };
+    return { success: true, timings: [] };
   }
 
   const { publish = () => {} } = context;
+  const now = typeof context.now === "function" ? context.now : defaultNow;
 
   // Substitute constants into the entire blueprint
   const constants = blueprint.constants || {};
@@ -43,9 +46,29 @@ export async function executeBlueprint(blueprint, context) {
 
   let landingPage = resolvedBlueprint.landingPage || null;
 
+  // Per-step timing instrumentation (issue #249). Only the sanitized label —
+  // never the step payload — is recorded, so timings are safe to log.
+  const t0 = now();
+  /** @type {import("./timing.js").StepTiming[]} */
+  const timings = [];
+  const recordTiming = (index, stepName, label, startMs, status) => {
+    const endMs = Math.round(now() - t0);
+    timings.push({
+      index,
+      step: stepName,
+      label,
+      startMs,
+      endMs,
+      durationMs: endMs - startMs,
+      status,
+    });
+  };
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const stepName = step.step;
+    const label = sanitizeStepLabel(step);
+    const startMs = Math.round(now() - t0);
     const progress =
       PROGRESS_START + (i / steps.length) * (PROGRESS_END - PROGRESS_START);
 
@@ -53,11 +76,13 @@ export async function executeBlueprint(blueprint, context) {
 
     const handler = getStepHandler(stepName);
     if (!handler) {
+      recordTiming(i + 1, stepName, label, startMs, "failed");
       return {
         success: false,
         landingPage,
         failedStep: `${i + 1}:${stepName}`,
         error: `Unknown step type: ${stepName}`,
+        timings,
       };
     }
 
@@ -71,7 +96,15 @@ export async function executeBlueprint(blueprint, context) {
       if (result?.landingPage) {
         landingPage = result.landingPage;
       }
+      recordTiming(
+        i + 1,
+        stepName,
+        label,
+        startMs,
+        deriveStepStatus({ result }),
+      );
     } catch (error) {
+      recordTiming(i + 1, stepName, label, startMs, "failed");
       const message = error?.message || String(error);
       publish(`Blueprint step ${stepName} failed: ${message}`, progress);
       return {
@@ -79,6 +112,7 @@ export async function executeBlueprint(blueprint, context) {
         landingPage,
         failedStep: `${i + 1}:${stepName}`,
         error: message,
+        timings,
       };
     }
   }
@@ -86,5 +120,6 @@ export async function executeBlueprint(blueprint, context) {
   return {
     success: true,
     landingPage,
+    timings,
   };
 }
