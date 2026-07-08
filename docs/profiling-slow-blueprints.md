@@ -78,13 +78,18 @@ fed ZIP bytes. Rebuild the branch (`make bundle BRANCH=<branch>`) so the manifes
 
 Real Chromium measurements of the Adaptable demo blueprint (34 steps) put the cost here:
 
-1. **Course restore (`.mbz`)** — by far the largest single step (~64% of provisioning in the
-   measured run). A `restore_controller` run parses and imports the whole backup under WASM
-   SQLite. Keep backups lean; large ones also risk memory limits (see
-   [TROUBLESHOOTING](TROUBLESHOOTING.md)).
-2. **Plugin/theme ZIP installs** (~18% combined) — download + unzip + `upgrade_noncore()`.
-   A full-repo `archive/refs/heads/main.zip` (e.g. `mod_exelearning`) is the slowest; prefer a
-   pinned release ZIP.
+1. **Course restore (`.mbz`)** — originally ~64% of provisioning in the measured run, but
+   sub-timing showed ~97% of that was the *download of the backup inside PHP*
+   (`download_file_content` over the `tcpOverFetch` bridge), not Moodle's restore (~1s). Since
+   [ADR-0022](decisions/0022-browser-side-course-backup-download.md) the `.mbz` is downloaded
+   **browser-side** (native streaming fetch, with a progress bar), so `restoreCourse` now runs
+   in ~1–3s for a CORS-accessible backup. Non-CORS or > 50 MB backups fall back to the slower
+   in-PHP download. Backup size still matters (download + import both scale with it), and very
+   large backups can hit WASM SQLite memory limits (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
+2. **Plugin/theme ZIP installs** — download + unzip + `upgrade_noncore()`. With the restore
+   download fixed, these are typically the largest remaining steps. A full-repo
+   `archive/refs/heads/main.zip` (e.g. `mod_exelearning`) is the slowest; prefer a pinned
+   release ZIP.
 3. Everything else — role imports, module adds, config writes, the front-page `runPhpCode`
    fixups — is comparatively cheap (sub-second each).
 
@@ -92,10 +97,17 @@ Notably, the repeated `purge_all_caches()` calls inside custom `runPhpCode` step
 a dominant cost in the measured run (tens to low-hundreds of ms each), and an explicit
 `installLanguagePack` for a locale already installed at boot is a near-no-op.
 
+Tip: `restoreCourse` also emits a `[restore-perf] {json} [/restore-perf]` line with the
+per-phase breakdown (`download` / `extract` / `precheck` / `execute` / `finalize`), so you can
+see whether a slow restore is the download or Moodle's import.
+
 ## Recommendations for blueprint authors
 
-* Keep `.mbz` course backups small; they are usually the biggest cost.
-* Prefer pinned release ZIPs over moving `main` archives (reproducible, cacheable, smaller).
+* Keep `.mbz` course backups reasonably small and served from a CORS-accessible host (e.g.
+  `raw.githubusercontent.com`) so the fast browser-side download applies. Non-CORS or > 50 MB
+  backups fall back to the slower in-PHP download.
+* Prefer pinned release ZIPs over moving `main` archives (reproducible, cacheable, smaller) —
+  plugin ZIP installs are the largest remaining steps once the restore download is fast.
 * Put `debug=DEVELOPER` (32767) as the *last* step, or omit it and use `?debug=true` ad hoc —
   enabling it early makes every later step (including the restore) run in Moodle's most
   expensive diagnostic mode.
