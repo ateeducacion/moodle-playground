@@ -560,8 +560,13 @@ export function phpRestoreCourse({
   fullname = null,
   shortname = null,
   visible = true,
+  cleanupSource = false,
 } = {}) {
   const visibleInt = visible === false ? 0 : 1;
+  // Delete the source .mbz after a successful restore only when it is a
+  // throwaway temp we created (browser-side download); never for a
+  // user-supplied `path`.
+  const cleanupBlock = cleanupSource ? "@unlink($mbz);\n" : "";
 
   const sourceBlock = downloadUrl
     ? `$mbz = make_request_directory() . '/source.mbz';
@@ -615,7 +620,19 @@ $admin = get_admin();
 if (!$admin) { fail('Administrator account not found.'); }
 $USER = $admin;
 
+// Phase sub-timing (issue #249): record wall-clock ms per restore phase so the
+// slowest part (download vs extract vs execute_plan vs cache rebuild) is
+// observable. Emitted in the JSON result; carries no payload/secrets.
+$__phase = [];
+$__t = microtime(true);
+$__mark = function ($name) use (&$__phase, &$__t) {
+    $now = microtime(true);
+    $__phase[$name] = (int) round(($now - $__t) * 1000);
+    $__t = $now;
+};
+
 ${sourceBlock}
+$__mark('download');
 
 ${categoryBlock}
 
@@ -638,6 +655,7 @@ if ($backuptype !== backup::TYPE_1COURSE) {
     fulldelete($path);
     fail('The supplied .mbz is not a single-course backup.');
 }
+$__mark('extract');
 
 // Create the destination course shell with a guaranteed-unique shortname, then
 // restore the backup into it.
@@ -652,8 +670,10 @@ $courseid = restore_dbops::create_new_course($newfullname, $newshortname, $categ
 $rc = new restore_controller($backupdir, $courseid, backup::INTERACTIVE_NO, backup::MODE_GENERAL, $admin->id, backup::TARGET_NEW_COURSE);
 try {
     $rc->execute_precheck();
+    $__mark('precheck');
     $rc->execute_plan();
     $rc->destroy();
+    $__mark('execute');
 } catch (\\Throwable $e) {
     $rc->destroy();
     fulldelete($path);
@@ -673,8 +693,9 @@ $course->visible = ${visibleInt};
 update_course($course);
 rebuild_course_cache($courseid, true);
 fulldelete($path);
-purge_all_caches();
-echo json_encode(['ok' => true, 'courseid' => $courseid, 'shortname' => $course->shortname, 'fullname' => $course->fullname]);
+${cleanupBlock}purge_all_caches();
+$__mark('finalize');
+echo json_encode(['ok' => true, 'courseid' => $courseid, 'shortname' => $course->shortname, 'fullname' => $course->fullname, 'timings' => $__phase]);
 `;
 }
 
