@@ -425,6 +425,7 @@ so that future contributors (human or AI) understand **why** a choice was made �
 | [0019](docs/decisions/0019-streaming-tar-zstd-core-bundle-extraction.md) | Streaming (bounded-memory) extraction for tar.zst core bundles — now the sole format | Accepted |
 | [0020](docs/decisions/0020-preserve-empty-directories-in-tar-bundle.md) | Preserve empty plugin-type-root directories in the tar.zst bundle (fixes "Plugin type location does not exist!") | Accepted |
 | [0021](docs/decisions/0021-blueprint-per-step-timing-diagnostics.md) | Blueprint per-step timing instrumentation + `[blueprint-perf]` diagnostics channel | Accepted |
+| [0022](docs/decisions/0022-browser-side-course-backup-download.md) | Browser-side course backup (.mbz) download with progress (restore ~31s → ~3s) | Accepted |
 
 ## Debugging
 
