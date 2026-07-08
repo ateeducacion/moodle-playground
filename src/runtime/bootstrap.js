@@ -3097,6 +3097,26 @@ export async function bootstrapMoodle({
           0.95,
         );
       }
+      // Surface per-step timing diagnostics (issue #249). A single machine-
+      // readable line survives the shell's log prune and lets Playwright /
+      // humans identify the slowest steps. Never breaks boot on failure.
+      if (result.timings?.length) {
+        try {
+          const { formatBlueprintTimings } = await import(
+            "../blueprint/timing.js"
+          );
+          const { perfLine, summaryLine } = formatBlueprintTimings(
+            result.timings,
+          );
+          publish(summaryLine, 0.95);
+          publish(perfLine, 0.95);
+        } catch (timingError) {
+          publish(
+            `Blueprint timing diagnostics unavailable: ${timingError.message}`,
+            0.95,
+          );
+        }
+      }
     } catch (blueprintError) {
       publish(`Blueprint execution error: ${blueprintError.message}`, 0.95);
     }
