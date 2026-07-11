@@ -389,7 +389,12 @@ class sqlite3_pdo_moodle_database extends pdo_moodle_database {
             if ($columninfo['has_default'] && ($columninfo['meta_type'] == 'X' || $columninfo['meta_type'] == 'C')) {
                 $columninfo['default_value'] = substr($columninfo['default_value'], 1, -1);
             }
-            $structure[$columninfo['name']] = new database_column_info($columninfo);
+            // database_column_info::__construct() reads its fields via object property
+            // access ($data->$element), so it must be given an object like the other
+            // Moodle DML drivers (pgsql/mysqli) do. Passing the raw array leaves every
+            // property (including ->name) null, which silently breaks callers that read
+            // $column->name (e.g. theme_snap's deadlines query).
+            $structure[$columninfo['name']] = new database_column_info((object) $columninfo);
         }
 
         return $structure;
