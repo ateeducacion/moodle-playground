@@ -8,7 +8,7 @@
  *
  * Large/complex backups can fail (in-browser memory limits and SQLite-WASM
  * transaction limits); failures are reported gracefully and never abort the
- * blueprint. See docs/decisions/0007-course-restore-step.md.
+ * blueprint. See docs/architecture/adr/ADR-0007-course-restore-step.md.
  */
 
 import { phpRestoreCourse } from "../php/helpers.js";

@@ -8,7 +8,7 @@
  * The overlay applies the *final* contents of a pull request's changed files on
  * top of a prebuilt Moodle base in the browser filesystem (whole-file
  * replacement, never a unified diff). See
- * docs/decisions/0016-runtime-pr-file-overlay.md for the rationale.
+ * docs/architecture/adr/ADR-0016-runtime-pr-file-overlay.md for the rationale.
  */
 
 // Default safety caps. Both can be overridden per step via maxFiles /

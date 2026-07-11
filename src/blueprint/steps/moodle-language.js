@@ -5,7 +5,7 @@
  * (lib/componentlib.class.php) — the engine behind the admin Language packs UI.
  * The download goes to download.moodle.org/langpack, which the github-proxy
  * authorizes, and works in every browser (GET over tcpOverFetch, no streaming
- * request body). See docs/decisions/0006-moodle-langpack-proxy-allowance.md.
+ * request body). See docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md.
  */
 
 import { phpInstallLanguagePacks } from "../php/helpers.js";

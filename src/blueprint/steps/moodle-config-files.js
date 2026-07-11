@@ -27,7 +27,7 @@ function assertPhpOk(result, label) {
 }
 
 // Store a single file in Moodle's File API (system context) and point a config
-// value at it. See docs/decisions/0009-file-backed-config-settings-blueprint-steps.md.
+// value at it. See docs/architecture/adr/ADR-0009-file-backed-config-settings-blueprint-steps.md.
 async function handleSetConfigFile(step, { php, resources }) {
   if (!step.plugin) throw new Error("setConfigFile: 'plugin' is required.");
   if (!step.name) throw new Error("setConfigFile: 'name' is required.");

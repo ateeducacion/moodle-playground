@@ -2290,7 +2290,7 @@ async function runThemeCssWarmup(php, webRoot) {
 // browser — GET over tcpOverFetch). Idempotent: skips when the pack already
 // exists on disk (it persists in dataroot across reloads). Non-fatal: a network
 // failure falls back to English strings rather than aborting the boot.
-// See docs/decisions/0006-moodle-langpack-proxy-allowance.md.
+// See docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md.
 async function runLanguageAutoInstall(php) {
   const code = `<?php
 define('CLI_SCRIPT', true);
@@ -2342,7 +2342,7 @@ echo json_encode($result);
 // previous default — the snapshot bakes admin.lang='en', and a logged-in user's
 // lang overrides $CFG->lang, so without this the auto-logged-in admin keeps
 // seeing English even after the pack installs. Idempotent: a no-op when the
-// configured locale already matches. See docs/decisions/0006-*.
+// configured locale already matches. See docs/architecture/adr/ADR-0006-*.
 async function runSiteLanguageConfigure(php, locale) {
   const lang = typeof locale === "string" ? locale.trim().toLowerCase() : "";
   // The code is interpolated into the PHP below, so validate strictly first

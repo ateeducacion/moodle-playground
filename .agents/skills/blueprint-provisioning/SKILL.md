@@ -124,7 +124,7 @@ for large files), `path` (an `.mbz` already in MEMFS), or `data` (embedded, smal
 `category` (name, auto-created), `fullname`/`shortname`/`visible`. It raises memory, guards Moodle's
 `exit(1)` handler (ADR-0005), and restores into a new course (`TARGET_NEW_COURSE`). Large/complex
 backups can fail (memory / SQLite-WASM limits) but fail gracefully. See
-`docs/decisions/0007-course-restore-step.md`.
+`docs/architecture/adr/ADR-0007-course-restore-step.md`.
 
 #### Activities and modules
 | Step | Description |
@@ -163,7 +163,7 @@ Supported module types via `addModule`:
 reference, an inline resource descriptor (`{ "url": … }`), or a raw JSON/XML string — the same
 resource system used by `writeFile`/`unzip`. Generators (`phpImportRolePresets`, `phpCreateRoles`,
 `phpCreateScales`, `phpCreateCohorts`) install a graceful exception handler and are idempotent. See
-`docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md`.
+`docs/architecture/adr/ADR-0008-blueprint-roles-scales-cohorts-provisioning.md`.
 
 #### Plugins and themes
 | Step | Description |
@@ -181,7 +181,7 @@ resource system used by `writeFile`/`unzip`. Generators (`phpImportRolePresets`,
 github-proxy (allowlisted `/langpack/` paths, incl. `languages.md5`). The site language set in
 config (`installMoodle` `options.locale` / `siteOptions.locale`) is **auto-installed** on boot by
 `runLanguageAutoInstall()` in `bootstrap.js`. Both work in every browser (GET requests avoid the
-`duplex:'half'` WASM-network limit). See `docs/decisions/0006-moodle-langpack-proxy-allowance.md`.
+`duplex:'half'` WASM-network limit). See `docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md`.
 
 #### Filesystem and code execution
 | Step | Description |

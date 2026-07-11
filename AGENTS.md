@@ -381,52 +381,48 @@ make format    # Auto-fix lint and formatting issues
 For full test suite inventories, CI/CD pipeline, and browser compatibility details:
 @.agents/references/testing-and-ci.md
 
-## Architecture Decision Records (ADRs)
+## Architecture Decision Records (ADRs) and Software Design Documents (SDDs)
 
-Every significant technical decision must be documented as an Architecture Decision Record.
-ADRs capture the context, options considered, rationale, consequences, and review criteria
-so that future contributors (human or AI) understand **why** a choice was made — not just what.
+Significant technical work is documented before or alongside the code, following the
+ADR + SDD workflow (same shape as
+[eXeLearning PR #2149](https://github.com/exelearning/exelearning/pull/2149)).
+Full policy: [ADR guide](docs/architecture/adr/README.md),
+[SDD guide](docs/architecture/sdd/README.md).
 
-### Rules
-
-1. **When to write an ADR**: Any change that introduces a new pattern, modifies the request
-   pipeline, changes the storage model, adds a dependency, or alters build/deployment behavior.
-   When in doubt, write one — a short ADR is better than no ADR.
-2. **Template**: Always start from `.agents/templates/adr-template.md`. Do not invent a new format.
-3. **Location**: `docs/decisions/NNNN-kebab-case-title.md`, numbered sequentially.
-4. **Language**: English.
-5. **Status values**: `Proposed`, `Accepted`, `Rejected`, `Obsolete`, `Superseded by ADR-NNNN`.
-6. **Cross-reference**: When an ADR supersedes another, update the old ADR's status.
-7. **Link from code**: When code implements an ADR, add a brief comment referencing it
-   (e.g., `// See docs/decisions/0001-sw-level-scoped-static-asset-caching.md`).
-
-### Current ADRs
-
-| ADR | Topic | Status |
-|-----|-------|--------|
-| [0001](docs/decisions/0001-sw-level-scoped-static-asset-caching.md) | SW-level caching for scoped static assets | Accepted |
-| [0002](docs/decisions/0002-plugin-auto-detection-from-github-urls.md) | Plugin type & name auto-detection from GitHub URLs | Accepted |
-| [0003](docs/decisions/0003-direct-db-inserts-for-course-modules.md) | Direct DB inserts for course modules (WASM SQLite compat) | Accepted |
-| [0004](docs/decisions/0004-opcache-tuning-and-runtime-ux-defaults.md) | OPcache tuning and runtime UX defaults | Accepted |
-| [0005](docs/decisions/0005-resilient-blueprint-step-execution.md) | Resilient blueprint step execution with graceful errors | Accepted |
-| [0006](docs/decisions/0006-moodle-langpack-proxy-allowance.md) | Language pack install via the CORS proxy + Moodle's lang_installer | Accepted |
-| [0007](docs/decisions/0007-course-restore-step.md) | Course backup (.mbz) restore step (PHP streaming download + restore_controller) | Accepted |
-| [0008](docs/decisions/0008-blueprint-roles-scales-cohorts-provisioning.md) | Blueprint provisioning for roles, scales and cohorts (inline or by URL) | Accepted |
-| [0009](docs/decisions/0009-file-backed-config-settings-blueprint-steps.md) | File-backed Moodle config settings in blueprints (`setConfigFile` / `setConfigFiles`) | Accepted |
-| [0010](docs/decisions/0010-build-time-localcache-seed.md) | Build-time localcache seed (theme CSS + DI container) | Accepted |
-| [0011](docs/decisions/0011-bundle-trim-and-runtime-tuning.md) | Bundle content trim + php.ini/runtime tuning (amends ADR 0004) | Accepted |
-| [0012](docs/decisions/0012-worker-static-fast-path.md) | Static-file fast path bypassing the serial PHP request queue | Accepted |
-| [0013](docs/decisions/0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Accepted |
-| [0014](docs/decisions/0014-production-require-of-tests-files-patch.md) | Patch production code that require_once()s files under tests/ (mlbackend_python) | Accepted |
-| [0015](docs/decisions/0015-firefox-request-body-buffering.md) | Buffer the request body synchronously for Firefox (SW fetch handler) | Accepted |
-| [0016](docs/decisions/0016-runtime-pr-file-overlay.md) | Runtime PR file overlay for Moodle core PR previews (`applyPrOverlay`) | Accepted |
-| [0017](docs/decisions/0017-tracker-scenario-blueprints.md) | Explicit Moodle Playground scenario blocks in tracker issues (+ starter preset) | Accepted |
-| [0018](docs/decisions/0018-core-bundle-solid-compression-experiment.md) | Solid compression for core bundles (tar.zst) — experiment that led to adoption | Accepted |
-| [0019](docs/decisions/0019-streaming-tar-zstd-core-bundle-extraction.md) | Streaming (bounded-memory) extraction for tar.zst core bundles — now the sole format | Accepted |
-| [0020](docs/decisions/0020-preserve-empty-directories-in-tar-bundle.md) | Preserve empty plugin-type-root directories in the tar.zst bundle (fixes "Plugin type location does not exist!") | Accepted |
-| [0021](docs/decisions/0021-blueprint-per-step-timing-diagnostics.md) | Blueprint per-step timing instrumentation + `[blueprint-perf]` diagnostics channel | Accepted |
-| [0022](docs/decisions/0022-browser-side-course-backup-download.md) | Browser-side course backup (.mbz) download with progress (restore ~31s → ~3s) | Accepted |
-| [0023](docs/decisions/0023-resilient-resource-fetch-and-non-fatal-steps.md) | Resilient resource fetching (retry) + non-fatal-by-default steps (`critical` opt-in) | Accepted |
+- **Create or update an ADR** when a change introduces or modifies a **durable
+  architecture decision**. In this repo that means decisions affecting: the request
+  pipeline (shell/remote/SW/worker routing, HTML rewriting, caching), the storage and
+  persistence model, the SQLite driver and DB invariants, the core bundle format and
+  build pipeline, blueprint format/semantics, crash recovery, outbound networking
+  (proxies), deployment behavior (GitHub Pages subpaths), or new dependencies.
+  When in doubt, write one — a short ADR is better than no ADR.
+- **Create an SDD** for significant features, major refactors, design gates,
+  cross-cutting changes, or proposals with multiple implementation phases. SDDs
+  describe the feature plan, but **durable decisions inside an SDD must link to an
+  ADR** (existing or newly proposed) — don't bury the decision.
+- **Locations**: ADRs live under `docs/architecture/adr/`
+  (`ADR-NNNN-kebab-case-title.md`), SDDs under `docs/architecture/sdd/`
+  (`SDD-NNNN-kebab-case-title.md`). IDs are zero-padded, monotonic and never reused.
+- **Templates**: `docs/architecture/adr/ADR-0000-template.md` and
+  `docs/architecture/sdd/SDD-0000-template.md`. Do not invent a new format.
+  (ADR-0001…0023 predate the templates and keep their original lighter format —
+  do not retrofit them.)
+- **Indexes**: every ADR is listed in
+  [`docs/architecture/adr/records.md`](docs/architecture/adr/records.md) and every
+  SDD in [`docs/architecture/sdd/records.md`](docs/architecture/sdd/records.md).
+  Update the index in the same PR that adds or changes a record.
+- **Language**: English.
+- **Statuses**: ADRs use `Proposed`, `Accepted`, `Rejected`, `Superseded`; SDDs use
+  `Draft`, `In Review`, `Accepted`, `Implemented`, `Superseded`, `Abandoned`.
+- **Append-only**: do not rewrite accepted ADRs — supersede them with a new ADR
+  (`supersedes` / `superseded_by`). Do not rewrite implemented SDDs except for
+  typo/link fixes; supersede them if the design changes substantially.
+- **AI assistance**: record it in the ADR/SDD frontmatter
+  (`ai_assistance.tool` / `ai_assistance.model`; `none` if not used).
+- **Link from code**: when code implements an ADR, add a brief comment referencing it
+  (e.g., `// See docs/architecture/adr/ADR-0001-sw-level-scoped-static-asset-caching.md`).
+- **Mention in PRs**: list any ADRs or SDDs a PR creates or updates in the PR
+  description.
 
 ## Debugging
 

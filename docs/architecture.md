@@ -78,11 +78,28 @@ descriptor exhaustion), the worker snapshots the database and user files, boots 
 fresh runtime, and restores state automatically, with guards to prevent restart
 loops.
 
+## Architecture Decision Records and Software Design Documents
+
+Durable architecture decisions are tracked as **ADRs** under
+[`docs/architecture/adr/`](architecture/adr/README.md).
+
+Significant technical designs and design-gated proposals are tracked as **SDDs**
+under [`docs/architecture/sdd/`](architecture/sdd/README.md).
+
+ADRs and SDDs complement each other: an SDD describes the design and
+implementation plan for a change, while an ADR records a specific decision and
+its rationale. When an SDD contains a durable decision, that decision should
+link to an existing ADR or propose a new one.
+
+- [Architecture Decision Records](architecture/adr/README.md) — policy and
+  [index](architecture/adr/records.md)
+- [Software Design Documents](architecture/sdd/README.md) — policy and
+  [index](architecture/sdd/records.md)
+
 ## Going deeper
 
 This page is the practical overview. For the patch layout, SQLite driver details,
-build pipeline, and Architecture Decision Records (ADRs), see the maintainers'
-documentation:
+and the build pipeline, see the maintainers' documentation:
 
 - [Maintainers > Contributing](maintainers/contributing.md)
 - [Maintainers > Internal notes](maintainers/internal-notes.md)

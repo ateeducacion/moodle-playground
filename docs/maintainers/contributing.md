@@ -156,6 +156,10 @@ This page is the contributor-facing reference. Deeper material — Architecture 
 Records (ADRs), SQLite/WASM migration notes, troubleshooting, and known issues — is linked
 from [Internal notes](internal-notes.md).
 
+Significant technical decisions must be recorded as
+[ADRs](../architecture/adr/README.md), and significant designs are gated by
+[SDDs](../architecture/sdd/README.md) — see each guide for when one is required.
+
 `AGENTS.md` at the repository root is the authoritative guide for AI coding agents and the
 specialist agent skills under `.agents/skills/`. Consult it for domain-deep conventions,
 checklists, and known pitfalls before working in an unfamiliar area.

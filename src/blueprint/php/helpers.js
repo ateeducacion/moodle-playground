@@ -486,7 +486,7 @@ ${setConfigBlock}${purgeBlock}echo json_encode(['ok' => true, 'name' => '${escap
 // $CFG->langotherroot (download.moodle.org/langpack), which the github-proxy
 // authorizes, and extracts them into $CFG->dataroot/lang. Works in every
 // browser because these are GET requests over tcpOverFetch (no half-duplex
-// streaming body). See docs/decisions/0006-*.
+// streaming body). See docs/architecture/adr/ADR-0006-*.
 //
 // `codes` must be pre-validated against /^[a-z][a-z0-9_]*$/ by the caller; the
 // values are interpolated into a PHP array literal here.

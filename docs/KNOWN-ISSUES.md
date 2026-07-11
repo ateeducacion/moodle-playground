@@ -178,7 +178,7 @@ Main files involved:
 
 - `scripts/patch-moodle-source.sh`
 - `scripts/build-moodle-bundle.sh`
-- `docs/decisions/0014-production-require-of-tests-files-patch.md`
+- `docs/architecture/adr/ADR-0014-production-require-of-tests-files-patch.md`
 
 ## Current top priority
 
