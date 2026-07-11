@@ -112,7 +112,7 @@ Files:
 
 - `scripts/patch-moodle-source.sh` (drops the test-trait `require_once`/`use` and
   inlines the only method the class actually uses)
-- `docs/decisions/0014-production-require-of-tests-files-patch.md`
+- `docs/architecture/adr/ADR-0014-production-require-of-tests-files-patch.md`
 
 Notes:
 
@@ -304,7 +304,7 @@ Files:
 - `scripts/github-proxy-worker.js`
 - `src/blueprint/steps/moodle-language.js`
 - `src/runtime/bootstrap.js` (`runLanguageAutoInstall`)
-- `docs/decisions/0006-moodle-langpack-proxy-allowance.md`
+- `docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md`
 
 ### Course restore (`restoreCourse`) fails or the course is missing
 
@@ -329,7 +329,7 @@ Files:
 
 - `src/blueprint/steps/moodle-restore.js`
 - `src/blueprint/php/helpers.js` (`phpRestoreCourse`)
-- `docs/decisions/0007-course-restore-step.md`
+- `docs/architecture/adr/ADR-0007-course-restore-step.md`
 
 ### `PHP worker bridge timed out`
 

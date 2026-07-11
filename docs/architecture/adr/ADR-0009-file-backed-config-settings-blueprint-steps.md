@@ -45,7 +45,7 @@ never registers the file with Moodle, so it is never found or served.
 
 **Option 4.** Add two explicit steps, kept separate from scalar `setConfig` / `setConfigs`:
 
-* `setConfigFile` — resolve `data` (any [resource descriptor](../blueprints/reference.md#resources):
+* `setConfigFile` — resolve `data` (any [resource descriptor](../../blueprints/reference.md#resources):
   `url` / `base64` / `data-url` / `bundled` / `vfs` / `literal` / `@name`) to a temp MEMFS path,
   then store it via `get_file_storage()->create_file_from_pathname()` in
   `context_system::instance()` with `component = plugin`. Defaults: `filearea = name`, `itemid = 0`,

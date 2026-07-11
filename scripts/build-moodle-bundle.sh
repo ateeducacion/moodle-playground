@@ -159,7 +159,7 @@ rm -f "$BUNDLE_PATH"
 # be added (it would swallow real code: mod/wiki/history.php,
 # lib/aws-sdk/src/History.php, question/bank/history/...). The PHP-parity
 # tripwire below fails the build if a pattern ever swallows runtime PHP.
-# See docs/decisions/0011-bundle-trim-and-runtime-tuning.md.
+# See docs/architecture/adr/ADR-0011-bundle-trim-and-runtime-tuning.md.
 #
 # The runtime never reads VCS metadata or PHPUnit/Behat test suites; excluding
 # them cuts the download roughly in half (the shallow .git packfile alone is

@@ -67,6 +67,12 @@ nav:
       - Action reference: github/action-reference.md
   - Architecture:
       - Overview: architecture.md
+      - Architecture Decision Records: architecture/adr/README.md
+      - ADR Index: architecture/adr/records.md
+      - ADR Template: architecture/adr/ADR-0000-template.md
+      - Software Design Documents: architecture/sdd/README.md
+      - SDD Index: architecture/sdd/records.md
+      - SDD Template: architecture/sdd/SDD-0000-template.md
   - Maintainers:
       - Contributing: maintainers/contributing.md
       - Internal notes: maintainers/internal-notes.md

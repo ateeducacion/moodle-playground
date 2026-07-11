@@ -99,7 +99,7 @@ and `$plugin->requires`. The component name must match the directory path.
   breaks Firefox/Safari WASM outbound). Call `get_string_manager()->reset_caches()` afterward.
 - In this repo: `installLanguagePack` step (`src/blueprint/steps/moodle-language.js`) and
   `runLanguageAutoInstall()` in `bootstrap.js` (auto-installs a non-English site language on boot).
-  See `docs/decisions/0006-moodle-langpack-proxy-allowance.md`.
+  See `docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md`.
 
 ### Caching (MUC)
 
@@ -133,7 +133,7 @@ and `$plugin->requires`. The component name must match the directory path.
   `default_exception_handler` (`exit(1)`, kills `php.run`) — override it with a `set_exception_handler`
   that does `exit(0)` (ADR-0005). Large/complex backups may still fail; treat failure as graceful.
 - Implemented as the `restoreCourse` step (`src/blueprint/steps/moodle-restore.js`,
-  `phpRestoreCourse` in `php/helpers.js`). See `docs/decisions/0007-course-restore-step.md`.
+  `phpRestoreCourse` in `php/helpers.js`). See `docs/architecture/adr/ADR-0007-course-restore-step.md`.
 
 ### User and enrollment
 

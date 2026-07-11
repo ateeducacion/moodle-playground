@@ -8,7 +8,7 @@
  * target branch and overlaying the changed files at runtime in the browser
  * filesystem — no per-PR WASM bundle is built.
  *
- * See docs/decisions/0016-runtime-pr-file-overlay.md.
+ * See docs/architecture/adr/ADR-0016-runtime-pr-file-overlay.md.
  */
 import {
   escapePhp,

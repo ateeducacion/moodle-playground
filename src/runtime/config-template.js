@@ -354,7 +354,7 @@ export function createPhpIniEntries({
     // interned_strings_buffer are inert in this mode. They are kept (with
     // max_accelerated_files sized above Moodle's ~15k bundled PHP files)
     // only as future-proofing should file_cache_only ever be revisited.
-    // See docs/decisions/0011-bundle-trim-and-runtime-tuning.md (amends
+    // See docs/architecture/adr/ADR-0011-bundle-trim-and-runtime-tuning.md (amends
     // ADR 0004).
     "opcache.enable": "1",
     "opcache.file_cache": "/internal/shared/opcache",

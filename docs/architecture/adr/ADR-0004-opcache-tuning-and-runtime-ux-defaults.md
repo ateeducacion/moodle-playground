@@ -7,7 +7,7 @@
 > shared-memory segment, so `opcache.max_accelerated_files`,
 > `memory_consumption` and `interned_strings_buffer` are inert in this mode.
 > They are retained only as future-proofing. See
-> [0011](0011-bundle-trim-and-runtime-tuning.md).
+> [0011](ADR-0011-bundle-trim-and-runtime-tuning.md).
 
 ## Context and Problem
 

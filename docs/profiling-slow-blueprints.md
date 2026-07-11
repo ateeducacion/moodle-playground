@@ -3,7 +3,7 @@
 Heavy blueprints (many plugins, a large theme config import, a `.mbz` course restore,
 SCORM/H5P modules) can make provisioning take tens of seconds. This guide explains how to
 find *which step* is slow, using the per-step timing diagnostics added in
-[ADR-0021](decisions/0021-blueprint-per-step-timing-diagnostics.md).
+[ADR-0021](architecture/adr/ADR-0021-blueprint-per-step-timing-diagnostics.md).
 
 ## The `[blueprint-perf]` line
 
@@ -81,7 +81,7 @@ Real Chromium measurements of the Adaptable demo blueprint (34 steps) put the co
 1. **Course restore (`.mbz`)** — originally ~64% of provisioning in the measured run, but
    sub-timing showed ~97% of that was the *download of the backup inside PHP*
    (`download_file_content` over the `tcpOverFetch` bridge), not Moodle's restore (~1s). Since
-   [ADR-0022](decisions/0022-browser-side-course-backup-download.md) the `.mbz` is downloaded
+   [ADR-0022](architecture/adr/ADR-0022-browser-side-course-backup-download.md) the `.mbz` is downloaded
    **browser-side** (native streaming fetch, with a progress bar), so `restoreCourse` now runs
    in ~1–3s for a CORS-accessible backup. Non-CORS or > 50 MB backups fall back to the slower
    in-PHP download. Backup size still matters (download + import both scale with it), and very

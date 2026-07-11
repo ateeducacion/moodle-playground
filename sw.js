@@ -15,7 +15,7 @@ const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
 
 // Cache for scoped runtime static assets (CSS, JS, images, fonts, etc.)
 // that would otherwise queue through the serial PHP worker bridge.
-// See docs/decisions/0001-sw-level-scoped-static-asset-caching.md
+// See docs/architecture/adr/ADR-0001-sw-level-scoped-static-asset-caching.md
 const SCOPED_STATIC_CACHE = `moodle-playground-scoped-static-${BUILD_VERSION}`;
 const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|map)$/iu;
 // PHP scripts that serve cacheable assets with revision numbers in the URL.

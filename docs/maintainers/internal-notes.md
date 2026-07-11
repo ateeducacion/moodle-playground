@@ -15,13 +15,18 @@ at the repository root. Deep, per-domain references live in the skill files unde
 (Moodle internals, WP Playground & php-wasm, WASM & browser runtime, blueprint
 provisioning, unit testing, and E2E testing).
 
-## Architecture Decision Records
+## Architecture Decision Records and Software Design Documents
 
 Significant technical decisions are recorded as ADRs in
-[`docs/decisions/`](https://github.com/ateeducacion/moodle-playground/tree/main/docs/decisions)
-(0001 through 0016). Each ADR captures the context,
+[`docs/architecture/adr/`](../architecture/adr/README.md) — see the
+[ADR index](../architecture/adr/records.md). Each ADR captures the context,
 options considered, rationale, and consequences of a decision — read them before
 changing the request pipeline, the storage model, the build, or blueprint semantics.
+
+Significant designs are gated by SDDs in
+[`docs/architecture/sdd/`](../architecture/sdd/README.md) — see the
+[SDD index](../architecture/sdd/records.md). An SDD describes what a large
+change builds and how; durable decisions inside it link to ADRs.
 
 ## Design history and deep dives
 

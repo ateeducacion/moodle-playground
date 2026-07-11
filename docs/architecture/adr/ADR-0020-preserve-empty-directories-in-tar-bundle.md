@@ -3,8 +3,8 @@
 * Status: Accepted
 * Date: 2026-07-06
 
-Amends the "files-only" determinism policy of [ADR 0018](0018-core-bundle-solid-compression-experiment.md)
-and [ADR 0019](0019-streaming-tar-zstd-core-bundle-extraction.md): the tar writer now also emits
+Amends the "files-only" determinism policy of [ADR 0018](ADR-0018-core-bundle-solid-compression-experiment.md)
+and [ADR 0019](ADR-0019-streaming-tar-zstd-core-bundle-extraction.md): the tar writer now also emits
 directory members for the handful of directories that ship empty after the build trim.
 
 ## Context and Problem
