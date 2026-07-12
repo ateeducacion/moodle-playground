@@ -114,6 +114,14 @@ export function createPhpRuntime(
       const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
         ...(tcpOverFetch ? { tcpOverFetch } : {}),
         withIntl: true,
+        // Lower initial WASM memory allocation + explicit growth.
+        // Reduces peak memory at boot and allows the heap to grow only as
+        // needed (inspired by WP Playground lower-initial-memory work).
+        // 128 MiB starting point is a compromise for Moodle's size.
+        emscriptenOptions: {
+          INITIAL_MEMORY: 128 * 1024 * 1024,
+          ALLOW_MEMORY_GROWTH: 1,
+        },
       });
       const php = new PHP(runtimeId);
       const FS = php[__private__dont__use].FS;
@@ -252,6 +260,14 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
       const runtimeId = await loadWebRuntime(resolvedPhpVersion, {
         ...(tcpOverFetch ? { tcpOverFetch } : {}),
         withIntl: true,
+        // Lower initial WASM memory allocation + explicit growth.
+        // Reduces peak memory at boot and allows the heap to grow only as
+        // needed (inspired by WP Playground lower-initial-memory work).
+        // 128 MiB starting point is a compromise for Moodle's size.
+        emscriptenOptions: {
+          INITIAL_MEMORY: 128 * 1024 * 1024,
+          ALLOW_MEMORY_GROWTH: 1,
+        },
       });
       const php = new PHP(runtimeId);
       const FS2 = php[__private__dont__use].FS;
