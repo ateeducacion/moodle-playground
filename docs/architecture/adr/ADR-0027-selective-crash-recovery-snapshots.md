@@ -1,6 +1,6 @@
 ---
 id: ADR-0027
-title: "Selective crash recovery snapshots to bound memory usage during recovery"
+title: "Coherent selective crash recovery checkpoints"
 status: Proposed
 date: 2026-07-12
 deciders:
@@ -15,11 +15,11 @@ related:
 supersedes: []
 superseded_by: []
 ai_assistance:
-  tool: "Grok (xAI)"
-  model: "grok"
+  tool: "ChatGPT (OpenAI)"
+  model: "GPT-5.6 Thinking"
 ---
 
-# ADR-0027: Selective crash recovery snapshots to bound memory usage during recovery
+# ADR-0027: Coherent selective crash recovery checkpoints
 
 ## Status
 
@@ -27,84 +27,140 @@ Proposed
 
 ## Context
 
-The PHP WASM runtime can crash due to OOM, file descriptor exhaustion, or other fatal errors. The crash recovery system (see `src/runtime/crash-recovery.js`) takes a snapshot of critical state before destroying the old runtime and restores it after booting a fresh one.
+The PHP WASM runtime can crash due to OOM, file descriptor exhaustion, or
+other fatal errors. The crash recovery system captures state from the old
+runtime and restores it after booting a fresh one.
 
-Previously the system captured:
+Moodle's mutable `/persist` tree is already journaled to IndexedDB. This
+includes:
+
 - The SQLite database
-- Files from installed plugin directories
-- The entire `filedir` (user uploaded content)
+- `moodledata/filedir`
+- Configuration and session state
 
-All data was read into JavaScript arrays of `Uint8Array` while the runtime was already in a bad state.
+Runtime-installed plugin directories live outside `/persist`, so they require
+a separate in-memory snapshot.
 
-## Problem
+The previous crash path also traversed and copied the complete `filedir` into
+JavaScript memory. This could add tens or hundreds of MB of allocations while
+the runtime was already under memory pressure.
 
-Capturing the full `filedir` (which can grow to tens or hundreds of MB with user content, course files, etc.) requires significant temporary memory at the exact moment when memory is most constrained. This increases the chance of secondary failures during the recovery process itself.
+Simply removing the filedir snapshot is not sufficient. A current DB snapshot
+restored over an older IndexedDB filedir checkpoint can leave Moodle records
+pointing to missing files.
 
 ## Decision drivers
 
-- Crash recovery must be reliable and use as little extra memory as possible.
-- The primary value of recovery is preserving the database (courses, users, grades, config) and installed plugins.
-- In the ephemeral "playground" model, user-uploaded files are less critical than the structured data.
-- We must avoid patterns that make recovery itself likely to OOM.
+- Crash recovery must avoid full-filedir memory spikes.
+- The restored SQLite DB and `filedir` must represent the same recovery point.
+- A failed optimization must prefer an older coherent checkpoint over a newer
+  inconsistent site.
+- Runtime-installed plugin files must still survive recovery where possible.
+- The crash path must have an explicit memory bound.
 
 ## Options considered
 
-### Option 1: Always snapshot everything (previous behavior)
-- Pros: Maximum data preservation.
-- Cons: High memory spike risk during crash.
+### Option 1: Always snapshot the complete DB, plugins, and filedir
 
-### Option 2: Never snapshot anything except DB
-- Pros: Very safe.
-- Cons: Loses plugin files that may have been added at runtime.
+- Pros: Captures the latest in-memory state.
+- Cons: Copies the complete filedir during the crash path and can trigger a
+  secondary OOM.
 
-### Option 3: Snapshot DB + plugin files, intentionally skip filedir (chosen)
-- Pros: Covers the most important state while keeping the snapshot process bounded.
-- Cons: User files in filedir are lost on crash (acceptable for this use case).
+### Option 2: Snapshot DB and plugins, but never checkpoint filedir
 
-## Evidence
+- Pros: Uses less memory.
+- Cons: Can restore a newer DB over an older filedir journal and produce broken
+  file references.
 
-- Crash snapshots are taken from MEMFS (JS heap) using `readFileAsBuffer` / `listFiles`.
-- The `filedir` collection was the largest potential consumer.
-- Existing policy already excludes ephemeral cache directories from journaling (see `fs-persistence.js` and ADR-0025 context).
-- Recovery is a "best effort" mechanism; full site export is available separately.
+### Option 3: Selectively checkpoint pending filedir changes before the DB snapshot (chosen)
+
+- Pros: Copies only filedir files changed since the last journal flush, retains
+  DB/filedir coherence, and avoids traversing the complete filedir.
+- Cons: Recent changes are discarded when the selective checkpoint cannot be
+  completed within the configured bound.
 
 ## Decision
 
-We will make crash recovery snapshots selective:
+Crash recovery will use the existing filesystem journal as the source of truth
+for `filedir`:
 
-- Always attempt to preserve the SQLite database.
-- Preserve files from directories registered via `trackPluginDir()` (runtime-installed plugins/themes).
-- **Intentionally do not** snapshot the `filedir` contents.
+1. Before reading the SQLite DB snapshot, synchronously flush only pending
+   journal operations that enter, leave, or modify `moodledata/filedir`.
+2. Normalize operations before hydration so repeated writes to the same path
+   are read only once.
+3. Preflight the selected WRITE operations and reject a crash checkpoint above
+   16 MiB before file contents are copied into JavaScript memory.
+4. Capture the SQLite DB only after the filedir checkpoint succeeds.
+5. Continue snapshotting tracked runtime-installed plugin directories because
+   they live outside `/persist`.
+6. If the selective journal checkpoint fails or exceeds the limit, do not
+   capture a newer live DB or plugin snapshot. Recovery uses the last complete
+   IndexedDB checkpoint instead.
+7. If filesystem persistence is unavailable, allow a bounded DB + filedir
+   in-memory fallback. Abort the live snapshot when that fallback exceeds the
+   same byte limit.
 
-The `savedFiledirFiles` path is disabled, and `hasPendingRestore` no longer considers it.
+The persistence layer exposes an explicit `flushNow()` operation. It supports
+path-selective flushing, serializes with any debounced flush already in flight,
+retains operations in the pending queue on failure, and reports operation and
+byte counts for diagnostics.
 
 ## Consequences
 
 ### Positive
-- Significantly lower memory usage during the critical crash → recover window.
-- More reliable recovery on memory-constrained devices.
-- Consistent with the "ephemeral but useful state" philosophy of the project.
+
+- The crash path no longer traverses and copies the complete filedir when
+  IndexedDB persistence is active.
+- DB and filedir recovery remain coherent.
+- Only changed filedir contents since the previous flush are hydrated.
+- Oversized crash checkpoints fail before their file contents are read.
+- Failed IndexedDB writes no longer silently discard selected pending
+  operations.
+- Recovery logs expose the number of operations and hydrated bytes.
 
 ### Negative
-- On a crash, user-uploaded files (course resources, user pictures, etc.) will be lost. The database and plugins survive.
-- Slightly more complex restore logic and comments.
+
+- When the selective checkpoint fails or exceeds 16 MiB, changes newer than the
+  last persisted checkpoint are lost.
+- The persistence code has additional serialization and selective-flush logic.
+- Runtime-installed plugin snapshots remain an independent in-memory cost.
 
 ### Neutral
-- The mechanism for tracking plugins remains; only the filedir collection is removed.
+
+- The normal 1.5-second debounced persistence flow remains unchanged.
+- Cache and temporary directories remain excluded from persistence.
+- Full site export remains the durable way to preserve a Playground instance.
 
 ## Risks
-- A plugin that heavily uses the filedir for its own data could lose state. In practice most plugin data lives in the DB or its own plugin directory (which we still preserve).
+
+- The 16 MiB limit may need tuning based on real browser and device telemetry.
+- An individual upload larger than the limit causes recovery to use the prior
+  checkpoint rather than the latest in-memory state.
+- Plugin directories can still consume significant memory if very large; a
+  separate plugin snapshot limit may be added later.
 
 ## Validation
-- Crash recovery unit tests updated/verified for the supported paths.
-- Manual crash simulation (via forced errors) in browser.
-- Revisit if a strong use-case for preserving large user files on crash appears (e.g. via size-bounded or lazy snapshotting).
+
+- Unit tests verify that only filedir operations are flushed during the crash
+  checkpoint.
+- Unit tests verify that repeated writes are hydrated once.
+- Unit tests verify that oversized checkpoints are rejected before file reads.
+- Unit tests verify that failed persistence writes return operations to the
+  pending queue.
+- Crash recovery tests verify journal success, checkpoint failure, bounded
+  no-persistence fallback, and fallback size rejection.
+- CI and manual forced-crash verification cover the complete browser flow.
 
 ## Follow-up work
-- Consider adding a size guard + optional filedir snapshot behind a flag if needed in the future.
-- Monitor real-world crash frequency and recovery success rate.
+
+- Measure checkpoint operation counts, hydrated bytes, and recovery success in
+  real browser sessions.
+- Revisit the 16 MiB threshold using collected evidence.
+- Consider a separate bound for runtime-installed plugin snapshots.
 
 ## References
+
 - ADR-0025 (runtime lifecycle and diagnostics)
+- `src/runtime/fs-persistence.js`
 - `src/runtime/crash-recovery.js`
 - PR #264
