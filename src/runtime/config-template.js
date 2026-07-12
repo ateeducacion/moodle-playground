@@ -363,6 +363,7 @@ export function createPhpIniEntries({
     // See docs/architecture/adr/ADR-0011-bundle-trim-and-runtime-tuning.md (amends
     // ADR 0004).
     "opcache.enable": "1",
+    "opcache.jit": "0",
     "opcache.file_cache": "/internal/shared/opcache",
     "opcache.file_cache_only": "1",
     "opcache.max_accelerated_files": "20000",
