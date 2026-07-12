@@ -327,12 +327,12 @@ export function createPhpIniEntries({
     log_errors: "1",
     // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
     max_input_vars: "5000",
-    // memory_limit: 256M is a good balance for Moodle Playground.
+    // memory_limit: 256M + modest opcache is a good balance for Moodle Playground.
     // Official Moodle recommendation (docs.moodle.org) is at least 96-128M.
     // 256M gives headroom for normal operation while greatly reducing WASM
-    // heap usage vs the previous 512M. Heavy operations (course restore,
-    // large plugin installs) call raise_memory_limit(MEMORY_EXTRA) which
-    // temporarily increases it further.
+    // heap usage vs the previous 512M. opcache values reduced similarly.
+    // Heavy operations (course restore, large plugin installs) call
+    // raise_memory_limit(MEMORY_EXTRA) which temporarily increases it further.
     memory_limit: "256M",
     post_max_size: "64M",
     upload_max_filesize: "64M",
@@ -363,11 +363,12 @@ export function createPhpIniEntries({
     // See docs/architecture/adr/ADR-0011-bundle-trim-and-runtime-tuning.md (amends
     // ADR 0004).
     "opcache.enable": "1",
+    "opcache.jit": "0",
     "opcache.file_cache": "/internal/shared/opcache",
     "opcache.file_cache_only": "1",
     "opcache.max_accelerated_files": "20000",
-    "opcache.memory_consumption": "128",
-    "opcache.interned_strings_buffer": "32",
+    "opcache.memory_consumption": "96",
+    "opcache.interned_strings_buffer": "16",
     "opcache.validate_timestamps": "0",
     "opcache.file_cache_consistency_checks": "0",
   };
