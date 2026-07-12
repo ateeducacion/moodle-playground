@@ -278,28 +278,13 @@ export function createSnapshotManager({ postShell }) {
         });
       }
 
-      // 3. Save user-uploaded files (stored files in filedir)
-      try {
-        if (rawPhp.fileExists(FILEDIR_PATH) && rawPhp.isDir(FILEDIR_PATH)) {
-          const files = collectFiles(rawPhp, FILEDIR_PATH);
-          if (files.length > 0) {
-            savedFiledirFiles = files;
-            const totalBytes = files.reduce(
-              (sum, f) => sum + f.data.byteLength,
-              0,
-            );
-            postShell({
-              kind: "trace",
-              detail: `[snapshot] saved ${files.length} filedir entries (${Math.round(totalBytes / 1024)}KB)`,
-            });
-          }
-        }
-      } catch (err) {
-        postShell({
-          kind: "error",
-          detail: `[snapshot] failed to read filedir: ${err.message}`,
-        });
-      }
+      // 3. (intentionally skipped for memory optimization)
+      // Saving the entire filedir on crash can require copying a large amount
+      // of data into JS memory right when the runtime is unstable. In the
+      // ephemeral Playground, user uploads are not critical state — the DB
+      // + installed plugins are the valuable part that we preserve.
+      // If needed in the future, this can be re-enabled behind a size guard.
+      savedFiledirFiles = null;
     },
 
     /**
@@ -353,18 +338,8 @@ export function createSnapshotManager({ postShell }) {
         savedPluginFiles = null;
       }
 
-      // 3. Restore filedir (user-uploaded content)
-      if (savedFiledirFiles) {
-        const { ok, failed } = restoreFiles(rawPhp, savedFiledirFiles);
-        postShell({
-          kind: "trace",
-          detail: `[snapshot] restored ${ok} filedir entries${failed > 0 ? ` (${failed} failed)` : ""}`,
-        });
-        if (ok > 0) {
-          restored = true;
-        }
-        savedFiledirFiles = null;
-      }
+      // 3. filedir restore skipped (see save logic above — saves memory on crash)
+      savedFiledirFiles = null;
 
       return { restored, pluginsRestored, restoredPluginDirs };
     },
@@ -373,8 +348,8 @@ export function createSnapshotManager({ postShell }) {
     get hasPendingRestore() {
       return (
         savedDbSnapshot !== null ||
-        savedPluginFiles !== null ||
-        savedFiledirFiles !== null
+        savedPluginFiles !== null
+        // filedir intentionally not snapshotted to reduce memory on crash path
       );
     },
 
