@@ -20,10 +20,13 @@
  *   - Non-idempotent requests are NOT replayed to avoid side-effects.
  *   - A request is never retried more than once (loop protection).
  *   - An anti-loop guard prevents restarts if too few requests were processed.
- *   - DB snapshot preserves session state (courses, users, config) across restarts.
+ *   - Pending filedir journal changes are checkpointed before the DB snapshot.
  *
  * @module crash-recovery
  */
+
+const FILEDIR_PATH = "/persist/moodledata/filedir";
+const DEFAULT_MAX_CRASH_FILEDIR_BYTES = 16 * 1024 * 1024;
 
 /**
  * Detect Emscripten network errors (errno 23 = EHOSTUNREACH).
@@ -117,33 +120,38 @@ export function formatErrorDetail(error) {
 /**
  * Create a state snapshot manager for crash recovery.
  *
- * Instead of using @php-wasm/fs-journal (which replays FS operations and
- * conflicts with the fresh runtime's state), this takes a simpler approach:
+ * The persisted filesystem journal remains the source of truth for filedir.
+ * Before capturing the DB, the manager forces only pending filedir operations
+ * into IndexedDB. This keeps the restored DB and user files on the same crash
+ * checkpoint without copying the complete filedir into JavaScript memory.
  *
- * 1. Before destroying the crashed runtime, read the DB file and any
- *    runtime-installed plugin files directly from MEMFS (JS heap — works
- *    even with corrupted WASM linear memory).
- * 2. After bootstrapping a fresh runtime, overwrite the DB file and
- *    restore plugin directories. This preserves courses, users, config,
- *    and installed plugins.
- * 3. Re-create the admin session (auto-login) on the restored DB.
+ * If filesystem persistence is unavailable, a bounded in-memory filedir
+ * snapshot is used. If that fallback exceeds the configured limit, recovery
+ * skips the live snapshot and falls back to the last coherent persisted state.
+ * Runtime-installed plugin directories are still snapshotted because they live
+ * outside /persist and are not covered by the filesystem journal.
  *
- * @param {{ postShell: (msg: object) => void }} options
+ * @param {object} options - Snapshot manager options.
+ * @param {(msg: object) => void} options.postShell - Shell message callback.
+ * @param {number} [options.maxCrashFiledirBytes] - Crash checkpoint byte limit.
  * @returns {object} Snapshot manager with hydrate/restore methods.
  */
-const FILEDIR_PATH = "/persist/moodledata/filedir";
-
-export function createSnapshotManager({ postShell }) {
+export function createSnapshotManager({
+  postShell,
+  maxCrashFiledirBytes = DEFAULT_MAX_CRASH_FILEDIR_BYTES,
+}) {
   let savedDbSnapshot = null;
   let savedPluginFiles = null;
   let savedFiledirFiles = null;
   /** Paths of plugin directories installed during this session. */
   const installedPluginDirs = new Set();
 
-  /**
-   * Recursively collect all files under a directory from the raw PHP FS.
-   * Returns an array of { path, data } entries.
-   */
+  function clearSavedState() {
+    savedDbSnapshot = null;
+    savedPluginFiles = null;
+    savedFiledirFiles = null;
+  }
+
   /**
    * Write an array of { path, data } entries into MEMFS with dir deduplication.
    * Returns { ok, failed } counts.
@@ -175,6 +183,7 @@ export function createSnapshotManager({ postShell }) {
     return { ok, failed };
   }
 
+  /** Recursively collect all files under a directory. */
   function collectFiles(rawPhp, dirPath) {
     const files = [];
     try {
@@ -197,38 +206,157 @@ export function createSnapshotManager({ postShell }) {
     return files;
   }
 
+  /** Recursively collect files while enforcing an upper byte bound. */
+  function collectFilesBounded(rawPhp, dirPath, maxBytes) {
+    const files = [];
+    let totalBytes = 0;
+    let exceeded = false;
+
+    const visit = (path) => {
+      if (exceeded) return;
+      let entries;
+      try {
+        entries = rawPhp.listFiles(path, { prependPath: true });
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (exceeded) return;
+        if (rawPhp.isDir(entry)) {
+          visit(entry);
+          continue;
+        }
+
+        try {
+          const data = new Uint8Array(rawPhp.readFileAsBuffer(entry));
+          if (totalBytes + data.byteLength > maxBytes) {
+            exceeded = true;
+            files.length = 0;
+            return;
+          }
+          totalBytes += data.byteLength;
+          files.push({ path: entry, data });
+        } catch {
+          // Unreadable file — skip
+        }
+      }
+    };
+
+    visit(dirPath);
+    return { exceeded, files, totalBytes };
+  }
+
+  async function prepareFiledirCheckpoint(php, rawPhp) {
+    if (typeof php.flushPersistence === "function") {
+      try {
+        const result = await php.flushPersistence({
+          pathPrefix: FILEDIR_PATH,
+          maxBytes: maxCrashFiledirBytes,
+        });
+
+        if (result?.enabled) {
+          if (!result.ok) {
+            const sizeDetail =
+              result.reason === "size-limit"
+                ? ` (${Math.round((result.estimatedBytes || 0) / 1024)}KB exceeds ${Math.round(maxCrashFiledirBytes / 1024)}KB limit)`
+                : "";
+            postShell({
+              kind: "error",
+              detail: `[snapshot] filedir checkpoint failed${sizeDetail}; using the last persisted checkpoint`,
+            });
+            return { ok: false, mode: "journal", reason: result.reason };
+          }
+
+          postShell({
+            kind: "trace",
+            detail: `[snapshot] checkpointed ${result.flushedOps || 0} pending filedir ops (${Math.round((result.hydratedBytes || 0) / 1024)}KB)`,
+          });
+          return { ok: true, mode: "journal" };
+        }
+      } catch (error) {
+        postShell({
+          kind: "error",
+          detail: `[snapshot] filedir checkpoint failed: ${error.message}; using the last persisted checkpoint`,
+        });
+        return { ok: false, mode: "journal", reason: "flush-failed" };
+      }
+    }
+
+    if (!rawPhp.fileExists(FILEDIR_PATH) || !rawPhp.isDir(FILEDIR_PATH)) {
+      return { ok: true, mode: "fallback", files: [] };
+    }
+
+    const fallback = collectFilesBounded(
+      rawPhp,
+      FILEDIR_PATH,
+      maxCrashFiledirBytes,
+    );
+    if (fallback.exceeded) {
+      postShell({
+        kind: "error",
+        detail: `[snapshot] bounded filedir fallback exceeds ${Math.round(maxCrashFiledirBytes / 1024)}KB; skipping live snapshot`,
+      });
+      return { ok: false, mode: "fallback", reason: "size-limit" };
+    }
+
+    postShell({
+      kind: "trace",
+      detail: `[snapshot] saved bounded filedir fallback (${fallback.files.length} entries, ${Math.round(fallback.totalBytes / 1024)}KB)`,
+    });
+    return { ok: true, mode: "fallback", files: fallback.files };
+  }
+
   return {
     /**
-     * Read the DB file and plugin directories from the (possibly crashed)
-     * runtime before it is destroyed. MEMFS lives in JS heap, so
-     * readFileAsBuffer works even when the WASM linear memory is corrupted.
+     * Capture a coherent recovery checkpoint from the crashed runtime.
      *
      * Must be called BEFORE resetRuntime() / destroying the old PHP.
      *
-     * @param {object} php - The php-compat wrapper (has ._php)
-     * @param {string} dbPath - Full path to the SQLite DB file
+     * @param {object} php - The php-compat wrapper (has ._php).
+     * @param {string} dbPath - Full path to the SQLite DB file.
+     * @returns {Promise<object>} Snapshot capture result.
      */
     async hydrate(php, dbPath) {
+      clearSavedState();
       const rawPhp = php._php;
+      const filedirCheckpoint = await prepareFiledirCheckpoint(php, rawPhp);
 
-      // 1. Save the DB file
-      try {
-        const data = rawPhp.readFileAsBuffer(dbPath);
-        if (data && data.byteLength > 0) {
-          savedDbSnapshot = { path: dbPath, data: new Uint8Array(data) };
-          postShell({
-            kind: "trace",
-            detail: `[snapshot] saved DB (${data.byteLength} bytes)`,
-          });
-        }
-      } catch (err) {
-        postShell({
-          kind: "error",
-          detail: `[snapshot] failed to read DB: ${err.message}`,
-        });
+      if (!filedirCheckpoint.ok) {
+        return {
+          captured: false,
+          reason: filedirCheckpoint.reason || "filedir-checkpoint-failed",
+        };
       }
 
-      // 2. Save files from plugin directories installed during this session
+      if (
+        filedirCheckpoint.mode === "fallback" &&
+        filedirCheckpoint.files.length > 0
+      ) {
+        savedFiledirFiles = filedirCheckpoint.files;
+      }
+
+      // 1. Save the DB only after filedir has reached the same checkpoint.
+      try {
+        const data = rawPhp.readFileAsBuffer(dbPath);
+        if (!data || data.byteLength === 0) {
+          throw new Error("DB snapshot is empty");
+        }
+        savedDbSnapshot = { path: dbPath, data: new Uint8Array(data) };
+        postShell({
+          kind: "trace",
+          detail: `[snapshot] saved DB (${data.byteLength} bytes)`,
+        });
+      } catch (err) {
+        clearSavedState();
+        postShell({
+          kind: "error",
+          detail: `[snapshot] failed to read DB: ${err.message}; using the last persisted checkpoint`,
+        });
+        return { captured: false, reason: "db-read-failed" };
+      }
+
+      // 2. Save files from plugin directories installed during this session.
       if (installedPluginDirs.size > 0) {
         postShell({
           kind: "trace",
@@ -268,44 +396,26 @@ export function createSnapshotManager({ postShell }) {
         } else {
           postShell({
             kind: "trace",
-            detail: `[snapshot] no plugin files collected from tracked dirs`,
+            detail: "[snapshot] no plugin files collected from tracked dirs",
           });
         }
       } else {
         postShell({
           kind: "trace",
-          detail: `[snapshot] no plugin dirs tracked, skipping plugin hydration`,
+          detail: "[snapshot] no plugin dirs tracked, skipping plugin hydration",
         });
       }
 
-      // 3. Save user-uploaded files (stored files in filedir)
-      try {
-        if (rawPhp.fileExists(FILEDIR_PATH) && rawPhp.isDir(FILEDIR_PATH)) {
-          const files = collectFiles(rawPhp, FILEDIR_PATH);
-          if (files.length > 0) {
-            savedFiledirFiles = files;
-            const totalBytes = files.reduce(
-              (sum, f) => sum + f.data.byteLength,
-              0,
-            );
-            postShell({
-              kind: "trace",
-              detail: `[snapshot] saved ${files.length} filedir entries (${Math.round(totalBytes / 1024)}KB)`,
-            });
-          }
-        }
-      } catch (err) {
-        postShell({
-          kind: "error",
-          detail: `[snapshot] failed to read filedir: ${err.message}`,
-        });
-      }
+      return {
+        captured: true,
+        filedirMode: filedirCheckpoint.mode,
+      };
     },
 
     /**
-     * Restore the saved DB and plugin files onto a fresh runtime.
+     * Restore the saved DB, plugin files, and bounded fallback files.
      *
-     * @param {object} php - The php-compat wrapper (has ._php)
+     * @param {object} php - The php-compat wrapper (has ._php).
      */
     async restore(php) {
       if (!savedDbSnapshot && !savedPluginFiles && !savedFiledirFiles) {
@@ -320,7 +430,7 @@ export function createSnapshotManager({ postShell }) {
       let pluginsRestored = false;
       const restoredPluginDirs = [];
 
-      // 1. Restore DB
+      // 1. Restore DB.
       if (savedDbSnapshot) {
         try {
           rawPhp.writeFile(savedDbSnapshot.path, savedDbSnapshot.data);
@@ -353,12 +463,12 @@ export function createSnapshotManager({ postShell }) {
         savedPluginFiles = null;
       }
 
-      // 3. Restore filedir (user-uploaded content)
+      // 3. Restore filedir only for the bounded no-persistence fallback.
       if (savedFiledirFiles) {
         const { ok, failed } = restoreFiles(rawPhp, savedFiledirFiles);
         postShell({
           kind: "trace",
-          detail: `[snapshot] restored ${ok} filedir entries${failed > 0 ? ` (${failed} failed)` : ""}`,
+          detail: `[snapshot] restored ${ok} fallback filedir entries${failed > 0 ? ` (${failed} failed)` : ""}`,
         });
         if (ok > 0) {
           restored = true;
@@ -395,9 +505,7 @@ export function createSnapshotManager({ postShell }) {
 
     /** Discard any saved snapshot. */
     clear() {
-      savedDbSnapshot = null;
-      savedPluginFiles = null;
-      savedFiledirFiles = null;
+      clearSavedState();
     },
   };
 }
