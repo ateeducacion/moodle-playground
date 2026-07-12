@@ -1,0 +1,44 @@
+name: Format PR 264
+
+on:
+  push:
+    branches:
+      - perf/10-lighter-crash-snapshots
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Format changed files
+        run: |
+          npx @biomejs/biome check --write \
+            src/runtime/crash-recovery.js \
+            src/runtime/fs-persistence.js \
+            src/runtime/php-loader.js \
+            tests/runtime/crash-recovery-checkpoint.test.js \
+            tests/runtime/fs-persistence-checkpoint.test.js
+
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr264-formatted-files
+          path: |
+            src/runtime/crash-recovery.js
+            src/runtime/fs-persistence.js
+            src/runtime/php-loader.js
+            tests/runtime/crash-recovery-checkpoint.test.js
+            tests/runtime/fs-persistence-checkpoint.test.js
+          retention-days: 1
