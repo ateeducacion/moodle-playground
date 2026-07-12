@@ -327,9 +327,15 @@ export function createPhpIniEntries({
     log_errors: "1",
     // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
     max_input_vars: "5000",
-    memory_limit: "384M",
-    post_max_size: "96M",
-    upload_max_filesize: "96M",
+    // memory_limit: 256M is a good balance for Moodle Playground.
+    // Official Moodle recommendation (docs.moodle.org) is at least 96-128M.
+    // 256M gives headroom for normal operation while greatly reducing WASM
+    // heap usage vs the previous 512M. Heavy operations (course restore,
+    // large plugin installs) call raise_memory_limit(MEMORY_EXTRA) which
+    // temporarily increases it further.
+    memory_limit: "256M",
+    post_max_size: "64M",
+    upload_max_filesize: "64M",
     sys_temp_dir: TEMP_ROOT,
     upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
