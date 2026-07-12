@@ -126,6 +126,8 @@ export function formatErrorDetail(error) {
  * 2. After bootstrapping a fresh runtime, overwrite the DB file and
  *    restore plugin directories. This preserves courses, users, config,
  *    and installed plugins.
+ *    (filedir/user uploads are intentionally not snapshotted to keep
+ *    the recovery path lighter on memory.)
  * 3. Re-create the admin session (auto-login) on the restored DB.
  *
  * @param {{ postShell: (msg: object) => void }} options
