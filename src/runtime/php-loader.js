@@ -104,6 +104,7 @@ export function createPhpRuntime(
     }),
   );
   let wrapped = null;
+  let persistenceController = null;
 
   const deferred = {
     /**
@@ -125,6 +126,7 @@ export function createPhpRuntime(
       });
       const php = new PHP(runtimeId);
       const FS = php[__private__dont__use].FS;
+      persistenceController = null;
 
       // Ensure directories exist
       try {
@@ -151,7 +153,7 @@ export function createPhpRuntime(
       // Restore persisted mutable data (/persist) before Moodle bootstraps, so
       // the install gate finds the existing DB/marker and skips CLI provisioning.
       // Keyed by scopeId (sessionStorage) → data survives reloads within the tab
-      // session. forceCleanBoot (reset / ?clean=1) wipes it instead.
+      // session. forceCleanBoot (reset / blueprint change) wipes it instead.
       if (scopeId) {
         const { clearJournal, initFsPersistence } = await import(
           "./fs-persistence.js"
@@ -164,7 +166,7 @@ export function createPhpRuntime(
         if (forceCleanBoot) {
           await clearJournal(scopeId);
         }
-        await initFsPersistence(php, scopeId);
+        persistenceController = await initFsPersistence(php, scopeId);
       }
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
@@ -218,6 +220,29 @@ export function createPhpRuntime(
         },
         configurable: true,
       });
+    },
+
+    /**
+     * Flush pending persistence operations before a runtime is discarded.
+     *
+     * @param {object} options - Optional path and byte limits for the flush.
+     * @returns {Promise<object>} Flush status and metrics.
+     */
+    async flushPersistence(options = {}) {
+      if (!persistenceController) {
+        return {
+          enabled: false,
+          ok: true,
+          flushedOps: 0,
+          hydratedBytes: 0,
+          estimatedBytes: 0,
+        };
+      }
+
+      return {
+        enabled: true,
+        ...(await persistenceController.flushNow(options)),
+      };
     },
 
     // Placeholder methods that throw if called before refresh()
