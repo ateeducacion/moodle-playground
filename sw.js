@@ -21,12 +21,10 @@ const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico
 // PHP scripts that serve cacheable assets with revision numbers in the URL.
 // The revision acts as a natural cache key — when content changes, the URL changes.
 // Excludes pluginfile.php and draftfile.php (user content, not cacheable).
-// lib/requirejs.php is included for symmetry with lib/javascript.php: its
-// module URLs (/lib/requirejs.php/<rev>/core/first.js) already match
-// SCOPED_STATIC_RE via their .js suffix, so this is belt-and-braces (the
-// scope+runtime cache key and BUILD_VERSION-scoped cache name prevent stale
-// cross-build content), not a functional change.
-const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|lib\/requirejs\.php|theme\/image\.php|theme\/font\.php)\//u;
+// Additional patterns (theme/fonts.php, lib/yui.php etc.) added to increase
+// the number of Moodle-generated assets that bypass the serial PHP worker
+// and use the fast SW-scoped static cache (perf improvement #6).
+const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|lib\/requirejs\.php|theme\/image\.php|theme\/font\.php|theme\/fonts\.php|lib\/yui\.php)\//u;
 const INTERNAL_PROXY_PATH = "/__playground_proxy__";
 let playgroundConfigPromise;
 let addonProxyUrlOverride = null;
