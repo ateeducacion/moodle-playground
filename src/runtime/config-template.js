@@ -327,9 +327,9 @@ export function createPhpIniEntries({
     log_errors: "1",
     // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
     max_input_vars: "5000",
-    memory_limit: "512M",
-    post_max_size: "128M",
-    upload_max_filesize: "128M",
+    memory_limit: "384M",
+    post_max_size: "96M",
+    upload_max_filesize: "96M",
     sys_temp_dir: TEMP_ROOT,
     upload_tmp_dir: TEMP_ROOT,
     "session.save_handler": "files",
@@ -354,14 +354,17 @@ export function createPhpIniEntries({
     // interned_strings_buffer are inert in this mode. They are kept (with
     // max_accelerated_files sized above Moodle's ~15k bundled PHP files)
     // only as future-proofing should file_cache_only ever be revisited.
+    // Values are lower than previous (memory_limit 512M→384M, opcache
+    // memory/interned reduced) to cut peak WASM heap usage while remaining
+    // safe for Moodle's size (inspired by WP Playground defaults of 256M/64/8).
     // See docs/architecture/adr/ADR-0011-bundle-trim-and-runtime-tuning.md (amends
     // ADR 0004).
     "opcache.enable": "1",
     "opcache.file_cache": "/internal/shared/opcache",
     "opcache.file_cache_only": "1",
     "opcache.max_accelerated_files": "20000",
-    "opcache.memory_consumption": "128",
-    "opcache.interned_strings_buffer": "32",
+    "opcache.memory_consumption": "96",
+    "opcache.interned_strings_buffer": "16",
     "opcache.validate_timestamps": "0",
     "opcache.file_cache_consistency_checks": "0",
   };
