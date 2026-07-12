@@ -283,7 +283,24 @@ export function createSnapshotManager({
       }
     }
 
-    if (!rawPhp.fileExists(FILEDIR_PATH) || !rawPhp.isDir(FILEDIR_PATH)) {
+    // Lightweight mocks and runtimes without filesystem helpers have no
+    // recoverable filedir. Treat them as an empty bounded fallback.
+    if (
+      typeof rawPhp?.fileExists !== "function" ||
+      typeof rawPhp?.isDir !== "function"
+    ) {
+      return { ok: true, mode: "fallback", files: [] };
+    }
+
+    let hasFiledir = false;
+    try {
+      hasFiledir =
+        rawPhp.fileExists(FILEDIR_PATH) && rawPhp.isDir(FILEDIR_PATH);
+    } catch {
+      return { ok: true, mode: "fallback", files: [] };
+    }
+
+    if (!hasFiledir) {
       return { ok: true, mode: "fallback", files: [] };
     }
 
