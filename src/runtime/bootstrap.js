@@ -724,6 +724,16 @@ try {
         'gradepointmax' => '100',
         'downloadcoursecontentallowed' => '0',
         'enablesharingtomoodlenet' => '0',
+        // Additional playground-specific disables for lower memory/CPU and
+        // simpler UX (these are safe in ephemeral single-user environment).
+        'enableanalytics' => '0',
+        'enablestats' => '0',
+        'enableportfolios' => '0',
+        'messaging' => '0',
+        'allowemojipicker' => '0',
+        'showuseridentity' => '',
+        'enablebadges' => '0',
+        'enableglobalsearch' => '0',
     ];
 
     foreach ($defaults as $name => $value) {
