@@ -192,7 +192,8 @@ export async function flushPendingOps({
     const merged = normalizeFilesystemOperations([...current, ...hydrated]);
     await replacePersistedOps(merged);
     const hydratedBytes = hydrated.reduce(
-      (sum, op) => sum + (op.operation === "WRITE" ? op.data?.byteLength || 0 : 0),
+      (sum, op) =>
+        sum + (op.operation === "WRITE" ? op.data?.byteLength || 0 : 0),
       0,
     );
 

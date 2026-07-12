@@ -419,7 +419,8 @@ export function createSnapshotManager({
       } else {
         postShell({
           kind: "trace",
-          detail: "[snapshot] no plugin dirs tracked, skipping plugin hydration",
+          detail:
+            "[snapshot] no plugin dirs tracked, skipping plugin hydration",
         });
       }
 
