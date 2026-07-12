@@ -59,11 +59,16 @@ let automaticPhpInfoAttempted = false;
 //      MIN_REQUESTS_BEFORE_RESTART requests, it is likely a fundamental bug
 //      — do not restart (avoids infinite boot-crash-boot loops).
 //
-// No preventive rotation is performed. WordPress Playground does not rotate
-// preventively either; the correct fix for memory leaks is root-cause, not
-// periodic restarts that cost 3-8s each.
+// Preventive (scheduled) rotation is intentionally off by default because
+// a full Moodle boot is expensive. WP Playground rotates after N requests
+// in some hosting scenarios; here we only log at a very high watermark so
+// operators can decide to reload the tab. A future opt-in may be added.
 const MAX_REACTIVE_RESTARTS = 20;
 const MIN_REQUESTS_BEFORE_RESTART = 10;
+
+// Very high watermark — crossing this suggests a long-lived tab may be
+// accumulating leaks. We log a diagnostic but do not auto-reboot.
+const RUNTIME_HIGH_WATERMARK_REQUESTS = 1500;
 let requestCount = 0;
 let reactiveRestartCount = 0;
 
@@ -536,15 +541,41 @@ async function getRuntimeState() {
 
     // Kick off the manifest resolution + bundle download NOW so it overlaps the
     // WASM compile in php.refresh(). The no-op .catch prevents an
-    // unhandledrejection if refresh() throws first; the real error resurfaces
-    // at `await archivePromise` inside bootstrapMoodle and flows into the
-    // bootstrap-error catch below.
+    // unhandledrejection if refresh() throws first.
     const archivePromise = startArchiveResolution({
       moodleBranch,
       appBaseUrl: appRootUrl,
       publish,
     });
     archivePromise.catch(() => {});
+
+    // Eagerly start snapshot + localcache seed downloads as soon as the
+    // manifest is known. This overlaps them with both WASM compile and the
+    // big core tar.zst, reducing critical path on snapshot-origin boots.
+    const snapshotAssetsPromise = archivePromise
+      .then((arch) => {
+        const m = arch?.manifest;
+        const ps = [];
+        if (m?.snapshot?.url) {
+          ps.push(
+            import("./lib/moodle-loader.js").then(({ fetchAssetWithCache }) =>
+              fetchAssetWithCache(m.snapshot.url, m.snapshot).catch((e) => ({ error: e })),
+            ),
+          );
+        }
+        if (m?.snapshot?.localcache?.url) {
+          ps.push(
+            import("./lib/moodle-loader.js").then(({ fetchAssetWithCache }) =>
+              fetchAssetWithCache(
+                m.snapshot.localcache.url,
+                m.snapshot.localcache,
+              ).catch((e) => ({ error: e })),
+            ),
+          );
+        }
+        return Promise.all(ps);
+      })
+      .catch(() => {});
 
     const t1 = performance.now();
     await php.refresh();
@@ -707,6 +738,18 @@ function installBridgeListener() {
 
       try {
         requestCount += 1;
+
+        // High-watermark diagnostic (no auto action — full reboot is expensive).
+        if (requestCount === RUNTIME_HIGH_WATERMARK_REQUESTS) {
+          postShell({
+            kind: "log",
+            level: "warn",
+            message:
+              `[perf] Request count reached ${RUNTIME_HIGH_WATERMARK_REQUESTS}. ` +
+              `Long-lived tab may benefit from a manual Reset Playground to release accumulated memory.`,
+          });
+        }
+
         const state = await getRuntimeState();
         const response = await executePhpRequest(state, data.request);
         // Detect plugin installations from Moodle's native admin UI

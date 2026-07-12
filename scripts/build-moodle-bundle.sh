@@ -200,6 +200,13 @@ set -- "$@" \
   -x "*/AUTHORS*" -x "*/CONTRIBUTING*" \
   -x "*/upgrade.txt" -x "*/UPGRADING*"
 
+# Additional low-risk non-runtime files and metadata. These are never
+# included by Moodle's PHP loader or asset pipelines in normal operation.
+set -- "$@" \
+  -x "*/.editorconfig" -x "*/*.editorconfig" \
+  -x "*/psalm.xml*" -x "*/phpstan*" -x "*/.phpcs.xml*" -x "*/phpcs.xml*" \
+  -x "*/.github/workflows/*"
+
 (cd "$MOODLE_DIR" && zip -qr "$BUNDLE_PATH" . "$@")
 
 # Keep the manifest fileCount consistent with what the zip actually contains:
@@ -252,6 +259,13 @@ TAR_BUNDLE_PATH="$DIST_DIR/$TAR_BUNDLE_NAME"
 echo "Converting $BUNDLE_NAME -> $TAR_BUNDLE_NAME" >&2
 node "$SCRIPT_DIR/build-tar-zst-from-zip.mjs" "$BUNDLE_PATH" "$TAR_BUNDLE_PATH"
 rm -f "$BUNDLE_PATH"
+
+# Enforce tar.zst as the only shipped bundle format (ADR 0019).
+if [ ! -f "$TAR_BUNDLE_PATH" ]; then
+  echo "ERROR: expected tar.zst bundle was not produced: $TAR_BUNDLE_PATH" >&2
+  exit 1
+fi
+echo "Final bundle: $TAR_BUNDLE_PATH (tar.zst, $(stat -c%s "$TAR_BUNDLE_PATH" 2>/dev/null || wc -c < "$TAR_BUNDLE_PATH") bytes)" >&2
 
 SNAPSHOT_ARGS=""
 if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
