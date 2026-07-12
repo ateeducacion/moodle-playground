@@ -133,11 +133,11 @@ export function formatErrorDetail(error) {
  * @param {{ postShell: (msg: object) => void }} options
  * @returns {object} Snapshot manager with hydrate/restore methods.
  */
-const FILEDIR_PATH = "/persist/moodledata/filedir";
-
 export function createSnapshotManager({ postShell }) {
   let savedDbSnapshot = null;
   let savedPluginFiles = null;
+  // filedir snapshot intentionally disabled to reduce memory on crash path
+  // (see ADR-0027). We keep the variable for minimal diff but never populate it.
   let savedFiledirFiles = null;
   /** Paths of plugin directories installed during this session. */
   const installedPluginDirs = new Set();
@@ -348,11 +348,8 @@ export function createSnapshotManager({ postShell }) {
 
     /** Whether there is a saved snapshot waiting to be restored. */
     get hasPendingRestore() {
-      return (
-        savedDbSnapshot !== null ||
-        savedPluginFiles !== null
-        // filedir intentionally not snapshotted to reduce memory on crash path
-      );
+      // filedir intentionally not snapshotted (see ADR-0027)
+      return savedDbSnapshot !== null || savedPluginFiles !== null;
     },
 
     /**
