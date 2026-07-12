@@ -37,3 +37,5 @@ folder and keep their original lightweight format (see
 | [ADR-0021](ADR-0021-blueprint-per-step-timing-diagnostics.md) | Blueprint per-step timing instrumentation + `[blueprint-perf]` diagnostics channel | Accepted | 2026-07-08 |
 | [ADR-0022](ADR-0022-browser-side-course-backup-download.md) | Browser-side course backup (.mbz) download with progress | Accepted | 2026-07-08 |
 | [ADR-0023](ADR-0023-resilient-resource-fetch-and-non-fatal-steps.md) | Resilient resource fetching + non-fatal-by-default blueprint steps | Accepted | 2026-07-08 |
+| [ADR-0024](ADR-0024-browser-memory-and-emscripten-configuration.md) | Lower base PHP memory_limit and Emscripten INITIAL_MEMORY for browser WASM environments | Proposed | 2026-07-12 |
+| [ADR-0025](ADR-0025-boot-time-asset-delivery-and-runtime-lifecycle.md) | Boot-time asset delivery overlap, static fast-paths, and long-lived runtime diagnostics | Proposed | 2026-07-12 |
