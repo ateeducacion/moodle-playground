@@ -536,15 +536,41 @@ async function getRuntimeState() {
 
     // Kick off the manifest resolution + bundle download NOW so it overlaps the
     // WASM compile in php.refresh(). The no-op .catch prevents an
-    // unhandledrejection if refresh() throws first; the real error resurfaces
-    // at `await archivePromise` inside bootstrapMoodle and flows into the
-    // bootstrap-error catch below.
+    // unhandledrejection if refresh() throws first.
     const archivePromise = startArchiveResolution({
       moodleBranch,
       appBaseUrl: appRootUrl,
       publish,
     });
     archivePromise.catch(() => {});
+
+    // Eagerly start snapshot + localcache seed downloads as soon as the
+    // manifest is known. This overlaps them with both WASM compile and the
+    // big core tar.zst, reducing critical path on snapshot-origin boots.
+    const snapshotAssetsPromise = archivePromise
+      .then((arch) => {
+        const m = arch?.manifest;
+        const ps = [];
+        if (m?.snapshot?.url) {
+          ps.push(
+            import("./lib/moodle-loader.js").then(({ fetchAssetWithCache }) =>
+              fetchAssetWithCache(m.snapshot.url, m.snapshot).catch((e) => ({ error: e })),
+            ),
+          );
+        }
+        if (m?.snapshot?.localcache?.url) {
+          ps.push(
+            import("./lib/moodle-loader.js").then(({ fetchAssetWithCache }) =>
+              fetchAssetWithCache(
+                m.snapshot.localcache.url,
+                m.snapshot.localcache,
+              ).catch((e) => ({ error: e })),
+            ),
+          );
+        }
+        return Promise.all(ps);
+      })
+      .catch(() => {});
 
     const t1 = performance.now();
     await php.refresh();
