@@ -149,7 +149,7 @@ byte counts for diagnostics.
   pending queue.
 - Crash recovery tests verify journal success, checkpoint failure, bounded
   no-persistence fallback, and fallback size rejection.
-- CI and manual forced-crash verification cover the complete browser flow.
+- CI runs the complete unit test, Biome, build, and browser E2E suites.
 
 ## Follow-up work
 
