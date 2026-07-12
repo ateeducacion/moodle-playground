@@ -39,9 +39,9 @@ fi
 # WASM runtime and snapshot generation scripts.
 PHP_COMMON_ARGS="
 -d max_input_vars=5000
--d memory_limit=512M
--d post_max_size=128M
--d upload_max_filesize=128M
+-d memory_limit=256M
+-d post_max_size=64M
+-d upload_max_filesize=64M
 "
 
 # Check native PHP has pdo_sqlite
