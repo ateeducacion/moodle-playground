@@ -1394,10 +1394,7 @@ describe("github-proxy-worker ?release=latest and &asset-pattern=", () => {
     global.fetch = async (url) => {
       const u = String(url);
 
-      if (
-        u ===
-        "https://api.github.com/repos/owner/repo/releases/tags/1.9.7"
-      ) {
+      if (u === "https://api.github.com/repos/owner/repo/releases/tags/1.9.7") {
         return new Response(
           JSON.stringify({
             tag_name: "1.9.7",
@@ -1444,10 +1441,7 @@ describe("github-proxy-worker ?release=latest and &asset-pattern=", () => {
     global.fetch = async (url) => {
       const u = String(url);
 
-      if (
-        u ===
-        "https://api.github.com/repos/owner/repo/releases/latest"
-      ) {
+      if (u === "https://api.github.com/repos/owner/repo/releases/latest") {
         return new Response(
           JSON.stringify({
             tag_name: "1.9.8",
