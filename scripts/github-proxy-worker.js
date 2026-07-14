@@ -8,12 +8,20 @@
 //    omeka.org / dev.omeka.org resources (plugin/module pages and downloads), and
 //    Nextcloud / ownCloud public share links (/s/{token}[/download]) on any host.
 //
-// 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&atom=...][&path=...]
+// 2. GitHub proxy mode: ?repo={owner/repo}[&branch=...][&pr=...][&commit=...][&release=...][&asset=...][&asset-pattern=...][&atom=...][&path=...]
 //    Builds the correct GitHub URL from semantic parameters and proxies the response.
 //    With &path={file} it serves a single raw file at the given ref (default
 //    branch when no ref is given) with CORS — e.g. a blueprint.json living in
 //    the repo. The ref travels as a query param, so refs with slashes
 //    (feat/x) are handled losslessly.
+//    &release=latest resolves the repo's current latest release via the
+//    GitHub API instead of a fixed tag. &asset-pattern={glob} picks a release
+//    asset by a shell-style glob (e.g. "package-*.tar.gz") instead of an
+//    exact &asset= filename, so a blueprint URL keeps working release after
+//    release without pinning a version. Both require a successful GitHub API
+//    call — unlike &asset= with an exact &release= tag, there is no
+//    deterministic direct-download URL to fall back to when the tag or asset
+//    name isn't known up front.
 //
 // Environment variables (optional):
 //   GITHUB_TOKEN – A GitHub personal access token to raise API rate limits from 60 to 5000 req/hour.
@@ -69,8 +77,10 @@ export default {
           branch: "?repo={owner/repo}[&branch={branch}]",
           pr: "?repo={owner/repo}&pr={number}",
           commit: "?repo={owner/repo}&commit={sha}",
-          release: "?repo={owner/repo}&release={tag}",
-          asset: "?repo={owner/repo}&release={tag}&asset={filename}",
+          release: "?repo={owner/repo}&release={tag|latest}",
+          asset: "?repo={owner/repo}&release={tag|latest}&asset={filename}",
+          asset_pattern:
+            "?repo={owner/repo}&release={tag|latest}&asset-pattern={glob}",
           raw_file: "?repo={owner/repo}&path={path}[&branch={branch}]",
           atom_releases: "?repo={owner/repo}&atom=releases",
           atom_tags: "?repo={owner/repo}&atom=tags",
@@ -111,21 +121,24 @@ async function handleGitHubProxy(params, env) {
     return handleAtomFeed(repo, params.get("atom"));
   }
 
-  // Release asset
-  if (params.has("release") && params.has("asset")) {
+  // Release asset (exact filename, or a glob via &asset-pattern=)
+  if (
+    params.has("release") &&
+    (params.has("asset") || params.has("asset-pattern"))
+  ) {
     return handleReleaseAsset(
       repo,
       params.get("release"),
       params.get("asset"),
       env,
+      null,
+      params.get("asset-pattern"),
     );
   }
 
   // Full release ZIP
   if (params.has("release")) {
-    return proxyGitHubZip(
-      `${GITHUB_BASE}/${repo}/archive/refs/tags/${params.get("release")}.zip`,
-    );
+    return handleReleaseZip(repo, params.get("release"), env);
   }
 
   // Specific commit
@@ -315,10 +328,52 @@ async function handlePullRequest(repo, prNumber, env) {
 }
 
 // ---------------------------------------------------------------------------
+// Release ZIP resolution (source archive)
+// ---------------------------------------------------------------------------
+
+async function handleReleaseZip(repo, release, env) {
+  if (release !== "latest") {
+    return proxyGitHubZip(
+      `${GITHUB_BASE}/${repo}/archive/refs/tags/${release}.zip`,
+    );
+  }
+
+  // Unlike a fixed tag, "latest" has no deterministic archive URL — it must
+  // be resolved through the API first.
+  const data = await githubApiRequest(
+    `${GITHUB_API}/repos/${repo}/releases/latest`,
+    env,
+  );
+
+  if (!data?.tag_name) {
+    return jsonResponse(
+      {
+        error:
+          "Could not resolve the latest release via the GitHub API (rate-limited or blocked).",
+      },
+      502,
+    );
+  }
+
+  return proxyGitHubZip(
+    `${GITHUB_BASE}/${repo}/archive/refs/tags/${data.tag_name}.zip`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Release asset resolution
 // ---------------------------------------------------------------------------
 
-async function handleReleaseAsset(repo, tag, assetName, env, request = null) {
+async function handleReleaseAsset(
+  repo,
+  tag,
+  assetName,
+  env,
+  request = null,
+  assetPattern = null,
+) {
+  const isLatest = tag === "latest";
+
   // A release asset's browser_download_url is deterministic:
   //   https://github.com/{repo}/releases/download/{tag}/{assetName}
   // and 302s to the asset CDN with no API call. We query the API first only to
@@ -327,25 +382,36 @@ async function handleReleaseAsset(repo, tag, assetName, env, request = null) {
   // GITHUB_TOKEN can be blocked for the repo (e.g. an org fine-grained-PAT
   // policy 404s a public repo), which would otherwise turn every legitimate
   // download into a 502 JSON body.
-  const directUrl = `${GITHUB_BASE}/${repo}/releases/download/${encodeURIComponent(
-    tag,
-  )}/${encodeURIComponent(assetName)}`;
+  //
+  // That deterministic shortcut only exists for an EXACT tag + exact asset
+  // name. Resolving "latest" or matching &asset-pattern= both depend on
+  // reading the actual release/asset list back from the API, since neither
+  // the real tag nor the real filename is known up front.
+  const apiUrl = isLatest
+    ? `${GITHUB_API}/repos/${repo}/releases/latest`
+    : `${GITHUB_API}/repos/${repo}/releases/tags/${tag}`;
 
-  const apiUrl = `${GITHUB_API}/repos/${repo}/releases/tags/${tag}`;
   const data = await githubApiRequest(apiUrl, env);
 
-  // API reachable: validate the asset name and use its canonical download URL.
+  // API reachable: validate/resolve the asset and use its canonical download URL.
   if (data?.assets) {
-    const asset = data.assets.find(
-      (a) => a.name.toLowerCase() === assetName.toLowerCase(),
-    );
+    const asset = assetPattern
+      ? findAssetByPattern(data.assets, assetPattern)
+      : data.assets.find(
+          (a) => a.name.toLowerCase() === assetName.toLowerCase(),
+        );
 
     if (!asset) {
       const available = data.assets.map((a) => a.name);
+      const releaseLabel = isLatest
+        ? `latest (${data.tag_name || "unknown tag"})`
+        : `"${tag}"`;
 
       return jsonResponse(
         {
-          error: `Asset "${assetName}" not found in release "${tag}".`,
+          error: assetPattern
+            ? `No asset matching pattern "${assetPattern}" found in release ${releaseLabel}.`
+            : `Asset "${assetName}" not found in release ${releaseLabel}.`,
           available_assets: available,
         },
         404,
@@ -358,9 +424,45 @@ async function handleReleaseAsset(repo, tag, assetName, env, request = null) {
     });
   }
 
-  // API unavailable/blocked: fall back to the deterministic direct URL so the
-  // download still works without any api.github.com call.
+  // API unavailable/blocked. "latest" and asset-pattern have no deterministic
+  // fallback URL (the real tag/filename is unknown), so fail clearly instead
+  // of guessing.
+  if (isLatest || assetPattern) {
+    return jsonResponse(
+      {
+        error:
+          "Could not resolve the release via the GitHub API (rate-limited or blocked). Resolving 'latest' or an asset-pattern requires a successful API call.",
+      },
+      502,
+    );
+  }
+
+  // Exact tag + exact asset name: fall back to the deterministic direct URL
+  // so the download still works without any api.github.com call.
+  const directUrl = `${GITHUB_BASE}/${repo}/releases/download/${encodeURIComponent(
+    tag,
+  )}/${encodeURIComponent(assetName)}`;
+
   return proxyGitHubZip(directUrl, { request, downloadFilename: assetName });
+}
+
+// Matches a release asset name against a shell-style glob (only `*` and `?`
+// are wildcards; everything else is matched literally). Lets a blueprint URL
+// pin to an asset shape (e.g. "package-*.tar.gz") instead of an exact
+// versioned filename, so it keeps resolving across releases.
+function findAssetByPattern(assets, pattern) {
+  const regex = globToRegExp(pattern);
+
+  return assets.find((a) => regex.test(a.name));
+}
+
+function globToRegExp(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+
+  return new RegExp(`^${escaped}$`, "iu");
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,8 +1594,8 @@ function landingPageHtml(origin) {
         <span class="method">GET</span>
         <span class="endpoint-name">Release</span>
       </div>
-      <div class="endpoint-desc">Download the source archive for a tagged release.</div>
-      <div class="url-box">${base}/?repo=<span class="param">{owner/repo}</span>&amp;release=<span class="param">{tag}</span></div>
+      <div class="endpoint-desc">Download the source archive for a tagged release, or <code>latest</code> to always resolve the repo's current latest release.</div>
+      <div class="url-box">${base}/?repo=<span class="param">{owner/repo}</span>&amp;release=<span class="param">{tag|latest}</span></div>
     </div>
 
     <div class="endpoint">
@@ -1501,8 +1603,17 @@ function landingPageHtml(origin) {
         <span class="method">GET</span>
         <span class="endpoint-name">Release Asset</span>
       </div>
-      <div class="endpoint-desc">Download a specific asset file attached to a release.</div>
-      <div class="url-box">${base}/?repo=<span class="param">{owner/repo}</span>&amp;release=<span class="param">{tag}</span>&amp;asset=<span class="param">{filename}</span></div>
+      <div class="endpoint-desc">Download a specific asset file attached to a release (also accepts <code>release=latest</code>).</div>
+      <div class="url-box">${base}/?repo=<span class="param">{owner/repo}</span>&amp;release=<span class="param">{tag|latest}</span>&amp;asset=<span class="param">{filename}</span></div>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="endpoint-name">Release Asset (pattern)</span>
+      </div>
+      <div class="endpoint-desc">Download a release asset matched by a glob instead of an exact filename — handy when the filename embeds a version, e.g. <code>package-*.tar.gz</code>. Combine with <code>release=latest</code> for a URL that never needs updating.</div>
+      <div class="url-box">${base}/?repo=<span class="param">{owner/repo}</span>&amp;release=<span class="param">{tag|latest}</span>&amp;asset-pattern=<span class="param">{glob}</span></div>
     </div>
 
   </div>
