@@ -31,7 +31,7 @@ env:
 jobs:
   # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
   lint-and-test:
-    if: github.event.action != 'closed'
+    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -70,7 +70,7 @@ jobs:
 
   # ── Build: all 6 Moodle branches + docs ──
   build:
-    if: github.event.action != 'closed'
+    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -203,6 +203,7 @@ jobs:
 
   # ── E2E: Chromium + Firefox ──
   e2e:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     needs: build
     runs-on: ubuntu-latest
     strategy:
