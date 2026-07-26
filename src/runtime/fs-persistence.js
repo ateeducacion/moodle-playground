@@ -4,6 +4,7 @@ import {
   normalizeFilesystemOperations,
   replayFSJournal,
 } from "@php-wasm/fs-journal";
+import { __private__dont__use } from "@php-wasm/universal";
 
 // Persist Moodle's mutable state (SQLite DB at /persist/moodledata/*.sq3.php,
 // moodledata/filedir, config under /persist) to IndexedDB via @php-wasm/fs-journal,
@@ -30,6 +31,29 @@ const EPHEMERAL_RE =
 
 function isEphemeralPath(path) {
   return EPHEMERAL_RE.test(path || "");
+}
+
+function pathMatchesPrefix(path, pathPrefix) {
+  if (!pathPrefix) return true;
+  const normalizedPrefix = String(pathPrefix).replace(/\/$/u, "");
+  return path === normalizedPrefix || path.startsWith(`${normalizedPrefix}/`);
+}
+
+/**
+ * Check whether a journal operation affects a path prefix.
+ *
+ * @param {object} operation - Filesystem journal operation.
+ * @param {string} pathPrefix - Path prefix to match.
+ * @returns {boolean} Whether the operation touches the prefix.
+ */
+export function operationTouchesPathPrefix(operation, pathPrefix) {
+  if (pathMatchesPrefix(operation?.path || "", pathPrefix)) {
+    return true;
+  }
+  return (
+    operation?.operation === "RENAME" &&
+    pathMatchesPrefix(operation.toPath || "", pathPrefix)
+  );
 }
 
 async function openDb(name) {
@@ -91,17 +115,167 @@ export async function collapseAndHydrate(rawPhp, ops) {
   return hydrateUpdateFileOps(rawPhp, normalizeFilesystemOperations(ops));
 }
 
-async function flushOps(rawPhp, db, pendingOps) {
-  if (pendingOps.length === 0) return;
-  const ops = pendingOps.splice(0);
-  try {
-    const hydrated = await collapseAndHydrate(rawPhp, ops);
-    const current = await loadOps(db);
-    const merged = normalizeFilesystemOperations([...current, ...hydrated]);
-    await replaceOps(db, merged);
-  } catch {
-    // Non-fatal — changes are in MEMFS even if the journal write fails.
+function estimateWriteBytes(rawPhp, ops, getFileSize) {
+  let estimatedBytes = 0;
+  const resolveFileSize =
+    getFileSize ||
+    ((path) => rawPhp[__private__dont__use].FS.stat(path).size || 0);
+
+  for (const op of ops) {
+    if (op.operation !== "WRITE") continue;
+    estimatedBytes += Number(resolveFileSize(op.path)) || 0;
   }
+
+  return estimatedBytes;
+}
+
+/**
+ * Flush selected pending operations into the persisted journal.
+ *
+ * Selected operations are removed from the pending queue before hydration so
+ * concurrent filesystem events can continue to accumulate. On failure, the
+ * selected operations are put back at the front of the queue.
+ *
+ * @param {object} options - Flush dependencies and limits.
+ * @returns {Promise<object>} Flush result.
+ */
+export async function flushPendingOps({
+  rawPhp,
+  pendingOps,
+  loadPersistedOps,
+  replacePersistedOps,
+  shouldFlush = () => true,
+  maxBytes = Number.POSITIVE_INFINITY,
+  getFileSize = null,
+}) {
+  const selectedOps = [];
+  const remainingOps = [];
+
+  for (const op of pendingOps) {
+    if (shouldFlush(op)) {
+      selectedOps.push(op);
+    } else {
+      remainingOps.push(op);
+    }
+  }
+
+  if (selectedOps.length === 0) {
+    return {
+      ok: true,
+      flushedOps: 0,
+      hydratedBytes: 0,
+      estimatedBytes: 0,
+    };
+  }
+
+  pendingOps.splice(0, pendingOps.length, ...remainingOps);
+  const normalizedOps = normalizeFilesystemOperations(selectedOps);
+
+  let estimatedBytes = 0;
+  try {
+    if (Number.isFinite(maxBytes)) {
+      estimatedBytes = estimateWriteBytes(rawPhp, normalizedOps, getFileSize);
+      if (estimatedBytes > maxBytes) {
+        pendingOps.unshift(...selectedOps);
+        return {
+          ok: false,
+          reason: "size-limit",
+          flushedOps: 0,
+          hydratedBytes: 0,
+          estimatedBytes,
+        };
+      }
+    }
+
+    const hydrated = await hydrateUpdateFileOps(rawPhp, normalizedOps);
+    const current = await loadPersistedOps();
+    const merged = normalizeFilesystemOperations([...current, ...hydrated]);
+    await replacePersistedOps(merged);
+    const hydratedBytes = hydrated.reduce(
+      (sum, op) =>
+        sum + (op.operation === "WRITE" ? op.data?.byteLength || 0 : 0),
+      0,
+    );
+
+    return {
+      ok: true,
+      flushedOps: hydrated.length,
+      hydratedBytes,
+      estimatedBytes,
+    };
+  } catch (error) {
+    pendingOps.unshift(...selectedOps);
+    return {
+      ok: false,
+      reason: "flush-failed",
+      error,
+      flushedOps: 0,
+      hydratedBytes: 0,
+      estimatedBytes,
+    };
+  }
+}
+
+function createJournalFlusher(rawPhp, persistDb, pendingOps) {
+  let flushTimer = null;
+  let flushQueue = Promise.resolve();
+
+  const enqueueFlush = (options = {}) => {
+    const run = flushQueue.then(() =>
+      flushPendingOps({
+        rawPhp,
+        pendingOps,
+        loadPersistedOps: () => loadOps(persistDb),
+        replacePersistedOps: (ops) => replaceOps(persistDb, ops),
+        ...options,
+      }),
+    );
+    flushQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer !== null) return;
+    flushTimer = setTimeout(async () => {
+      flushTimer = null;
+      await enqueueFlush();
+    }, FLUSH_DELAY_MS);
+  };
+
+  const flushNow = async ({ pathPrefix = null, maxBytes } = {}) => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+
+    const shouldFlush = pathPrefix
+      ? (op) => operationTouchesPathPrefix(op, pathPrefix)
+      : () => true;
+    const aggregate = {
+      ok: true,
+      flushedOps: 0,
+      hydratedBytes: 0,
+      estimatedBytes: 0,
+    };
+
+    while (pendingOps.some(shouldFlush)) {
+      const result = await enqueueFlush({ shouldFlush, maxBytes });
+      aggregate.flushedOps += result.flushedOps || 0;
+      aggregate.hydratedBytes += result.hydratedBytes || 0;
+      aggregate.estimatedBytes += result.estimatedBytes || 0;
+
+      if (!result.ok) {
+        return { ...aggregate, ...result, ok: false };
+      }
+    }
+
+    return aggregate;
+  };
+
+  return { flushNow, scheduleFlush };
 }
 
 export async function clearJournal(scopeId) {
@@ -138,25 +312,17 @@ function replayResilient(rawPhp, ops) {
 export async function initFsPersistence(rawPhp, scopeId) {
   const persistDb = await openDb(`${PERSIST_DB_PREFIX}:${scopeId}`);
   const pendingPersistOps = [];
-  let flushTimer = null;
-
-  const scheduleFlush = () => {
-    if (flushTimer !== null) return;
-    flushTimer = setTimeout(async () => {
-      flushTimer = null;
-      await flushOps(rawPhp, persistDb, pendingPersistOps);
-    }, FLUSH_DELAY_MS);
-  };
+  const flusher = createJournalFlusher(rawPhp, persistDb, pendingPersistOps);
 
   // Journal /persist — mutable app data (DB, moodledata, config). Skip ephemeral
   // SQLite temp files: they are created and deleted within a single transaction
   // and cause hydration failures if journaled.
   journalFSEvents(rawPhp, "/persist", (op) => {
     const path = op.path || "";
-    if (/\.(sqlite-journal|sqlite-wal|sqlite-shm)$/.test(path)) return;
+    if (/\.(sqlite-journal|sqlite-wal|sqlite-shm)$/u.test(path)) return;
     if (isEphemeralPath(path)) return;
     pendingPersistOps.push(op);
-    scheduleFlush();
+    flusher.scheduleFlush();
   });
 
   // Drop any cache ops a pre-fix session may have already journaled, so an old
@@ -165,4 +331,8 @@ export async function initFsPersistence(rawPhp, scopeId) {
     (op) => !isEphemeralPath(op.path),
   );
   replayResilient(rawPhp, savedPersistOps);
+
+  return {
+    flushNow: flusher.flushNow,
+  };
 }

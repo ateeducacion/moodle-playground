@@ -40,4 +40,4 @@ folder and keep their original lightweight format (see
 | [ADR-0024](ADR-0024-browser-memory-and-emscripten-configuration.md) | Lower base PHP memory_limit and Emscripten INITIAL_MEMORY for browser WASM environments | Proposed | 2026-07-12 |
 | [ADR-0025](ADR-0025-boot-time-asset-delivery-and-runtime-lifecycle.md) | Boot-time asset delivery overlap, static fast-paths, and long-lived runtime diagnostics | Proposed | 2026-07-12 |
 | [ADR-0026](ADR-0026-playground-config-minimization.md) | Playground-specific minimization of Moodle configuration and features for memory and simplicity | Proposed | 2026-07-12 |
-| [ADR-0027](ADR-0027-selective-crash-recovery-snapshots.md) | Selective crash recovery snapshots to bound memory usage during recovery | Proposed | 2026-07-12 |
+| [ADR-0027](ADR-0027-selective-crash-recovery-snapshots.md) | Coherent selective crash recovery checkpoints | Proposed | 2026-07-12 |

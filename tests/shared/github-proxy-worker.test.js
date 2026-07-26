@@ -1290,6 +1290,249 @@ describe("github-proxy-worker Dropbox shared links", () => {
   });
 });
 
+describe("github-proxy-worker ?release=latest and &asset-pattern=", () => {
+  it("resolves the latest release tag for a full source ZIP", async () => {
+    const calls = [];
+    global.fetch = async (url) => {
+      const u = String(url);
+      calls.push(u);
+
+      if (u === "https://api.github.com/repos/owner/repo/releases/latest") {
+        return new Response(JSON.stringify({ tag_name: "v2.3.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (u === "https://github.com/owner/repo/archive/refs/tags/v2.3.0.zip") {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&release=latest"),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(
+      calls.includes("https://api.github.com/repos/owner/repo/releases/latest"),
+    );
+    assert.ok(
+      calls.includes(
+        "https://github.com/owner/repo/archive/refs/tags/v2.3.0.zip",
+      ),
+    );
+  });
+
+  it("returns 502 for ?release=latest when the API is unreachable (no deterministic fallback)", async () => {
+    global.fetch = async () => new Response("rate limited", { status: 403 });
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&release=latest"),
+      {},
+    );
+
+    assert.equal(response.status, 502);
+    const body = await response.json();
+    assert.match(body.error, /could not resolve the latest release/i);
+  });
+
+  it("downloads a named asset from the latest release (?release=latest&asset=)", async () => {
+    global.fetch = async (url) => {
+      const u = String(url);
+
+      if (u === "https://api.github.com/repos/owner/repo/releases/latest") {
+        return new Response(
+          JSON.stringify({
+            tag_name: "v2.3.0",
+            assets: [
+              {
+                name: "plugin.zip",
+                browser_download_url:
+                  "https://github.com/owner/repo/releases/download/v2.3.0/plugin.zip",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (
+        u ===
+        "https://github.com/owner/repo/releases/download/v2.3.0/plugin.zip"
+      ) {
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=latest&asset=plugin.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      Array.from(new Uint8Array(await response.arrayBuffer())),
+      [0x50, 0x4b, 0x03, 0x04],
+    );
+  });
+
+  it("matches a versioned asset name via &asset-pattern= on a fixed tag", async () => {
+    global.fetch = async (url) => {
+      const u = String(url);
+
+      if (u === "https://api.github.com/repos/owner/repo/releases/tags/1.9.7") {
+        return new Response(
+          JSON.stringify({
+            tag_name: "1.9.7",
+            assets: [
+              {
+                name: "package-1.9.7.tar.gz",
+                browser_download_url:
+                  "https://github.com/owner/repo/releases/download/1.9.7/package-1.9.7.tar.gz",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (
+        u ===
+        "https://github.com/owner/repo/releases/download/1.9.7/package-1.9.7.tar.gz"
+      ) {
+        return new Response(new Uint8Array([0x1f, 0x8b, 0x08, 0x00]), {
+          status: 200,
+          headers: { "Content-Type": "application/gzip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=1.9.7&asset-pattern=package-*.tar.gz",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      'attachment; filename="package-1.9.7.tar.gz"',
+    );
+  });
+
+  it("combines release=latest with &asset-pattern= to track a repo without pinning a version", async () => {
+    global.fetch = async (url) => {
+      const u = String(url);
+
+      if (u === "https://api.github.com/repos/owner/repo/releases/latest") {
+        return new Response(
+          JSON.stringify({
+            tag_name: "1.9.8",
+            assets: [
+              { name: "source.zip", browser_download_url: "irrelevant" },
+              {
+                name: "package-1.9.8.tar.gz",
+                browser_download_url:
+                  "https://github.com/owner/repo/releases/download/1.9.8/package-1.9.8.tar.gz",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (
+        u ===
+        "https://github.com/owner/repo/releases/download/1.9.8/package-1.9.8.tar.gz"
+      ) {
+        return new Response(new Uint8Array([0x1f, 0x8b, 0x08, 0x00]), {
+          status: 200,
+          headers: { "Content-Type": "application/gzip" },
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=latest&asset-pattern=package-*.tar.gz",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      'attachment; filename="package-1.9.8.tar.gz"',
+    );
+  });
+
+  it("returns 404 with the available asset list when no asset matches the pattern", async () => {
+    global.fetch = async (url) => {
+      const u = String(url);
+
+      if (
+        u === "https://api.github.com/repos/owner/repo/releases/tags/v1.0.0"
+      ) {
+        return new Response(
+          JSON.stringify({
+            tag_name: "v1.0.0",
+            assets: [{ name: "other-file.txt", browser_download_url: "x" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=v1.0.0&asset-pattern=plugin-*.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.match(body.error, /no asset matching pattern/i);
+    assert.deepEqual(body.available_assets, ["other-file.txt"]);
+  });
+
+  it("returns 502 for &asset-pattern= when the API is unreachable (no deterministic fallback)", async () => {
+    global.fetch = async () => new Response("rate limited", { status: 403 });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?repo=owner/repo&release=v1.0.0&asset-pattern=plugin-*.zip",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 502);
+    const body = await response.json();
+    assert.match(body.error, /requires a successful api call/i);
+  });
+});
+
 describe("github-proxy-worker ?path= raw file mode", () => {
   it("serves a raw repo file at a branch ref with CORS (slash-safe ref)", async () => {
     const calls = [];
