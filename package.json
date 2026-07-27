@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "concurrently": "^10.0.4",
     "esbuild": "^0.28.1",
     "http-server": "^14.1.1"
