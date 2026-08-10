@@ -16,10 +16,10 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
-    "@php-wasm/fs-journal": "^3.1.47",
-    "@php-wasm/stream-compression": "^3.1.47",
-    "@php-wasm/universal": "^3.1.47",
-    "@php-wasm/web": "^3.1.47",
+    "@php-wasm/fs-journal": "^3.1.48",
+    "@php-wasm/stream-compression": "^3.1.48",
+    "@php-wasm/universal": "^3.1.48",
+    "@php-wasm/web": "^3.1.48",
     "fflate": "^0.8.3",
     "zstddec": "^0.2.0"
   },
