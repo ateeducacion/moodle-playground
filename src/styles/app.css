@@ -221,6 +221,15 @@ button.danger:hover {
   width: auto;
 }
 
+/* Compact app-icon variant of the brand, shown instead of the wordmark on
+   narrow screens. */
+.toolbar-brand__icon {
+  display: none;
+  height: 26px;
+  width: 26px;
+  border-radius: 6px;
+}
+
 .address-form__input {
   display: flex;
   align-items: center;
@@ -816,21 +825,21 @@ button.danger:hover {
     gap: var(--space-sm);
   }
 
-  .address-form__input {
+  /* Minimal mobile toolbar: app icon, Home, and the panel toggle. */
+  .toolbar-brand__logo {
     display: none;
   }
 
-  .toolbar-separator {
-    display: none;
+  .toolbar-brand__icon {
+    display: block;
   }
 
-  .browser-toolbar .icon-button--labeled {
-    width: 36px;
-    min-width: 36px;
-    padding: 0;
-  }
-
-  .browser-toolbar .icon-button__label {
+  .address-form__input,
+  .toolbar-separator,
+  .browser-toolbar .icon-button--labeled,
+  .browser-toolbar .toolbar-github,
+  #back-button,
+  #refresh-button {
     display: none;
   }
 
