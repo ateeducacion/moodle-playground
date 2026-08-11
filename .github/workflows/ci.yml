@@ -201,9 +201,9 @@ jobs:
             gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$BODY" >/dev/null
           fi
 
-  # ── E2E: Chromium + Firefox, split across two runners per browser ──
+  # ── E2E: Chromium + Firefox, shard only the Firefox critical path ──
   e2e:
-    name: e2e (${{ matrix.browser }}, shard ${{ matrix.shard }}/${{ matrix.total_shards }})
+    name: e2e (${{ matrix.label }})
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -211,20 +211,19 @@ jobs:
       matrix:
         include:
           - browser: chromium
-            shard: 1
-            total_shards: 2
-            workers: 2
-          - browser: chromium
-            shard: 2
-            total_shards: 2
+            label: chromium
+            shard_arg: ""
+            artifact: chromium
             workers: 2
           - browser: firefox
-            shard: 1
-            total_shards: 2
+            label: firefox, shard 1/2
+            shard_arg: --shard=1/2
+            artifact: firefox-1-of-2
             workers: 2
           - browser: firefox
-            shard: 2
-            total_shards: 2
+            label: firefox, shard 2/2
+            shard_arg: --shard=2/2
+            artifact: firefox-2-of-2
             workers: 2
     steps:
       - uses: actions/checkout@v7
@@ -246,8 +245,8 @@ jobs:
           name: site-build
           path: _site
 
-      - name: Run Playwright e2e tests (${{ matrix.browser }}, shard ${{ matrix.shard }}/${{ matrix.total_shards }})
-        run: npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/${{ matrix.total_shards }}
+      - name: Run Playwright e2e tests (${{ matrix.label }})
+        run: npx playwright test --project=${{ matrix.browser }} ${{ matrix.shard_arg }}
         env:
           CI: "true"
           PLAYWRIGHT_WEB_ROOT: _site
@@ -258,7 +257,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-results-${{ matrix.browser }}-${{ matrix.shard }}-of-${{ matrix.total_shards }}
+          name: e2e-results-${{ matrix.artifact }}
           path: test-results/
           retention-days: 7
 
@@ -293,4 +292,4 @@ jobs:
       - name: Deploy to Cloudflare Pages (production)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx --yes wrangler@4 pages deploy _site --project-name="$CLOUDFLARE_PAGES_PROJECT" --branch=main
+        run: npx --yes wrangler@4 pages deploy _site --project-name="$CLOUDFLARE_PAGES_PROJECT" --branch=main --commit-dirty=true
