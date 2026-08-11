@@ -825,7 +825,8 @@ button.danger:hover {
     gap: var(--space-sm);
   }
 
-  /* Minimal mobile toolbar: app icon, Home, and the panel toggle. */
+  /* Minimal mobile toolbar: app icon, Home, a narrow URL bar, and the
+     panel toggle. */
   .toolbar-brand__logo {
     display: none;
   }
@@ -834,7 +835,6 @@ button.danger:hover {
     display: block;
   }
 
-  .address-form__input,
   .toolbar-separator,
   .browser-toolbar .icon-button--labeled,
   .browser-toolbar .toolbar-github,
