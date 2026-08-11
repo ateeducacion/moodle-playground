@@ -109,6 +109,148 @@ class sqlite3_pdo_moodle_database extends pdo_moodle_database {
         // Eliminates lock acquisition overhead on every transaction.
         $this->pdb->exec('PRAGMA locking_mode=EXCLUSIVE');
         $this->pdb->exec('PRAGMA page_size=4096');
+        $this->register_mysql_functions();
+    }
+
+    /**
+     * Register emulations of common MySQL SQL functions that SQLite lacks.
+     *
+     * Plugins that let users write raw SQL (e.g. block_configurable_reports) almost
+     * always receive queries written in MySQL dialect, so functions such as
+     * FROM_UNIXTIME() fail on SQLite with "no such function". SQLite supports
+     * user defined functions, so the most common MySQL date/time and string helpers
+     * are emulated here with MySQL semantics (e.g. CONCAT() returns NULL when any
+     * argument is NULL, unlike the SQLite 3.44+ built-in it may override).
+     */
+    protected function register_mysql_functions() {
+        $this->create_sql_function('from_unixtime', function ($timestamp, $format = null) {
+            if ($timestamp === null || !is_numeric($timestamp)) {
+                return null;
+            }
+            $timestamp = (int)$timestamp;
+            if ($format === null) {
+                return date('Y-m-d H:i:s', $timestamp);
+            }
+            return $this->format_mysql_date($timestamp, (string)$format);
+        }, -1);
+        $this->create_sql_function('unix_timestamp', function ($datetime = null) {
+            if ($datetime === null) {
+                return time();
+            }
+            $timestamp = strtotime((string)$datetime);
+            return ($timestamp === false) ? null : $timestamp;
+        }, -1);
+        $this->create_sql_function('date_format', function ($datetime, $format) {
+            if ($datetime === null || $format === null) {
+                return null;
+            }
+            $timestamp = strtotime((string)$datetime);
+            if ($timestamp === false) {
+                return null;
+            }
+            return $this->format_mysql_date($timestamp, (string)$format);
+        }, 2);
+        $this->create_sql_function('now', function () {
+            return date('Y-m-d H:i:s');
+        }, 0);
+        $this->create_sql_function('curdate', function () {
+            return date('Y-m-d');
+        }, 0);
+        $this->create_sql_function('curtime', function () {
+            return date('H:i:s');
+        }, 0);
+        $this->create_sql_function('if', function ($condition, $iftrue, $iffalse) {
+            return $condition ? $iftrue : $iffalse;
+        }, 3);
+        $this->create_sql_function('md5', function ($value) {
+            return ($value === null) ? null : md5((string)$value);
+        }, 1);
+        $this->create_sql_function('concat', function (...$args) {
+            foreach ($args as $arg) {
+                if ($arg === null) {
+                    return null;
+                }
+            }
+            return implode('', array_map('strval', $args));
+        }, -1);
+        $this->create_sql_function('concat_ws', function ($separator, ...$args) {
+            if ($separator === null) {
+                return null;
+            }
+            $parts = [];
+            foreach ($args as $arg) {
+                if ($arg !== null) {
+                    $parts[] = (string)$arg;
+                }
+            }
+            return implode((string)$separator, $parts);
+        }, -1);
+    }
+
+    /**
+     * Register a user defined SQL function on the current connection.
+     *
+     * @param string $name SQL function name (SQLite matches it case-insensitively).
+     * @param callable $callback PHP implementation of the function.
+     * @param int $numargs Number of arguments the function accepts, -1 for variable.
+     */
+    protected function create_sql_function(string $name, callable $callback, int $numargs): void {
+        if (method_exists($this->pdb, 'createFunction')) {
+            // Pdo\Sqlite subclass (PHP 8.4+ PDO::connect()).
+            $this->pdb->createFunction($name, $callback, $numargs);
+        } else if (method_exists($this->pdb, 'sqliteCreateFunction')) {
+            $this->pdb->sqliteCreateFunction($name, $callback, $numargs);
+        }
+    }
+
+    /**
+     * Format a unix timestamp using a MySQL DATE_FORMAT() format string.
+     *
+     * Covers the commonly used specifiers; week-based specifiers (%u, %v, %V,
+     * %x, %X) are approximated with their ISO-8601 equivalents. As in MySQL,
+     * unknown specifiers yield the literal character.
+     *
+     * @param int $timestamp Unix timestamp to format.
+     * @param string $format MySQL format string, e.g. '%Y-%m-%d %H:%i'.
+     * @return string The formatted date.
+     */
+    protected function format_mysql_date(int $timestamp, string $format): string {
+        return preg_replace_callback('/%(.)/', function (array $matches) use ($timestamp): string {
+            switch ($matches[1]) {
+                case 'Y': return date('Y', $timestamp);
+                case 'y': return date('y', $timestamp);
+                case 'M': return date('F', $timestamp);
+                case 'b': return date('M', $timestamp);
+                case 'm': return date('m', $timestamp);
+                case 'c': return date('n', $timestamp);
+                case 'D': return date('jS', $timestamp);
+                case 'd': return date('d', $timestamp);
+                case 'e': return date('j', $timestamp);
+                case 'j': return sprintf('%03d', (int)date('z', $timestamp) + 1);
+                case 'H': return date('H', $timestamp);
+                case 'k': return date('G', $timestamp);
+                case 'h': // 12-hour, zero-padded, same as %I.
+                case 'I': return date('h', $timestamp);
+                case 'l': return date('g', $timestamp);
+                case 'i': return date('i', $timestamp);
+                case 'S': // Seconds, same as %s.
+                case 's': return date('s', $timestamp);
+                case 'f': return sprintf('%06d', (int)date('u', $timestamp));
+                case 'p': return date('A', $timestamp);
+                case 'r': return date('h:i:s A', $timestamp);
+                case 'T': return date('H:i:s', $timestamp);
+                case 'W': return date('l', $timestamp);
+                case 'a': return date('D', $timestamp);
+                case 'w': return date('w', $timestamp);
+                case 'u': // Week-based specifiers approximated as ISO-8601 week.
+                case 'v':
+                case 'V': return date('W', $timestamp);
+                case 'x': // ISO-8601 week-numbering year for %x and %X.
+                case 'X': return date('o', $timestamp);
+                case '%': return '%';
+                default:  return $matches[1];
+            }
+        }, $format);
     }
 
     /**
