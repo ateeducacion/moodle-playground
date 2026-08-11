@@ -6,11 +6,13 @@
 // The Moodle core bundle (a single tar.zst, ~36 MB) can exceed Cloudflare's hard
 // 25 MiB per-file limit. The PHP build and generate-manifest.mjs are left
 // untouched; this runs as a post-processing pass over the assembled _site:
-//   1. For each channel manifest whose bundle file exceeds the cap, split it into
+//   1. Ensure latest.json exists as the backward-compatible alias for the default
+//      MOODLE_500_STABLE manifest, including when the final bundle came from cache.
+//   2. For each channel manifest whose bundle file exceeds the cap, split it into
 //      `<file>.part-NNN` siblings (<= PART_SIZE each).
-//   2. Rewrite that manifest's bundle to add { parts, partSize, totalSize, sha256 }
+//   3. Rewrite that manifest's bundle to add { parts, partSize, totalSize, sha256 }
 //      while PRESERVING format/container/codec (byte-level split, format-agnostic).
-//   3. Delete the original oversized file.
+//   4. Delete the original oversized file.
 // The loader (lib/moodle-loader.js) reassembles the parts and verifies the
 // overall sha256 — byte-identical to the original bundle, which the runtime then
 // streams-decodes exactly as the single-file case.
@@ -115,7 +117,21 @@ function scanOversized(dir) {
 }
 
 // ── main ──
-const manifestFiles = listManifests(join(SITE, "assets", "manifests"));
+const manifestDir = join(SITE, "assets", "manifests");
+const defaultManifest = join(manifestDir, "MOODLE_500_STABLE.json");
+const latestManifest = join(manifestDir, "latest.json");
+
+// A normal bundle build writes latest.json together with MOODLE_500_STABLE.json.
+// A warm CI cache restores only the canonical per-version manifest, so recreate
+// the alias in the assembled site before manifests are post-processed.
+if (fileSize(latestManifest) < 0 && fileSize(defaultManifest) >= 0) {
+  writeFileSync(latestManifest, readFileSync(defaultManifest));
+  console.log(
+    "chunk-bundles: restored latest.json from MOODLE_500_STABLE.json",
+  );
+}
+
+const manifestFiles = listManifests(manifestDir);
 const zipsToDelete = new Set();
 const rewritten = [];
 
