@@ -98,7 +98,115 @@ jobs:
       - name: Generate build metadata
         run: npm run build:version
 
+      - name: Build runtime worker
+        run: npm run build-worker
+
+      - name: Resolve Moodle source refs
+        id: moodle_refs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="https://github.com/moodle/moodle.git"
+          heads=$(git ls-remote "$repo" \
+            refs/heads/MOODLE_404_STABLE \
+            refs/heads/MOODLE_405_STABLE \
+            refs/heads/MOODLE_500_STABLE \
+            refs/heads/MOODLE_501_STABLE \
+            refs/heads/main)
+
+          resolve_head() {
+            local output_name="$1"
+            local ref="$2"
+            local sha
+
+            sha=$(printf '%s\n' "$heads" | awk -v ref="$ref" '$2 == ref { print $1; exit }')
+            if [ -z "$sha" ]; then
+              echo "Unable to resolve Moodle ref: $ref" >&2
+              exit 1
+            fi
+
+            printf '%s=%s\n' "$output_name" "$sha" >> "$GITHUB_OUTPUT"
+            printf '%-20s %s\n' "$output_name" "$sha"
+          }
+
+          resolve_head moodle_404 refs/heads/MOODLE_404_STABLE
+          resolve_head moodle_405 refs/heads/MOODLE_405_STABLE
+          resolve_head moodle_500 refs/heads/MOODLE_500_STABLE
+          resolve_head moodle_501 refs/heads/MOODLE_501_STABLE
+          resolve_head main refs/heads/main
+
+          tag_refs=$(git ls-remote "$repo" \
+            refs/tags/v5.2.0 \
+            'refs/tags/v5.2.0^{}')
+          tag_sha=$(printf '%s\n' "$tag_refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+          if [ -z "$tag_sha" ]; then
+            tag_sha=$(printf '%s\n' "$tag_refs" | awk 'NR == 1 { print $1 }')
+          fi
+          if [ -z "$tag_sha" ]; then
+            echo "Unable to resolve Moodle tag: v5.2.0" >&2
+            exit 1
+          fi
+
+          printf 'moodle_502=%s\n' "$tag_sha" >> "$GITHUB_OUTPUT"
+          printf '%-20s %s\n' moodle_502 "$tag_sha"
+
+      - name: Restore Moodle 4.4 bundle
+        id: cache_404
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_404_STABLE
+            assets/manifests/MOODLE_404_STABLE.json
+          key: moodle-bundle-v1-php83-node24-404-${{ steps.moodle_refs.outputs.moodle_404 }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle 4.5 bundle
+        id: cache_405
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_405_STABLE
+            assets/manifests/MOODLE_405_STABLE.json
+          key: moodle-bundle-v1-php83-node24-405-${{ steps.moodle_refs.outputs.moodle_405 }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle 5.0 bundle
+        id: cache_500
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_500_STABLE
+            assets/manifests/MOODLE_500_STABLE.json
+          key: moodle-bundle-v1-php83-node24-500-${{ steps.moodle_refs.outputs.moodle_500 }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle 5.1 bundle
+        id: cache_501
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_501_STABLE
+            assets/manifests/MOODLE_501_STABLE.json
+          key: moodle-bundle-v1-php83-node24-501-${{ steps.moodle_refs.outputs.moodle_501 }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle 5.2 bundle
+        id: cache_502
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_502_STABLE
+            assets/manifests/MOODLE_502_STABLE.json
+          key: moodle-bundle-v1-php83-node24-502-${{ steps.moodle_refs.outputs.moodle_502 }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle main bundle
+        id: cache_main
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/main
+            assets/manifests/main.json
+          key: moodle-bundle-v1-php83-node24-main-${{ steps.moodle_refs.outputs.main }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
       - name: Restore snapshot cache
+        if: ${{ steps.cache_404.outputs.cache-hit != 'true' || steps.cache_405.outputs.cache-hit != 'true' || steps.cache_500.outputs.cache-hit != 'true' || steps.cache_501.outputs.cache-hit != 'true' || steps.cache_502.outputs.cache-hit != 'true' || steps.cache_main.outputs.cache-hit != 'true' }}
         uses: actions/cache@v6
         with:
           path: .cache/snapshots
@@ -106,8 +214,30 @@ jobs:
           restore-keys: |
             snapshots-
 
-      - name: Prepare runtime assets (all branches)
-        run: make prepare-all JOBS=2
+      - name: Build missing Moodle bundles
+        if: ${{ steps.cache_404.outputs.cache-hit != 'true' || steps.cache_405.outputs.cache-hit != 'true' || steps.cache_500.outputs.cache-hit != 'true' || steps.cache_501.outputs.cache-hit != 'true' || steps.cache_502.outputs.cache-hit != 'true' || steps.cache_main.outputs.cache-hit != 'true' }}
+        shell: bash
+        env:
+          CACHE_404: ${{ steps.cache_404.outputs.cache-hit }}
+          CACHE_405: ${{ steps.cache_405.outputs.cache-hit }}
+          CACHE_500: ${{ steps.cache_500.outputs.cache-hit }}
+          CACHE_501: ${{ steps.cache_501.outputs.cache-hit }}
+          CACHE_502: ${{ steps.cache_502.outputs.cache-hit }}
+          CACHE_MAIN: ${{ steps.cache_main.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+
+          targets=()
+          [ "$CACHE_404" = "true" ] || targets+=(bundle-MOODLE_404_STABLE)
+          [ "$CACHE_405" = "true" ] || targets+=(bundle-MOODLE_405_STABLE)
+          [ "$CACHE_500" = "true" ] || targets+=(bundle-MOODLE_500_STABLE)
+          [ "$CACHE_501" = "true" ] || targets+=(bundle-MOODLE_501_STABLE)
+          [ "$CACHE_502" = "true" ] || targets+=(bundle-MOODLE_502_STABLE)
+          [ "$CACHE_MAIN" = "true" ] || targets+=(bundle-main)
+
+          printf 'Building %d uncached Moodle bundle(s): %s\n' "${#targets[@]}" "${targets[*]}"
+          make check-php
+          make --no-print-directory -j 2 "${targets[@]}"
 
       - name: Install docs dependencies
         run: python -m pip install --default-timeout=120 -r requirements-docs.txt
