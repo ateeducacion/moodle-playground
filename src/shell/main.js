@@ -447,16 +447,27 @@ function bindShellChannel() {
         els.address.value = currentPath;
         saveState({ lastReadyAt: new Date().toISOString() });
         break;
-      case "frame-ready":
+      case "frame-ready": {
+        // In-site navigations announce "frame-ready" before "navigate", so
+        // the back-stack transition must be recorded here — by the time the
+        // "navigate" message arrives, currentPath has already moved on. The
+        // very first frame load (and the first one after a restore) is the
+        // landing redirect, not a user navigation, so it is not recorded.
+        const wasBooted = remoteFrameBooted;
         remoteFrameBooted = true;
         if (!uiLocked) {
-          currentPath = isInternalRuntimePath(message.path)
+          const nextPath = isInternalRuntimePath(message.path)
             ? currentPath
             : message.path || currentPath;
+          if (wasBooted) {
+            recordBackEntry(currentPath, nextPath);
+          }
+          currentPath = nextPath;
           els.address.value = currentPath;
           saveState();
         }
         break;
+      }
       case "navigate": {
         const nextPath = isInternalRuntimePath(message.path)
           ? currentPath
