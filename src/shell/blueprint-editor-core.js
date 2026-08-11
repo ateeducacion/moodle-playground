@@ -174,10 +174,13 @@ export function createBlueprintValidationResult(rawText, deps) {
     };
   }
 
+  const stepCount = Array.isArray(blueprint?.steps)
+    ? blueprint.steps.length
+    : 0;
   return {
     valid: true,
     stage: "valid",
-    message: "Blueprint is valid.",
+    message: `✓ Valid blueprint · ${stepCount} ${stepCount === 1 ? "step" : "steps"}`,
     errors: [],
     blueprint,
   };
