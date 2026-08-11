@@ -795,13 +795,18 @@ button.danger:hover {
     grid-template-columns: 1fr;
   }
 
-  .workspace:not(.is-panel-collapsed) {
-    grid-template-rows: 1fr 1fr;
-  }
-
+  /* On narrow screens the open panel takes over the whole area below the
+     toolbar instead of splitting the screen with the site. */
   .side-panel {
+    position: fixed;
+    top: var(--navbar-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
     border-left: 0;
     border-top: 1px solid var(--border-light);
+    box-shadow: none;
   }
 }
 
