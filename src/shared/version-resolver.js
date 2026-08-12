@@ -56,7 +56,7 @@ export const MOODLE_BRANCHES = [
     branch: "MOODLE_502_STABLE",
     version: "5.2",
     label: "Moodle 5.2.x",
-    gitRef: "v5.2.0",
+    gitRef: "MOODLE_502_STABLE",
     webRoot: "/www/moodle/public",
     manifestFile: "MOODLE_502_STABLE.json",
     bundleDir: "MOODLE_502_STABLE",
