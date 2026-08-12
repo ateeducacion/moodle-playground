@@ -46,6 +46,7 @@ describe("getBranchMetadata", () => {
     assert.ok(meta);
     assert.strictEqual(meta.version, "5.2");
     assert.strictEqual(meta.label, "Moodle 5.2.x");
+    assert.strictEqual(meta.gitRef, "MOODLE_502_STABLE");
     assert.strictEqual(meta.webRoot, "/www/moodle/public");
   });
 });

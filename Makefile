@@ -85,7 +85,7 @@ bundle-MOODLE_501_STABLE:
 	BRANCH=MOODLE_501_STABLE npm run bundle
 
 bundle-MOODLE_502_STABLE:
-	BRANCH=MOODLE_502_STABLE GIT_REF=v5.2.0 npm run bundle
+	BRANCH=MOODLE_502_STABLE npm run bundle
 
 bundle-main:
 	BRANCH=main npm run bundle
