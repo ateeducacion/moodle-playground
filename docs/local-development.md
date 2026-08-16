@@ -76,6 +76,63 @@ When to use each command:
     running app keeps using the stale bundle. Unit tests run the source directly, so they do
     **not** catch a missing rebuild.
 
+## The Build ID
+
+Every build is stamped with a **Build ID** that names one deployed artifact:
+
+```text
+20260816T065012Z-9e39f37d
+└──── UTC build time ───┘ └ commit ┘
+```
+
+It is deliberately **not** a semantic version. Moodle Playground ships a rolling
+release, and the weekly base rebuild re-cuts Moodle bundles from upstream while this
+repository is unchanged — so two deployments can share a commit but be different
+artifacts. Because the timestamp is the *build* time (not the commit time), each one
+still gets its own ID:
+
+```text
+20260816T065012Z-9e39f37d   # weekly rebuild
+20260823T060003Z-9e39f37d   # same source, new artifact
+```
+
+A local build appends `-dirty` when the working tree has uncommitted changes
+(`20260816T065012Z-9e39f37d-dirty`). CI builds are never dirty.
+
+Generate it locally — `make prepare`, `make test` and friends already do this for you:
+
+```bash
+npm run build:version                                 # write the metadata files
+node scripts/write-build-version.mjs --print-version  # print the ID only
+BUILD_VERSION=20260816T065012Z-9e39f37d npm run build:version   # pin an exact ID
+```
+
+Where to find it:
+
+| Where | What you get |
+|-------|--------------|
+| Info panel → **Runtime → Playground build** | The running build, click to copy. |
+| Runtime log | One `Playground build …` line at startup. |
+| `assets/build-version.json` | `buildVersion`, `generatedAt`, `gitSha`, `dirty`. |
+| `src/generated/build-version.js` | `BUILD_VERSION` / `BUILD_METADATA` for app code. |
+| Sentry | The issue's `release`. |
+
+Both generated files are git-ignored: nothing hand-maintains an identifier.
+
+In CI, the `build-id` job computes the ID **once** and every later job reuses it via
+`needs.build-id.outputs.build_version`, so a pipeline run has exactly one Build ID and
+GitHub Pages and Cloudflare Pages report the same value for the same artifact.
+
+The Build ID is also the cache version. Service Worker cache namespaces embed it
+(`src/shared/cache-names.js`), activation purges this app's namespaces from earlier
+builds, and the worker is registered as `sw.js?build=<Build ID>` — so a browser can
+never mix code from two builds. It does **not** key persistent user data: deploying a
+new build invalidates code caches without wiping a visitor's site.
+
+The Build ID identifies the Playground itself, never the Moodle release running inside
+it — those are shown separately. See
+[ADR-0029](architecture/adr/ADR-0029-build-identification-and-cache-versioning.md).
+
 ## Run
 
 ```bash
