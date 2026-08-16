@@ -1,5 +1,6 @@
 import { createPhpBridgeChannel, createWorkerRequestId } from "./src/shared/protocol.js";
 import { BUILD_VERSION as IMPORTED_BUILD_VERSION } from "./src/generated/build-version.js";
+import { buildScopedStaticCacheName, buildStaticCacheName, isStaleAppCacheName } from "./src/shared/cache-names.js";
 
 const bridges = new Map();
 const pending = new Map();
@@ -10,13 +11,12 @@ const clientContexts = new Map();
 const BUILD_VERSION = IMPORTED_BUILD_VERSION
   || new URL(self.location.href).searchParams.get("build")
   || "dev";
-const STATIC_CACHE_PREFIX = "moodle-playground-static";
-const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}-${BUILD_VERSION}`;
+const STATIC_CACHE_NAME = buildStaticCacheName(BUILD_VERSION);
 
 // Cache for scoped runtime static assets (CSS, JS, images, fonts, etc.)
 // that would otherwise queue through the serial PHP worker bridge.
 // See docs/architecture/adr/ADR-0001-sw-level-scoped-static-asset-caching.md
-const SCOPED_STATIC_CACHE = `moodle-playground-scoped-static-${BUILD_VERSION}`;
+const SCOPED_STATIC_CACHE = buildScopedStaticCacheName(BUILD_VERSION);
 const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|map)$/iu;
 // PHP scripts that serve cacheable assets with revision numbers in the URL.
 // The revision acts as a natural cache key — when content changes, the URL changes.
@@ -214,13 +214,9 @@ async function networkFirstStaticFetch(request) {
 
 async function purgeOldStaticCaches() {
   const cacheNames = await caches.keys();
-  const SCOPED_STATIC_PREFIX = "moodle-playground-scoped-static-";
   await Promise.all(
     cacheNames
-      .filter((cacheName) =>
-        (cacheName.startsWith(`${STATIC_CACHE_PREFIX}-`) && cacheName !== STATIC_CACHE_NAME)
-        || (cacheName.startsWith(SCOPED_STATIC_PREFIX) && cacheName !== SCOPED_STATIC_CACHE),
-      )
+      .filter((cacheName) => isStaleAppCacheName(cacheName, BUILD_VERSION))
       .map((cacheName) => caches.delete(cacheName)),
   );
 }
