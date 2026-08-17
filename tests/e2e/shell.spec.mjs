@@ -133,6 +133,37 @@ test("side panel opens and shows tabs", async ({ page, playground }) => {
   await expect(page.locator("#runtime-id-value")).not.toHaveText("-");
 });
 
+test("serves build metadata matching the Build ID shown in the info panel", async ({
+  page,
+  playground,
+}) => {
+  await playground.open();
+
+  const metadata = await page.evaluate(async () => {
+    const response = await fetch(
+      new URL("assets/build-version.json", window.location.href),
+      { cache: "no-store" },
+    );
+    return response.ok ? response.json() : null;
+  });
+
+  expect(metadata).not.toBeNull();
+  expect(metadata.buildVersion).toMatch(
+    /^\d{8}T\d{6}Z-(?:[0-9a-f]{8}|nogit)(?:-dirty)?$/,
+  );
+  expect(metadata).toMatchObject({
+    gitSha: expect.any(String),
+    generatedAt: expect.any(String),
+    dirty: expect.any(Boolean),
+  });
+
+  // The deployed artifact and the UI must report the same build.
+  await page.locator("#panel-toggle-button").click();
+  await expect(page.locator("#build-id-value")).toHaveText(
+    metadata.buildVersion,
+  );
+});
+
 test("logs tab displays runtime log entries", async ({ page, playground }) => {
   await playground.open();
 

@@ -29,10 +29,40 @@ env:
   PREVIEW_BUTTON_IMG: https://raw.githubusercontent.com/ateeducacion/moodle-playground/main/assets/playground-preview-button.svg
 
 jobs:
+  # ── Build ID: generated once, reused by every job in this run ──
+  # A pipeline run produces exactly one Build ID (YYYYMMDDTHHMMSSZ-<sha8>), so
+  # the artifact tested by e2e is the one deployed to Pages and Cloudflare.
+  # See docs/architecture/adr/ADR-0029-build-identification-and-cache-versioning.md
+  build-id:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      build_version: ${{ steps.meta.outputs.build_version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Compute Build ID
+        id: meta
+        env:
+          # On pull_request, actions/checkout resolves a throwaway merge commit;
+          # record the PR head commit so the Build ID stays traceable to source.
+          BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          build_version="$(node scripts/write-build-version.mjs --print-version)"
+          echo "build_version=$build_version" >> "$GITHUB_OUTPUT"
+          echo "Build ID: $build_version" >> "$GITHUB_STEP_SUMMARY"
+
   # ── Fast feedback: syntax + unit tests + lint (no PHP, no bundle) ──
   lint-and-test:
     if: github.event.action != 'closed'
+    needs: build-id
     runs-on: ubuntu-latest
+    env:
+      BUILD_VERSION: ${{ needs.build-id.outputs.build_version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -71,7 +101,10 @@ jobs:
   # ── Build: all 6 Moodle branches + docs ──
   build:
     if: github.event.action != 'closed'
+    needs: build-id
     runs-on: ubuntu-latest
+    env:
+      BUILD_VERSION: ${{ needs.build-id.outputs.build_version }}
     steps:
       - uses: actions/checkout@v7
 

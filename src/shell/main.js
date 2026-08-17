@@ -5,12 +5,18 @@ import {
   resolveBlueprint,
   validateBlueprint,
 } from "../blueprint/index.js";
+import { BUILD_VERSION } from "../generated/build-version.js";
 import {
   fetchManifest,
   parseReleaseVersion,
   resolveManifestUrl,
 } from "../runtime/manifest.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
+import {
+  captureException,
+  captureMessage,
+  initMonitoring,
+} from "../shared/monitoring.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
 import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
@@ -66,6 +72,8 @@ const els = {
   runtimeIdChip: document.querySelector("#runtime-id-chip"),
   runtimeIdValue: document.querySelector("#runtime-id-value"),
   moodleReleaseValue: document.querySelector("#moodle-release-value"),
+  buildIdChip: document.querySelector("#build-id-chip"),
+  buildIdValue: document.querySelector("#build-id-value"),
   infoPanel: document.querySelector("#info-panel"),
   infoTab: document.querySelector("#info-tab"),
   sidePanel: document.querySelector("#side-panel"),
@@ -482,6 +490,7 @@ function bindShellChannel() {
         remoteFrameBooted = false;
         setUiLocked(false);
         appendLog(message.detail, true);
+        captureMessage(message.detail, "error", { source: "runtime" });
         if (!latestPhpInfoHtml) {
           setActivePanel("phpinfo");
           capturePhpInfoViaWorker("bootstrap-error");
@@ -673,6 +682,31 @@ async function main() {
     `params=${JSON.stringify(urlParams)} -> php=${currentPhpVersion}, moodleBranch=${currentMoodleBranch}, runtimeId=${currentRuntimeId}`,
   );
 
+  // Error monitoring (Sentry) — a no-op unless config.sentry.dsn is set.
+  // The Playground Build ID is the Sentry release, so an issue names the exact
+  // deployed artifact. See ADR-0028 and ADR-0029.
+  initMonitoring({
+    dsn: config.sentry?.dsn,
+    environment: config.sentry?.environment,
+    release: BUILD_VERSION,
+    tags: {
+      runtime: currentRuntimeId,
+      moodleBranch: currentMoodleBranch,
+      phpVersion: currentPhpVersion,
+    },
+  });
+
+  // Build ID in the Runtime panel: the deployed Playground artifact, kept
+  // distinct from the Moodle release running inside it.
+  if (els.buildIdValue) {
+    els.buildIdValue.textContent = BUILD_VERSION;
+  }
+  if (els.buildIdChip) {
+    els.buildIdChip.title = `Copy Playground build ID (${BUILD_VERSION})`;
+  }
+  // One startup line so a copied runtime log always names the deployed build.
+  appendLog(`Playground build ${BUILD_VERSION}`);
+
   const previous = loadSessionState(scopeId);
   const preferredPath =
     activeBlueprint?.landingPage || config.landingPath || "/";
@@ -714,6 +748,20 @@ async function main() {
       label.textContent = "✓ copied";
       setTimeout(() => {
         label.textContent = original;
+      }, 1400);
+    });
+  }
+
+  if (els.buildIdChip) {
+    els.buildIdChip.addEventListener("click", () => {
+      navigator.clipboard?.writeText(BUILD_VERSION);
+      const label = els.buildIdValue;
+      if (!label) {
+        return;
+      }
+      label.textContent = "✓ copied";
+      setTimeout(() => {
+        label.textContent = BUILD_VERSION;
       }, 1400);
     });
   }
@@ -832,4 +880,5 @@ els.reset.addEventListener("click", async () => {
 main().catch((error) => {
   setUiLocked(false);
   appendLog(String(error?.stack || error?.message || error), true);
+  captureException(error, { source: "shell-main" });
 });

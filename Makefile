@@ -98,7 +98,9 @@ up: deps build-version build-worker bundle-all-pretty serve
 up-local: deps build-version bundle
 	BRANCH=$${BRANCH:-$(DEFAULT_BRANCH)} ./scripts/setup-local.sh $(LOCAL_PORT) $(LOCAL_PHP)
 
-test:
+# Generate build metadata first: src/generated/build-version.js is git-ignored,
+# and several tests (and the modules they import) expect it to exist.
+test: build-version
 	node --test tests/**/*.test.js
 
 test-e2e:

@@ -5,6 +5,9 @@
   "landingPath": "/login/index.php",
   "addonProxyUrl": "https://github-proxy.exelearning.dev/",
   "phpCorsProxyUrl": "https://github-proxy.exelearning.dev/?url=",
+  "sentry": {
+    "dsn": "https://e6dac7d88c3dae67f635103541a10d66@o4510456164712448.ingest.de.sentry.io/4511915755962448"
+  },
   "locale": "en",
   "timezone": "UTC",
   "autologin": false,
