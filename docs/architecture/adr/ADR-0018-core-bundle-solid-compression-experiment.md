@@ -233,3 +233,47 @@ and the `?bundle-format=` flag prototyped on the experiment branch did **not** m
   build codec/level/window if the Moodle tree's cross-file redundancy shifts materially.
 * Re-measure whenever the Moodle bundle's size or file count changes materially (a new branch),
   since the storage delta and chunk boundary (the 48–50 MB 2-vs-3-chunk edge) can shift.
+
+## Appendix A — Raw runtime boot benchmark (browser harness)
+
+Preserved verbatim from the experiment branch `experiment/core-bundle-solid-compression`
+(commit `7620303`, 2026-07-04), file `artifacts/compression-experiment/summary.md`. That
+branch was deleted on 2026-08-20 once its conclusions had shipped; the table is kept here so
+the ADR stays self-contained. This appendix only adds evidence — nothing above it is changed.
+
+Unlike the storage table in *Results* (measured on Node + Chrome), these are **real runtime
+boot metrics from the browser harness**, captured on both engines.
+
+- Base URL `http://localhost:8091` · Browsers: chromium, firefox.
+- Boot metrics are REAL (runtime `__bootMetrics`). "Model DL Fast-3G" is
+  `bytes / 1.6 Mbit·s⁻¹` — the bundle is fetched in a Worker that page-level CDP throttling
+  does not reliably cover, so a modeled figure is more trustworthy.
+- "Peak JS buffer" is the streaming parser's high-water mark (bounded by the largest single
+  file) vs the full-tar path materializing the whole ~250 MB tar.
+
+| Browser | Format | Mode | Size | Δ vs ZIP | Chunks | Decode ms | Extract-write ms | Cold total ms | Warm total ms | Peak JS buffer | Model DL Fast-3G ms | OK |
+|---------|--------|------|------|----------|--------|-----------|------------------|---------------|---------------|----------------|---------------------|----|
+| chromium | zip | zip | 70.3 MiB | 0% | 3 | 0 | 0 | 3946 | 3172 | — | 368808 | ✅ |
+| chromium | tar.zst | streaming | 34.6 MiB | -50.8% | 2 | 0 | 526 | 2879 | 2356 | 6.6 MiB | 181467 | ✅ |
+| chromium | tar.zst-full | full | 34.6 MiB | -50.8% | 2 | 195 | 0 | 3122 | 2667 | ~251 MiB (full tar) | 181467 | ✅ |
+| chromium | tar.gz | streaming | 51.5 MiB | -26.76% | 3 | 0 | 583 | 2899 | 2621 | 6.6 MiB | 270103 | ✅ |
+| firefox | zip | zip | 70.3 MiB | 0% | 3 | 0 | 0 | 13267 | 12567 | — | 368808 | ✅ |
+| firefox | tar.zst | streaming | 34.6 MiB | -50.8% | 2 | 0 | 1663 | 9985 | 8834 | 6.6 MiB | 181467 | ✅ |
+| firefox | tar.zst-full | — | 34.6 MiB | -50.8% | 2 | — | — | — | — | — | 181467 | ❌ |
+| firefox | tar.gz | streaming | 51.5 MiB | -26.76% | 3 | 0 | 913 | 9118 | 7765 | 6.6 MiB | 270103 | ✅ |
+
+### What this run answers
+
+* **It closes the Firefox question left open in *Results* footnote ².** That footnote records
+  that the `tar.zst` *boot* did not complete inside the harness's 120 s budget on Firefox, and
+  that confirming it "needs a local retry, not a code change". This run is that retry:
+  **streaming `tar.zst` boots on Firefox in 9985 ms cold / 8834 ms warm (✅)**, while the
+  **full-buffer `tar.zst-full` path FAILS there (❌)**. The earlier non-completion was the
+  full-buffer path, not the codec.
+* **It is the direct measured justification for ADR 0019.** Streaming bounds the peak JS buffer
+  to the largest single file (~6.6 MiB) instead of materializing the whole ~250 MB tar — and
+  that bounded ceiling is precisely what lets `tar.zst` boot on Firefox at all.
+* **Cold-boot effect depends entirely on the network.** On a fast/warm-cache network it is
+  roughly a wash (WASM compile dominates; 2879 ms vs ZIP's 3946 ms in Chrome, within
+  run-to-run variance). On a slow network the −51 % download dominates decisively — compare
+  "Model DL Fast-3G": ~181 s vs ~369 s.
