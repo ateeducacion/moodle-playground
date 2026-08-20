@@ -2,7 +2,10 @@ import { loadBlueprint } from "../blueprint/index.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
-import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
+import {
+  isServiceWorkerUnsupportedError,
+  registerVersionedServiceWorker,
+} from "../shared/service-worker-version.js";
 import { saveSessionState } from "../shared/storage.js";
 import {
   resolveRuntimeConfig,
@@ -118,8 +121,31 @@ async function registerRuntimeServiceWorker() {
       scope: "./",
     },
   );
-  await navigator.serviceWorker.ready;
+  await navigator.serviceWorker?.ready;
   return registration;
+}
+
+/**
+ * Show a Service Worker failure in the boot overlay and forward it to the
+ * shell, which owns the monitoring client. A missing API (iOS Safari private
+ * browsing, an insecure origin) is an environment limitation, so it travels as
+ * a warning under its own group instead of as a runtime error.
+ */
+function reportServiceWorkerFailure(scopeId, error) {
+  const unsupported = isServiceWorkerUnsupportedError(error);
+  const detail = unsupported
+    ? error.message
+    : `Service Worker registration failed: ${error?.message || error}`;
+
+  setOverlayVisible(true);
+  emit(scopeId, {
+    kind: "error",
+    detail,
+    level: unsupported ? "warning" : "error",
+    source: unsupported
+      ? "service-worker-unsupported"
+      : "service-worker-registration",
+  });
 }
 
 async function deleteIndexedDbDatabase(name) {
@@ -217,13 +243,13 @@ async function resetRuntimeStorage({
 }
 
 async function waitForServiceWorkerControl() {
-  if (!navigator.serviceWorker.controller) {
+  if (!navigator.serviceWorker?.controller) {
     await new Promise((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         reject(new Error("Timed out waiting for service worker control."));
       }, 10000);
 
-      navigator.serviceWorker.addEventListener(
+      navigator.serviceWorker?.addEventListener(
         "controllerchange",
         () => {
           window.clearTimeout(timeoutId);
@@ -236,7 +262,7 @@ async function waitForServiceWorkerControl() {
 }
 
 function configureRuntimeServiceWorker({ addonProxyUrl }) {
-  if (!navigator.serviceWorker.controller) {
+  if (!navigator.serviceWorker?.controller) {
     return;
   }
 
@@ -247,7 +273,7 @@ function configureRuntimeServiceWorker({ addonProxyUrl }) {
 }
 
 function ensureRemoteServiceWorkerControl(scopeId, runtimeId) {
-  if (navigator.serviceWorker.controller) {
+  if (navigator.serviceWorker?.controller) {
     window.sessionStorage.removeItem(
       `${CONTROL_RELOAD_KEY_PREFIX}:${scopeId}:${runtimeId}`,
     );
@@ -566,7 +592,15 @@ async function bootstrapRemote() {
     progress: 0.08,
   });
 
-  await registerRuntimeServiceWorker();
+  try {
+    await registerRuntimeServiceWorker();
+  } catch (error) {
+    // Without a Service Worker nothing downstream can run; surface the reason
+    // instead of failing later with an opaque timeout or a blank frame.
+    reportServiceWorkerFailure(scopeId, error);
+    return;
+  }
+
   if (ensureRemoteServiceWorkerControl(scopeId, selection.runtimeId)) {
     return;
   }

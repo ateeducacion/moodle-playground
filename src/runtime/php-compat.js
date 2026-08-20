@@ -126,6 +126,11 @@ function getMimeType(path) {
   return MIME_TYPES[ext] || "application/octet-stream";
 }
 
+// The Fetch spec forbids a body on these statuses; PHP legitimately emits 204
+// and 304 (conditional GETs, no-content replies) and constructing a Response
+// with bytes for them throws and blanks the whole page.
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
 /**
  * Convert a PHPResponse to a native Response object.
  *
@@ -139,7 +144,18 @@ function phpResponseToResponse(phpResponse, extraHeaders) {
   if (phpResponse.headers) {
     for (const [key, values] of Object.entries(phpResponse.headers)) {
       for (const value of values) {
-        headers.append(key, value);
+        // Skip headers with an invalid name/value rather than letting a single
+        // malformed header (Headers.append() throws "Invalid name") abort the
+        // entire response — which would blank the whole page.
+        try {
+          headers.append(key, value);
+        } catch (error) {
+          try {
+            console.warn(
+              `[php-compat] skipping invalid response header "${key}": ${error?.message || error}`,
+            );
+          } catch {}
+        }
       }
     }
   }
@@ -151,10 +167,14 @@ function phpResponseToResponse(phpResponse, extraHeaders) {
     }
   }
 
-  return new Response(phpResponse.bytes, {
-    status: phpResponse.httpStatusCode,
-    headers,
-  });
+  const status = phpResponse.httpStatusCode;
+  return new Response(
+    NULL_BODY_STATUSES.has(status) ? null : phpResponse.bytes,
+    {
+      status,
+      headers,
+    },
+  );
 }
 
 /**

@@ -6,9 +6,15 @@
  * The critical functions are: resolveScriptPath, isPhpScript, getMimeType.
  * Since these are not exported, we replicate them here to test the logic
  * that the module depends on.
+ *
+ * phpResponseToResponse IS reachable (via the `__testing` export) and is
+ * exercised against the real implementation at the bottom of this file.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { __testing } from "../../src/runtime/php-compat.js";
+
+const { phpResponseToResponse } = __testing;
 
 // Replicate the pure functions from php-compat.js for testing
 function resolveScriptPath(pathname, webRoot) {
@@ -213,5 +219,78 @@ describe("decodePathInfo", () => {
 
   it("returns empty string for empty input", () => {
     assert.strictEqual(decodePathInfo(""), "");
+  });
+});
+
+describe("phpResponseToResponse", () => {
+  const makePhpResponse = (status, body, headers = {}) => ({
+    httpStatusCode: status,
+    headers,
+    bytes: new TextEncoder().encode(body),
+  });
+
+  // Regression: `new Response(bytes, { status: 204 })` throws
+  // "Response with null body status cannot have body", which aborted the
+  // request and blanked the page.
+  it("drops the body on a 204 while keeping the status", async () => {
+    const response = phpResponseToResponse(
+      makePhpResponse(204, "should not be sent", {
+        "content-type": ["text/html"],
+      }),
+    );
+
+    assert.strictEqual(response.status, 204);
+    assert.strictEqual(response.body, null);
+    assert.strictEqual(await response.text(), "");
+  });
+
+  it("drops the body on a 304 (conditional GET) while keeping the status", async () => {
+    const response = phpResponseToResponse(
+      makePhpResponse(304, "stale body", { etag: ['"abc"'] }),
+    );
+
+    assert.strictEqual(response.status, 304);
+    assert.strictEqual(response.body, null);
+    assert.strictEqual(response.headers.get("etag"), '"abc"');
+  });
+
+  it("keeps the body on a 200", async () => {
+    const response = phpResponseToResponse(
+      makePhpResponse(200, "<html>ok</html>", {
+        "content-type": ["text/html; charset=utf-8"],
+      }),
+    );
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(await response.text(), "<html>ok</html>");
+    assert.strictEqual(
+      response.headers.get("content-type"),
+      "text/html; charset=utf-8",
+    );
+  });
+
+  // Regression: Headers.append() throws "Invalid name" on a malformed header,
+  // which aborted the entire response instead of dropping one header.
+  it("skips an invalid header name instead of aborting the response", async () => {
+    const response = phpResponseToResponse(
+      makePhpResponse(200, "body", {
+        "content-type": ["text/plain"],
+        "x bad header": ["nope"],
+      }),
+    );
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(await response.text(), "body");
+    assert.strictEqual(response.headers.get("content-type"), "text/plain");
+  });
+
+  it("still applies extraHeaders", async () => {
+    const response = phpResponseToResponse(makePhpResponse(200, "body", {}), {
+      "x-playground": "1",
+      "x-empty": "",
+    });
+
+    assert.strictEqual(response.headers.get("x-playground"), "1");
+    assert.strictEqual(response.headers.get("x-empty"), null);
   });
 });
