@@ -129,6 +129,36 @@ describe("fetchManifest", () => {
 
     assert.strictEqual(seenInit?.cache, "no-store");
   });
+
+  // Regression: this is the manifest fetch the boot path actually performs.
+  // A WebKit/Firefox network-level rejection used to reach monitoring as a
+  // bare "Load failed" with no URL and no phase.
+  it("names the phase and the query-less URL when the fetch rejects", async () => {
+    await assert.rejects(
+      () =>
+        withFetch(
+          () => {
+            throw new TypeError("Load failed");
+          },
+          () =>
+            fetchManifest(
+              "https://example.com/assets/manifests/latest.json?build=abc123",
+            ),
+        ),
+      (error) => {
+        assert.match(error.message, /Network error while fetching manifest/);
+        assert.match(
+          error.message,
+          /https:\/\/example\.com\/assets\/manifests\/latest\.json/,
+        );
+        // The cache-busting query is stripped so Sentry groups the reports.
+        assert.ok(!error.message.includes("build=abc123"));
+        assert.match(error.message, /Load failed/);
+        assert.ok(error.cause instanceof TypeError);
+        return true;
+      },
+    );
+  });
 });
 
 describe("resolveManifestUrl", () => {
@@ -201,6 +231,35 @@ describe("resolveManifestUrl", () => {
     );
     // Transient errors are retried before propagating.
     assert.ok(headAttempts >= 2, `expected retries, got ${headAttempts}`);
+  });
+
+  it("gives the propagated probe error the phase and URL, keeping the retries", async () => {
+    let headAttempts = 0;
+    await assert.rejects(
+      () =>
+        withFetch(
+          (_url, init) => {
+            if (init.method === "HEAD") {
+              headAttempts++;
+              throw new TypeError("Load failed");
+            }
+            throw new Error("fallback should not be fetched");
+          },
+          () => resolveManifestUrl("main", APP_BASE),
+        ),
+      (error) => {
+        assert.match(
+          error.message,
+          /Network error while fetching manifest probe/,
+        );
+        assert.ok(error.message.includes(MAIN_BRANCH_URL));
+        assert.match(error.message, /Load failed/);
+        assert.ok(error.cause instanceof TypeError);
+        return true;
+      },
+    );
+    // Wrapping the rejection must not disturb the retry budget.
+    assert.strictEqual(headAttempts, 3);
   });
 
   it("retries a transient failure then succeeds on the branch URL", async () => {
