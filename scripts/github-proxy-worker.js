@@ -225,14 +225,7 @@ async function handleAtomFeed(repo, type) {
     );
 
     if (!upstream.ok) {
-      return jsonResponse(
-        {
-          error: "Upstream server returned an error.",
-          status: upstream.status,
-          statusText: upstream.statusText,
-        },
-        502,
-      );
+      return upstreamErrorResponse(upstream);
     }
 
     const headers = new Headers();
@@ -276,14 +269,7 @@ async function proxyRawFile(repo, ref, rawPath) {
     );
 
     if (!upstream.ok) {
-      return jsonResponse(
-        {
-          error: "Upstream server returned an error.",
-          status: upstream.status,
-          statusText: upstream.statusText,
-        },
-        upstream.status === 404 ? 404 : 502,
-      );
+      return upstreamErrorResponse(upstream);
     }
 
     const headers = new Headers();
@@ -632,15 +618,7 @@ async function proxyGitHubZip(
     );
 
     if (!upstream.ok) {
-      return jsonResponse(
-        {
-          error: "Upstream server returned an error.",
-          status: upstream.status,
-          statusText: upstream.statusText,
-          upstream_url: url,
-        },
-        502,
-      );
+      return upstreamErrorResponse(upstream, { upstream_url: url });
     }
 
     const responseHeaders = new Headers(upstream.headers);
@@ -742,14 +720,7 @@ async function handleGenericProxy(targetUrl, request) {
     );
 
     if (!upstream.ok) {
-      return jsonResponse(
-        {
-          error: "Upstream server returned an error.",
-          status: upstream.status,
-          statusText: upstream.statusText,
-        },
-        502,
-      );
+      return upstreamErrorResponse(upstream);
     }
 
     const headers = new Headers(upstream.headers);
@@ -813,6 +784,25 @@ function jsonResponse(data, status) {
       ...corsHeaders(),
     },
   });
+}
+
+// Maps an upstream failure onto a client-visible status. A 404 (deleted branch,
+// renamed repo, stale blueprint URL), a 403/429 (rate limit) and a 401 are the
+// upstream's own verdict, not a proxy outage, so they are passed through instead
+// of being flattened into 502 — reporting them as "bad gateway" made ordinary
+// "not found" errors look like the proxy itself was down.
+const PASSTHROUGH_UPSTREAM_STATUSES = new Set([401, 403, 404, 410, 429]);
+
+function upstreamErrorResponse(upstream, extra = {}) {
+  return jsonResponse(
+    {
+      error: "Upstream server returned an error.",
+      status: upstream.status,
+      statusText: upstream.statusText,
+      ...extra,
+    },
+    PASSTHROUGH_UPSTREAM_STATUSES.has(upstream.status) ? upstream.status : 502,
+  );
 }
 
 // Maps a blocked redirect into a 400 response. A redirect into an

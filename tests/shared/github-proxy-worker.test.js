@@ -1601,3 +1601,103 @@ describe("github-proxy-worker ?path= raw file mode", () => {
     assert.equal(body.error, "Upstream server returned an error.");
   });
 });
+
+describe("github-proxy-worker upstream status mapping", () => {
+  // Regression: a stale blueprint URL pointing at a deleted branch made the
+  // proxy answer 502 ("Failed to fetch ...: 502" in Sentry) even though GitHub
+  // itself answered 404, so an ordinary "not found" looked like a proxy outage.
+  const zipUrl =
+    "https://github.com/erseco/facturascripts-plugin-AiScan/archive/refs/heads/deleted-branch.zip";
+
+  const proxyZip = async () =>
+    worker.fetch(
+      new Request(`https://proxy.example/?url=${encodeURIComponent(zipUrl)}`),
+      {},
+    );
+
+  it("passes an upstream 404 through instead of flattening it into 502", async () => {
+    global.fetch = async () =>
+      new Response("Not Found", { status: 404, statusText: "Not Found" });
+
+    const response = await proxyZip();
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.error, "Upstream server returned an error.");
+    assert.equal(body.status, 404);
+    assert.equal(body.statusText, "Not Found");
+  });
+
+  it("keeps upstream_url on the archive route while passing 404 through", async () => {
+    global.fetch = async () =>
+      new Response("Not Found", { status: 404, statusText: "Not Found" });
+
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&branch=gone"),
+      {},
+    );
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.status, 404);
+    assert.equal(
+      body.upstream_url,
+      "https://github.com/owner/repo/archive/refs/heads/gone.zip",
+    );
+  });
+
+  it("passes an upstream 403 (rate limit) through unchanged", async () => {
+    global.fetch = async () =>
+      new Response("rate limited", { status: 403, statusText: "Forbidden" });
+
+    const response = await proxyZip();
+
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.status, 403);
+    assert.equal(body.statusText, "Forbidden");
+  });
+
+  it("passes an upstream 429 through unchanged", async () => {
+    global.fetch = async () =>
+      new Response("slow down", {
+        status: 429,
+        statusText: "Too Many Requests",
+      });
+
+    const response = await proxyZip();
+
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).status, 429);
+  });
+
+  it("still reports a genuine upstream 500 as 502 while naming the real status", async () => {
+    global.fetch = async () =>
+      new Response("boom", {
+        status: 500,
+        statusText: "Internal Server Error",
+      });
+
+    const response = await proxyZip();
+
+    assert.equal(response.status, 502);
+    const body = await response.json();
+    assert.equal(body.status, 500);
+    assert.equal(body.statusText, "Internal Server Error");
+  });
+
+  it("passes an upstream 404 through on the Atom feed route", async () => {
+    global.fetch = async () =>
+      new Response("Not Found", { status: 404, statusText: "Not Found" });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://proxy.example/?url=https://github.com/owner/repo/releases.atom",
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).status, 404);
+  });
+});

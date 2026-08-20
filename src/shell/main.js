@@ -19,7 +19,10 @@ import {
 } from "../shared/monitoring.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
-import { registerVersionedServiceWorker } from "../shared/service-worker-version.js";
+import {
+  isServiceWorkerUnsupportedError,
+  registerVersionedServiceWorker,
+} from "../shared/service-worker-version.js";
 import {
   clearScopeSession,
   getOrCreateScopeId,
@@ -35,6 +38,7 @@ import {
   shouldTraceRuntimeSelection,
 } from "../shared/version-resolver.js";
 import { initBlueprintEditor } from "./blueprint-editor.js";
+import { escapeHtml } from "./blueprint-editor-core.js";
 
 const els = {
   addressForm: document.querySelector("#address-form"),
@@ -183,20 +187,84 @@ function recordBackEntry(previousPath, nextPath) {
   updateBackButton();
 }
 
-async function ensureRuntimeServiceWorker() {
-  if (!config) {
+/**
+ * Replace the site frame with a blocking, human-readable message. The runtime
+ * cannot boot without a Service Worker, so the alternative is a blank iframe
+ * with the failure buried in an uncaught TypeError.
+ */
+function showBlockingBootError(title, detail) {
+  setActivePanel("logs");
+  if (els.sidePanel?.classList.contains("is-collapsed")) {
+    toggleSidePanel();
+  }
+
+  if (!els.frame) {
     return;
   }
 
-  await registerVersionedServiceWorker(
-    new URL("../../sw.bundle.js", import.meta.url),
-    {
-      scope: "./",
-    },
-  );
-  await navigator.serviceWorker.ready;
+  els.frame.removeAttribute("src");
+  els.frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>
+      html,body{height:100%}
+      body{margin:0;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:#fff;color:#1f2937;font:15px/1.6 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      div{max-width:44rem}
+      h1{margin:0 0 12px;font-size:1.15rem}
+      p{margin:0}
+    </style><div role="alert"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></div>`;
+}
 
-  if (!navigator.serviceWorker.controller) {
+/**
+ * Report a Service Worker failure to the user and to monitoring.
+ *
+ * A missing API is an environment limitation (iOS Safari private browsing,
+ * insecure origin), so it is reported as a warning under its own Sentry group;
+ * a rejected registration is a genuine failure and is captured as an exception.
+ */
+function reportServiceWorkerFailure(error) {
+  const unsupported = isServiceWorkerUnsupportedError(error);
+  const detail = unsupported
+    ? error.message
+    : `Service Worker registration failed: ${error?.message || error}`;
+
+  appendLog(detail, true);
+  showBlockingBootError(
+    unsupported
+      ? "Service Workers are unavailable"
+      : "Service Worker registration failed",
+    detail,
+  );
+  setUiLocked(false);
+
+  if (unsupported) {
+    captureMessage(detail, "warning", { source: "service-worker-unsupported" });
+    return;
+  }
+
+  captureException(error, { source: "service-worker-registration" });
+}
+
+/**
+ * Returns true when the runtime Service Worker is registered and usable.
+ * A false return means the failure has already been surfaced to the user.
+ */
+async function ensureRuntimeServiceWorker() {
+  if (!config) {
+    return true;
+  }
+
+  try {
+    await registerVersionedServiceWorker(
+      new URL("../../sw.bundle.js", import.meta.url),
+      {
+        scope: "./",
+      },
+    );
+    await navigator.serviceWorker?.ready;
+  } catch (error) {
+    reportServiceWorkerFailure(error);
+    return false;
+  }
+
+  if (!navigator.serviceWorker?.controller) {
     const alreadyReloaded =
       window.sessionStorage.getItem(CONTROL_RELOAD_KEY) === "1";
     if (!alreadyReloaded) {
@@ -207,6 +275,7 @@ async function ensureRuntimeServiceWorker() {
   }
 
   window.sessionStorage.removeItem(CONTROL_RELOAD_KEY);
+  return true;
 }
 
 async function updateFrame() {
@@ -214,7 +283,12 @@ async function updateFrame() {
     serviceWorkerReady = ensureRuntimeServiceWorker();
   }
 
-  await serviceWorkerReady;
+  if (!(await serviceWorkerReady)) {
+    // The blocking message is already on screen; loading the remote frame
+    // without a Service Worker would only render a blank iframe.
+    return;
+  }
+
   const url = resolveRemoteUrl(scopeId, currentRuntimeId, currentPath, {
     phpVersion: currentPhpVersion,
     moodleBranch: currentMoodleBranch,
@@ -230,6 +304,9 @@ async function updateFrame() {
     url.searchParams.set("reload", String(remoteReloadToken));
   }
   remoteFrameBooted = false;
+  // srcdoc wins over src, so drop any blocking message left by a previous
+  // failed boot before pointing the frame at the runtime again.
+  els.frame.removeAttribute("srcdoc");
   els.frame.src = url.toString();
   pendingCleanBoot = false;
 }
@@ -490,7 +567,12 @@ function bindShellChannel() {
         remoteFrameBooted = false;
         setUiLocked(false);
         appendLog(message.detail, true);
-        captureMessage(message.detail, "error", { source: "runtime" });
+        // The remote frame can classify its own failures (an unsupported
+        // Service Worker is an environment limitation, not a runtime error),
+        // so honor the level and source it sends.
+        captureMessage(message.detail, message.level || "error", {
+          source: message.source || "runtime",
+        });
         if (!latestPhpInfoHtml) {
           setActivePanel("phpinfo");
           capturePhpInfoViaWorker("bootstrap-error");
@@ -516,7 +598,7 @@ function bindShellChannel() {
 }
 
 function bindServiceWorkerMessages() {
-  navigator.serviceWorker.addEventListener("message", (event) => {
+  navigator.serviceWorker?.addEventListener("message", (event) => {
     const message = event.data;
     if (message?.kind === "sw-debug") {
       appendLog(`[sw] ${message.detail}`);
