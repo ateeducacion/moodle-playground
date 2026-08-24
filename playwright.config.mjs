@@ -9,7 +9,9 @@ const reportDir = process.env.PLAYWRIGHT_REPORT_DIR || "playwright-report";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: false,
+  // Test-level parallelism is required for balanced Playwright shards. Keep the
+  // local default unchanged while allowing CI to distribute tests evenly.
+  fullyParallel: process.env.CI === "true",
   workers: Number(process.env.PLAYWRIGHT_WORKERS) || (process.env.CI ? 2 : 3),
   timeout: 180_000,
   expect: {
