@@ -1,4 +1,7 @@
-import { resolveBootstrapArchive } from "../../lib/moodle-loader.js";
+import {
+  fetchBootAsset,
+  resolveBootstrapArchive,
+} from "../../lib/moodle-loader.js";
 import { buildManifestUrl as buildManifestUrlFromVersions } from "../shared/version-resolver.js";
 
 export async function fetchManifest(manifestUrl) {
@@ -9,7 +12,13 @@ export async function fetchManifest(manifestUrl) {
         : new URL("../../", import.meta.url).href;
     manifestUrl = new URL("assets/manifests/latest.json", base).toString();
   }
-  const response = await fetch(manifestUrl, { cache: "no-store" });
+  // Routed through fetchBootAsset so a network-level rejection names the
+  // phase and the URL instead of reaching monitoring as a bare "Load failed".
+  const response = await fetchBootAsset(
+    manifestUrl,
+    { cache: "no-store" },
+    "manifest",
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -98,7 +107,11 @@ export async function resolveManifestUrl(moodleBranch, appBaseUrl) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let response;
     try {
-      response = await fetch(branchUrl, { method: "HEAD", cache: "no-store" });
+      response = await fetchBootAsset(
+        branchUrl,
+        { method: "HEAD", cache: "no-store" },
+        "manifest probe",
+      );
     } catch (error) {
       // Network error — transient. Retry, then propagate if it never recovers.
       lastError = error;

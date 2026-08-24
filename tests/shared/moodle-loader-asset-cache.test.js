@@ -177,3 +177,55 @@ describe("normalizeManifest snapshot/localcache URL resolution", () => {
     assert.equal(manifest.snapshot, undefined);
   });
 });
+
+// Regression: WebKit reports a network-level fetch rejection as a bare
+// "Load failed" and Firefox as "NetworkError when attempting to fetch
+// resource". Those reached Sentry with no URL and no boot phase, so they were
+// unactionable. The boot fetches now name both.
+describe("boot fetch network errors", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    teardownMocks();
+    globalThis.fetch = originalFetch;
+  });
+
+  it("names the phase and the query-less URL when the manifest fetch rejects", async () => {
+    installMocks();
+    globalThis.fetch = async () => {
+      throw new TypeError("Load failed");
+    };
+
+    await assert.rejects(
+      () =>
+        fetchManifest(
+          "https://example.test/assets/manifests/MOODLE_502_STABLE.json?build=abc123",
+        ),
+      (error) => {
+        assert.match(error.message, /Network error while fetching manifest/);
+        assert.match(
+          error.message,
+          /https:\/\/example\.test\/assets\/manifests\/MOODLE_502_STABLE\.json/,
+        );
+        // The cache-busting query string is stripped so Sentry groups the
+        // reports together instead of one group per build.
+        assert.ok(!error.message.includes("build=abc123"));
+        assert.match(error.message, /Load failed/);
+        assert.ok(error.cause instanceof TypeError);
+        return true;
+      },
+    );
+  });
+
+  it("names the asset phase when an auxiliary boot asset fetch rejects", async () => {
+    installMocks();
+    globalThis.fetch = async () => {
+      throw new TypeError("NetworkError when attempting to fetch resource.");
+    };
+
+    await assert.rejects(
+      () => fetchAssetWithCache("https://example.test/install.sq3"),
+      /Network error while fetching asset \(https:\/\/example\.test\/install\.sq3\): NetworkError/,
+    );
+  });
+});
