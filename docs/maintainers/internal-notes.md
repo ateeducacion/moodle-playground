@@ -13,7 +13,9 @@ The authoritative guide for working in this codebase (human or AI) is
 at the repository root. Deep, per-domain references live in the skill files under
 [`.agents/skills/`](https://github.com/ateeducacion/moodle-playground/tree/main/.agents/skills)
 (Moodle internals, WP Playground & php-wasm, WASM & browser runtime, blueprint
-provisioning, unit testing, and E2E testing).
+provisioning, unit testing, and E2E testing). The same directory also holds
+third-party skills installed with `gh skill add` and kept current by the
+`update-agent-skills` workflow; `AGENTS.md` lists them with their origin.
 
 ## Architecture Decision Records and Software Design Documents
 

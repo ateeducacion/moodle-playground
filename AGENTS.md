@@ -69,6 +69,45 @@ known pitfalls, and conventions that are not repeated elsewhere in this document
 4. **Do not duplicate** skill content in this file — AGENTS.md provides the architectural
    overview; skills provide the deep domain knowledge.
 
+### Third-party skills
+
+Alongside the in-house skills, `.agents/skills/` vendors three upstream skills for tools this
+project is built with. They are installed with the GitHub CLI, which copies the skill into
+`.agents/skills/<name>/` (the directory GitHub Copilot, Codex, Cursor, Gemini CLI and most
+other agents read) and records the upstream repository, path and tree SHA in the `SKILL.md`
+frontmatter so the copy can be refreshed later (`gh skill add` is an alias of `gh skill install`):
+
+```bash
+gh skill add cloudflare/security-audit-skill security-audit --agent github-copilot
+ln -s ../../.agents/skills/security-audit .claude/skills/security-audit
+gh skill update --all    # refresh every vendored skill
+```
+
+| Skill | Read it before | Origin |
+|-------|----------------|--------|
+| `security-audit` | Hunting vulnerabilities or validating a security finding in application code: a multi-agent recon → hunt → validate → report pipeline that only reports exploitable issues | [`cloudflare/security-audit-skill`](https://github.com/cloudflare/security-audit-skill), MIT |
+| `github-actions-hardening` | Reviewing, hardening or writing any `.github/workflows/*.yml`: per-job `permissions:`, SHA-pinned third-party actions, `${{ }}` injection via `env:`, privileged triggers. Report-only by default; apply the edits when asked. Policy here: first-party `actions/*` stay on major tags kept current by Dependabot; pin third-party actions to a commit SHA with a version comment, as `update-agent-skills.yml` does | [`github/awesome-copilot`](https://github.com/github/awesome-copilot), MIT |
+| `playwright-cli` | Driving the running playground from the terminal with `npx playwright cli`: snapshot and click through the nested iframes, read console and network output, mock routes, or attach to a spec paused with `npx playwright test --debug=cli`. Not for authoring `tests/e2e/*.spec.mjs` (`e2e-playwright` stays authoritative there), and ignore its plan/generate test-generation flow | [`microsoft/playwright-cli`](https://github.com/microsoft/playwright-cli), Apache-2.0 |
+
+Rules for vendored skills:
+
+- **Keep them verbatim.** Never reformat or edit a vendored skill: local changes diverge from
+  upstream and `gh skill update` overwrites them. Fix it upstream and re-install. Provenance
+  lives in each `SKILL.md` frontmatter (`metadata.github-repo`, `github-path`,
+  `github-tree-sha`); in-house skills carry no such metadata and the updater skips them.
+- **One copy, symlinked for Claude Code.** Claude Code only scans `.claude/skills/`, so every
+  skill — in-house or vendored — is exposed there as a symlink to its `.agents/skills/`
+  directory. Do not copy a `SKILL.md`; link it.
+- **Updates arrive as pull requests.** `.github/workflows/update-agent-skills.yml` runs
+  `gh skill update --all` every Monday and opens a PR when an upstream skill changed. Skills
+  are prompts, so review that diff as a behaviour change.
+- **Project rules win.** Vendored skills describe their tool in general; where one disagrees
+  with this file or an in-house skill, the repository's conventions apply.
+- **No WordPress Playground skills, deliberately.** `WordPress/agent-skills` `blueprint` and
+  `wp-playground` describe WordPress Blueprints, whose schema shares step names with ours
+  (`login`, `writeFile`, `unzip`, …) but not their shapes; an agent following them would
+  rewrite our blueprints into WordPress ones. `blueprint-provisioning` is the authority here.
+
 ## Build System
 
 This project uses npm, esbuild, and a small Makefile workflow.

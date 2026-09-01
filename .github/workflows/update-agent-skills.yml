@@ -1,0 +1,65 @@
+# Update agent skills
+#
+# The third-party agent skills vendored under .agents/skills/ (see the Skills
+# section in AGENTS.md) are installed with the GitHub CLI (`gh skill add`),
+# which records the upstream repository, path and tree SHA of each one in its
+# SKILL.md frontmatter. This workflow runs `gh skill update --all` against that
+# directory once a week and opens a pull request when any vendored skill
+# changed, so the copies never drift silently from upstream. In-house skills
+# carry no github-* metadata and are skipped by the CLI with a notice.
+#
+# Pull requests opened with the default GITHUB_TOKEN do not trigger ci.yml.
+# That is fine here: skills are instructions for coding agents, nothing in the
+# build or tests reads them. Review the diff (an upstream change is a behaviour
+# change for the agents) and merge.
+name: Update agent skills
+
+on:
+  schedule:
+    # Weekly, Mondays at 06:23 UTC. Offset from the other Monday schedules.
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+# Least privilege: the default token gets nothing; the job requests exactly
+# what pushing the update branch and opening the PR needs. The two third-party
+# actions are pinned to commit SHAs (Dependabot keeps the pins and the version
+# comments current); first-party actions/* stay on major tags like the rest of
+# the workflows here.
+permissions: {}
+
+concurrency:
+  group: update-agent-skills
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: update
+        uses: devantler-tech/actions/update-agent-skills@3ee6cb9bbd616c2a38779be41a5e41f3e77282d0 # v13.2.3
+        with:
+          dir: .agents/skills
+
+      - name: Open pull request
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          commit-message: "chore(deps): update agent skills"
+          title: "chore(deps): update agent skills"
+          body: |
+            Weekly `gh skill update --all` run against `.agents/skills/`.
+
+            ```text
+            ${{ steps.update.outputs.updated-skills }}
+            ```
+
+            Skills are prompts that coding agents follow, so an upstream change
+            is a behaviour change: skim the diff before merging.
+          branch: deps/agent-skills-update
+          delete-branch: true
