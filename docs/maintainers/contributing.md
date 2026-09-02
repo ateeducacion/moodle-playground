@@ -163,3 +163,9 @@ Significant technical decisions must be recorded as
 `AGENTS.md` at the repository root is the authoritative guide for AI coding agents and the
 specialist agent skills under `.agents/skills/`. Consult it for domain-deep conventions,
 checklists, and known pitfalls before working in an unfamiliar area.
+
+Third-party skills (for example Cloudflare's `security-audit`) are vendored into that same
+directory with the GitHub CLI (`gh skill add`) and refreshed by the `update-agent-skills`
+workflow, which runs `gh skill update --all` weekly and opens a pull request when upstream
+changed. Claude Code discovers every skill through the symlinks under `.claude/skills/`.
+Never edit a vendored skill in place; the Skills section in `AGENTS.md` has the details.
