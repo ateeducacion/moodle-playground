@@ -128,13 +128,14 @@ function addModuleExec(fileSpecs = []) {
                             );
                             // Update entrypath/entryname if the module supports them.
                             try {
-                                $cols = $DB->get_columns($moduleInfo->modulename);
+                                $safeModName = clean_param($moduleInfo->modulename, PARAM_ALPHANUMEXT);
+                                $cols = $DB->get_columns($safeModName);
                                 if (isset($cols['entrypath'])) {
-                                    $DB->set_field($moduleInfo->modulename, 'entrypath',
+                                    $DB->set_field($safeModName, 'entrypath',
                                         $mainFile->get_filepath(), ['id' => $instanceid]);
                                 }
                                 if (isset($cols['entryname'])) {
-                                    $DB->set_field($moduleInfo->modulename, 'entryname',
+                                    $DB->set_field($safeModName, 'entryname',
                                         $mainFile->get_filename(), ['id' => $instanceid]);
                                 }
                             } catch (\\Throwable $ignore) {}
@@ -177,7 +178,8 @@ try {
             $instance->$k = $v;
         }
     }
-    $instanceid = $DB->insert_record($moduleInfo->modulename, $instance);
+    $safeModName = clean_param($moduleInfo->modulename, PARAM_ALPHANUMEXT);
+    $instanceid = $DB->insert_record($safeModName, $instance);
 
     $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
     context_module::instance($cmid);
