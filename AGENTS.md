@@ -138,8 +138,8 @@ ln -s ../../.agents/skills/security-audit .claude/skills/security-audit
 
 - `security-audit`, `github-actions-hardening`, and `playwright-cli` are vendored.
   Keep them verbatim, including `metadata.github-*` provenance. Fix upstream and
-  reinstall instead of editing the local copy. The six in-house skills deliberately
-  have no GitHub provenance and are maintained here.
+  reinstall instead of editing the local copy. The domain skills stay local. The four technical
+  skills are maintained here as the shared source for sibling playgrounds.
 - `.github/workflows/update-agent-skills.yml` checks weekly and opens update PRs.
   Review prompt changes as behavior changes. Scope manual update commands to
   `.agents/skills` to avoid updating unrelated user-level skills.
@@ -149,6 +149,13 @@ ln -s ../../.agents/skills/security-audit .claude/skills/security-audit
 - Use `e2e-playwright` for test authoring; do not adopt the vendored CLI skill's
   plan/generate flow. Do not install WordPress Blueprint skills: overlapping step
   names hide incompatible schemas. Our blueprint skill is authoritative.
+- `wp-playground-php-wasm`, `wasm-browser-runtime`, `e2e-playwright`, and
+  `unit-testing` are the shared source in `ateeducacion/moodle-playground`.
+  Keep their bodies application-neutral. Moodle-specific behavior belongs in
+  [runtime references](.agents/references/php-wasm-runtime.md) and
+  [testing references](.agents/references/playground-testing.md), outside skill
+  directories. Siblings install these four with `gh skills install` and update
+  through GitHub provenance; do not copy Moodle's local references into them.
 - Keep in-house descriptions short and specific. Retain non-obvious constraints;
   link to existing docs/source for conditional details instead of copying manuals,
   line counts, test inventories, or API catalogs into each skill.

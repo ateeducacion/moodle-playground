@@ -1,61 +1,51 @@
 ---
 name: e2e-playwright
-description: Write, review, or debug tests/e2e Playwright specs for Moodle Playground. Covers WASM readiness and nested Moodle frames; not terminal browser automation.
+description: Write or debug browser-playground Playwright tests for WASM readiness, nested app frames, provisioning, and reload behavior.
 metadata:
-  author: moodle-playground
-  version: "1.0"
+  author: playgrounds
+  version: "2.0"
 ---
 
-# Moodle Playground E2E tests
+# Browser-playground E2E tests
 
-## Existing infrastructure
+Use the E2E section of the host repository's
+[testing reference](../../references/playground-testing.md) for helpers, selectors,
+and runner settings. Keep this local reference outside the installed skill. If
+absent, inspect the nearest spec and `playwright.config.mjs` instead of assuming
+helpers from another playground exist.
 
-Use `tests/e2e/helpers.mjs` and the nearest spec as the implementation pattern.
-`playwright.config.mjs` owns browser projects, server startup, concurrency, and
-output paths; avoid copying that configuration into tests.
+## Readiness and assertions
 
-- `waitForShellReady(page)` is sufficient for shell-only interactions.
-- `waitForPlaygroundReady(page)` waits for Moodle content as well as the shell.
-- `getMoodleFrame(page)` targets `#site-frame` → `#remote-frame`.
-- `navigateWithinPlayground(page, path)` and `waitForMoodlePath` handle navigation.
-- `buildBlueprintParam`, `uniqueSuffix`, and diagnostics helpers already exist.
-- Reuse `readyTimeoutMs` / `specTimeoutMs`: WASM boot has a larger budget in CI.
+Shell readiness and application readiness are separate. The enabled address bar
+can show that the shell is usable before the application renders. Reuse existing
+readiness helpers and wait for the app content needed by the test.
 
-## Assertions and isolation
+The common frame layout is `#site-frame` (remote host) → `#remote-frame` (app).
+Confirm it in the host and target both levels for application assertions:
 
-Verify the behavior the feature promises. For provisioning, assert the resulting
-Moodle content inside `getMoodleFrame(page)`; an address-bar change alone does not
-prove that a course, user, or activity was created. Shell-only behavior can be
-asserted in the shell. Wait for readiness before interacting, using conditions
-instead of fixed sleeps.
-
-Each test's browser context isolates its tab scope; the config already permits
-multiple workers while keeping `fullyParallel: false`. Do not impose a blanket
-serial-execution rule. Avoid running sibling checkouts against the same server:
-`reuseExistingServer` can silently connect a test to the wrong application.
-
-For reload tests, mutable `/persist` data is journaled to IndexedDB. A different
-blueprint source or a reset clears the environment. Derived Moodle caches are
-excluded from the journal. Ensure the test waits for the relevant persistence
-operation rather than assuming a write has flushed immediately.
-
-## Running and diagnosing
-
-```bash
-make test-e2e-chrome
-make test-e2e-firefox
-npx playwright test tests/e2e/shell.spec.mjs --project=chromium
+```js
+const app = page.frameLocator("#site-frame").frameLocator("#remote-frame");
 ```
 
-Use `PLAYWRIGHT_PORT` for an isolated server; `PLAYWRIGHT_EXTERNAL_SERVER=1` skips
-server startup when intentionally targeting an existing instance. Other settings
-are in `playwright.config.mjs`. The browser installation npm script installs
-Chromium only; ensure Firefox is installed when running its project.
+An address-bar update or blueprint textarea value does not establish successful
+provisioning. Assert the resulting resource/content. Shell-only features can be
+asserted in the shell. Use condition-based waits, not fixed boot sleeps.
 
-Worker or blueprint source changes require `npm run build-worker`. Clear Service
-Worker caches before manual browser checks. Reset Playground does not refresh the
-worker bundle. Start manual runtime debugging with `?debug=true`.
+## Isolation, reload, and debugging
 
-Inspect the existing diagnostics collector and trace output when a test fails.
-`admin-flows.spec.mjs` is skipped in CI; run it locally when changing those flows.
-For terminal-driven exploration, use the separate `playwright-cli` skill.
+Use the runner's existing timeout/concurrency settings. `fullyParallel: false`
+does not mean all tests or tabs share one runtime. Do not serialize the entire
+suite as an unrelated flakiness fix.
+
+Avoid reusing another playground's dev server on the same port. Changing baseURL
+alone may not change the startup command; inspect configuration or start an
+isolated external server with matching URL and external-server settings.
+
+For reload tests, wait for the relevant journal writes; shell readiness does not
+prove a debounced flush completed. Assert the retained application state. A fresh
+context isolates tab scope but is not a universal cache invalidation mechanism.
+
+Worker source changes require a rebuilt bundle. Clear Service Worker caches during
+manual verification; Reset Playground clears data. Inspect existing diagnostics,
+logs, and traces before adjusting selectors or increasing timeouts. Use the
+separate terminal browser skill for exploration, not as a test-generation policy.

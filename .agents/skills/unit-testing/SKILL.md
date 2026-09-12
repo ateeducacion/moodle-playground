@@ -1,199 +1,40 @@
 ---
 name: unit-testing
-description: Write, review, or debug Moodle Playground Node unit tests, including PHP generator and MEMFS mocks. Not browser E2E tests.
+description: Write or review browser-playground Node unit tests for normalization, request adapters, journaling, and generated PHP scripts.
 metadata:
-  author: moodle-playground
-  version: "1.0"
+  author: playgrounds
+  version: "2.0"
 ---
 
-# Unit Testing Expert
+# Browser-playground unit tests
 
-## Test infrastructure
+Use the unit-test section of the host repository's
+[testing reference](../../references/playground-testing.md) for test paths, commands,
+and app-specific contracts. This reference is outside the installed skill. If it
+is absent, read `package.json` and the nearest tests; do not copy another host's
+filename extensions or helper names.
 
-### Runner and assertions
+The playgrounds use `node:test` and `node:assert/strict`, importing source directly.
+Reuse existing setup and boundary mocks. Do not duplicate production logic in a
+test or add another framework for the same work.
 
-```javascript
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-```
+## Useful checks
 
-No external framework — only Node.js builtins. No Jest, Mocha, Vitest, etc.
+- Normalization: the host's real blueprint shapes, defaults, aliases, and invalid
+  inputs. Shared step names do not mean identical contracts between applications.
+- PHP generation: escaping and argv/env encoding, application bootstrap/CLI setup,
+  and explicit error handling. Assert a meaningful generated-code invariant;
+  matching a string alone does not establish successful PHP execution.
+- Adapters: method/body/header/status preservation and front-controller paths.
+- Journaling: normalization before hydration, renamed paths, checkpoint failures,
+  correct namespace isolation, and replay behavior.
+- Routing: root/subpath handling, scope isolation, and HTML entity decoding.
 
-### Run commands
+Exercise the real function with minimal fakes for the boundary under test. Do not
+only exercise a browser helper's early-return Node branch when its browser behavior
+is the subject. Prefer behavior assertions over a fixed snapshot of implementation.
 
-```bash
-make test                           # All unit tests
-npm run test:blueprint              # Blueprint tests only
-node --test tests/blueprint/*.test.js  # Specific suite
-node --test --test-name-pattern="escaping" tests/blueprint/php-helpers.test.js  # Pattern filter
-```
-
-### Test file conventions
-
-| Pattern | Location |
-|---------|----------|
-| Blueprint tests | `tests/blueprint/*.test.js` |
-| Runtime tests | `tests/runtime/*.test.js` |
-| Shared tests | `tests/shared/*.test.js` |
-| Service worker tests | `tests/sw/*.test.js` |
-| E2E tests | `tests/e2e/*.spec.mjs` (Playwright, separate runner) |
-
-File naming: `{module-name}.test.js` mirroring the source file name.
-
-### Test structure
-
-```javascript
-describe("functionOrModuleName", () => {
-  it("does X when given Y", () => {
-    const result = functionUnderTest(input);
-    assert.strictEqual(result, expected);
-  });
-
-  it("throws on invalid input", () => {
-    assert.throws(() => functionUnderTest(null), /expected error message/);
-  });
-});
-```
-
-## Mocking patterns
-
-### Mocking php.run() for step handlers
-
-Step handlers receive a `{ php, publish, resources, webRoot }` context.
-Create a minimal mock:
-
-```javascript
-function createMockPhp(responses = {}) {
-  const calls = [];
-  return {
-    calls,
-    run: async (code) => {
-      calls.push(code);
-      return {
-        text: responses.text || '{"ok":true}',
-        errors: responses.errors || "",
-        exitCode: responses.exitCode || 0,
-      };
-    },
-    writeFile: async (path, data) => {
-      calls.push({ writeFile: path, size: data.length });
-    },
-    request: async (req) => {
-      calls.push({ request: req.url });
-      return new Response(responses.text || '{"ok":true}', {
-        status: responses.status || 200,
-      });
-    },
-  };
-}
-```
-
-### Mocking ResourceRegistry
-
-```javascript
-const mockResources = {
-  resolve: async (ref) => new TextEncoder().encode("mock data"),
-  resolveText: async (ref) => "mock data",
-};
-```
-
-### Testing PHP code generation
-
-For `src/blueprint/php/helpers.js` functions, test the **generated PHP string**
-content — not execution. Verify:
-
-```javascript
-it("escapes single quotes in user values", () => {
-  const code = phpCreateUser({ username: "it's" });
-  assert.ok(code.includes("it\\'s"), "single quote should be escaped");
-});
-
-it("uses CLI_SCRIPT mode", () => {
-  const code = phpSetConfig("key", "value");
-  assert.ok(code.includes("define('CLI_SCRIPT', true)"));
-});
-
-it("uses absolute config.php path", () => {
-  const code = phpCreateCourse({ fullname: "Test", shortname: "T1" });
-  assert.ok(code.includes("require('/www/moodle/config.php')"));
-});
-```
-
-### Testing checkPhpResult
-
-The shared `checkPhpResult` in `src/blueprint/steps/check-result.js`:
-
-```javascript
-it("throws on PHP failure response", () => {
-  assert.throws(
-    () => checkPhpResult({ text: '{"ok":false,"error":"boom"}' }, "test"),
-    /test: PHP returned failure/,
-  );
-});
-
-it("passes on success response", () => {
-  assert.doesNotThrow(() =>
-    checkPhpResult({ text: '{"ok":true}' }, "test"),
-  );
-});
-```
-
-## Testing service worker helpers
-
-SW helpers are pure functions extracted for testability:
-
-```javascript
-// tests/sw/sw-helpers.test.js
-import { decodeHtmlAttributeEntities, extractScopedRuntime } from "../../sw.js";
-
-it("decodes &amp;", () => {
-  assert.strictEqual(decodeHtmlAttributeEntities("a&amp;b"), "a&b");
-});
-```
-
-Import the functions directly — no browser environment needed for pure helpers.
-
-## Testing runtime utilities
-
-For `crash-recovery.js`, `config-template.js`, `version-resolver.js`:
-
-```javascript
-// Test error classification
-it("detects WebAssembly.RuntimeError instances", () => {
-  const error = new WebAssembly.RuntimeError("test");
-  assert.strictEqual(isFatalWasmError(error), true);
-});
-
-// Test config generation
-it("sets correct wwwroot", () => {
-  const config = createMoodleConfigPhp({ wwwroot: "http://localhost:8080" });
-  assert.ok(config.includes("$CFG->wwwroot = 'http://localhost:8080'"));
-});
-```
-
-## What to test and what not to test
-
-### Useful unit-test targets
-
-- PHP code generation output (string content, escaping, SQL safety)
-- Pure utility functions (path helpers, entity decoding, version resolution)
-- Schema validation (valid/invalid blueprint inputs)
-- Error classification (isFatalWasmError, checkPhpResult)
-- Step handler input validation (required fields, type checks)
-
-### Don't test in unit tests
-
-- Actual PHP execution (that's what e2e tests are for)
-- Service worker fetch interception (requires browser environment)
-- WASM binary loading (requires @php-wasm runtime)
-- DOM manipulation (shell/main.js — use e2e tests)
-
-## Checklist for test changes
-
-- [ ] Does the test use `node:test` and `node:assert/strict`?
-- [ ] Is the test file named `{module}.test.js` in the correct directory?
-- [ ] Do the affected tests pass? Run the full suite when shared behavior changes.
-- [ ] Are mocks minimal — only mock what's necessary?
-- [ ] Does the test verify behavior, not implementation?
-- [ ] Are edge cases covered (null, empty, special characters)?
-- [ ] Does `make lint` pass? (Biome checks test files too)
+Actual application rendering, SW interception, and WASM boot need browser checks;
+a Node/NODEFS PHP harness does not establish browser memory behavior. Run affected
+unit tests, broadening for shared behavior changes. Source tests do not rebuild the
+worker and cannot detect a stale browser bundle.
