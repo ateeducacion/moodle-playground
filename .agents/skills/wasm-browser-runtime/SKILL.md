@@ -1,6 +1,6 @@
 ---
 name: wasm-browser-runtime
-description: WebAssembly and browser runtime expert. Use when debugging WASM crashes (OOM, unreachable traps, memory access out of bounds), optimizing Emscripten MEMFS performance, working with service worker request routing, understanding browser memory constraints, handling Web Worker communication, or investigating issues at the WASM/JS boundary. Also covers crash recovery, resource exhaustion detection, and runtime restart strategies.
+description: Debug Moodle Playground WASM memory and crashes, service-worker routing, filesystem journaling, or crash recovery.
 metadata:
   author: moodle-playground
   version: "1.0"
@@ -8,31 +8,11 @@ metadata:
 
 # WebAssembly & Browser Runtime Expert
 
-## Role
-
-You are an expert in WebAssembly runtime behavior in browsers, Emscripten's virtual
-filesystem (MEMFS), Web Worker architecture, Service Worker request interception, and
-the constraints of running server-side software (PHP/Moodle) inside a browser sandbox.
-You understand failure modes that are unique to this environment — WASM memory limits,
-file descriptor exhaustion, single-threaded execution, and the ephemeral nature of
-in-memory state.
-
-## When to activate
-
-- Investigating WASM runtime crashes (`RuntimeError: unreachable`, `memory access out of bounds`)
-- Working on crash recovery logic (`src/runtime/crash-recovery.js`)
-- Optimizing memory usage or startup performance
-- Working with the service worker (`sw.js`) — request routing, caching, HTML rewriting
-- Debugging Web Worker communication (`php-worker.js` ↔ main thread)
-- Understanding browser-imposed limits (memory, file descriptors, storage quotas)
-- Working with Emscripten MEMFS filesystem behavior
-- Investigating subpath deployment issues on GitHub Pages
-
 ## WebAssembly runtime constraints
 
 ### Memory model
 
-- WASM linear memory starts at ~256 MB and can grow up to ~2-4 GB (browser-dependent)
+- The main PHP loader configures WASM linear memory to start at 128 MiB and can grow up to ~2-4 GB (browser-dependent)
 - Memory can only **grow**, never shrink — once allocated, it's committed for the session
 - OOM manifests as `RuntimeError: memory access out of bounds` or `unreachable`
 - No garbage collection of WASM memory — PHP's internal allocator reuses within the
@@ -58,10 +38,10 @@ in-memory state.
 ### Browser storage limits
 
 - **MEMFS**: Limited only by available JS heap (~1-4 GB depending on browser/device)
-- **OPFS**: Not used in this project (ephemeral design)
-- **IndexedDB**: Not used in this project
+- **OPFS**: Not used in this project
+- **IndexedDB**: Journals mutable `/persist` data for reloads; see `src/runtime/fs-persistence.js`
 - **Cache API**: Used by service worker for static asset caching
-- **sessionStorage**: Used for blueprint persistence (5-10 MB limit)
+- **sessionStorage**: Holds the tab scope and blueprint source identity
 
 ## Emscripten MEMFS deep dive
 
@@ -86,7 +66,7 @@ memory. When PHP writes, data flows the other direction. This means:
 
 - File I/O involves copying between JS heap and WASM memory
 - Large files temporarily consume memory in BOTH locations during I/O
-- The Moodle ZIP extraction (~100-200 MB) is a peak memory moment
+- The Moodle tar.zst extraction (~100-200 MB) is a peak memory moment
 
 ### MEMFS operations characteristics
 
@@ -130,7 +110,7 @@ PHP Worker (php-worker.js)
 ### Scoped runtime paths
 
 Requests are scoped under `/playground/<scope>/<runtime>/`:
-- `scope` — identifies the playground instance (default: `main`)
+- `scope` — identifies the playground instance (normally a generated per-tab ID)
 - `runtime` — identifies the PHP version (e.g., `php83-cgi`)
 - The remaining path maps to the Moodle file structure
 
@@ -169,17 +149,17 @@ function isFatalWasmError(error) {
 }
 ```
 
-### Recovery flow
+### Recovery and persistence
 
-1. **Detect**: `isFatalWasmError()` returns true
-2. **Snapshot**: `createSnapshotManager()` saves DB file, plugin dirs, filedir from MEMFS
-3. **Destroy**: Old PHP instance is discarded
-4. **Create**: Fresh PHP instance via `loadWebRuntime()`
-5. **Bootstrap**: Full Moodle bootstrap (ZIP extraction → snapshot → config)
-6. **Restore**: Overwrite fresh DB with crash snapshot, copy plugin files back
-7. **Re-register**: Update `alternative_component_cache`, run `upgrade_noncore()`
-8. **Session**: Create new admin session (old one invalidated by DB restore)
-9. **Replay**: Re-execute original request if idempotent (GET/HEAD only)
+Read [ADR 0027](../../../docs/architecture/adr/ADR-0027-selective-crash-recovery-snapshots.md)
+and the current `php-worker.js` recovery path when changing snapshots. Recovery
+checkpoints pending filedir changes before taking the DB snapshot; on failure it
+prefers an older coherent checkpoint. Do not restore a newer DB over older uploads
+or reintroduce an unbounded full-filedir copy.
+
+`src/runtime/fs-persistence.js` journals `/persist` to `moodle-fs-journal:<scope>`.
+Keep derived `moodledata/{cache,localcache,temp,muc}` out of the journal, normalize
+operations before hydration, and restart journaling after clearing for a clean boot.
 
 ### Anti-loop guards
 
@@ -187,40 +167,18 @@ function isFatalWasmError(error) {
 - `MIN_REQUESTS_BEFORE_RESTART = 10` — don't restart if barely started
 - POST/PUT/DELETE requests are never replayed after recovery
 
-## Web Worker communication
+## Worker protocol
 
-### Message protocol
-
-`php-worker.js` communicates with the main thread via `postMessage`:
-
-```javascript
-// Main thread → Worker
-{ type: 'request', id: 123, request: { method, url, headers, body } }
-{ type: 'boot', config: { scope, runtime, blueprint, ... } }
-
-// Worker → Main thread
-{ type: 'response', id: 123, response: { status, headers, body } }
-{ type: 'progress', phase: 'bootstrap', progress: 0.5, message: '...' }
-{ type: 'error', id: 123, error: { message, stack } }
-```
-
-### Progress reporting
-
-Bootstrap reports progress through phases:
-- 0.0–0.1: Runtime initialization
-- 0.1–0.3: ZIP bundle download and extraction
-- 0.3–0.5: Install snapshot loading or CLI install
-- 0.5–0.9: Config normalization and blueprint steps
-- 0.9–1.0: Final setup and auto-login
+Read `php-worker.js` and `src/shared/protocol.js` for actual message shapes and
+progress events. Avoid inventing a second protocol from illustrative examples.
 
 ## Performance optimization strategies
 
 ### Startup time
 
 1. **Pre-built install snapshot**: Skip 3-8s CLI install by loading `install.sq3`
-2. **ZIP bundle caching**: Cache API stores the Moodle bundle between page loads
-3. **Lazy extraction**: Only extract files needed for initial boot (not implemented yet)
-4. **OPcache warming**: PHP OPcache compiles scripts on first access, subsequent requests faster
+2. **Bundle caching**: Cache API stores the Moodle bundle between page loads
+3. **OPcache warming**: PHP OPcache compiles scripts on first access, subsequent requests faster
 
 ### Runtime performance
 
@@ -235,22 +193,19 @@ Bootstrap reports progress through phases:
 2. **Monitor JS heap**: MEMFS file contents + WASM memory should stay under ~2 GB
 3. **Restart as recovery**: When memory is exhausted, the only option is a fresh runtime
 
-## Fragile Areas (from AGENTS.md)
+## Repository-specific pitfalls
 
 ### sw.js
 - Query strings must survive scoped redirects
 - HTML rewriting must keep Moodle links/forms inside the scoped runtime
 
 ### crash-recovery.js
-- `collectFiles()` uses `rawPhp.isDir()` and `rawPhp.readFileAsBuffer()` to snapshot
-  plugin directories and filedir — these are `@php-wasm/universal` APIs on the raw
-  PHP instance (`php._php`), not the compat wrapper
-- The snapshot `restore()` runs **after** full bootstrap completes — the fresh runtime
-  has a clean install DB which is then overwritten by the crash snapshot
-- `reRegisterPluginsAfterRestore()` must refresh the `alternative_component_cache` for
-  each restored plugin before `moodle_needs_upgrading()` will detect them
-- The filedir restore preserves user-uploaded content (SCORM packages, activity files)
-  that Moodle references via `mdl_files` rows in the restored DB
+- Snapshot filesystem operations use the raw PHP instance (`php._php`), not the
+  compat wrapper. Consult the current snapshot manager and ADR 0027 for coverage.
+- Plugin registration must refresh `alternative_component_cache` so Moodle can
+  discover restored plugins before checking upgrades.
+- Preserve restart limits and GET/HEAD-only replay; test the failure path as well
+  as successful restoration when changing recovery.
 
 ### Service Worker bundling (Firefox)
 - Firefox does not support ES module Service Workers (Mozilla Bug 1360870)
@@ -259,9 +214,11 @@ Bootstrap reports progress through phases:
   its directory path; Firefox throws `SecurityError` if violated
 - Source: `sw.js` → Bundle: `sw.bundle.js` → Built by: `npm run build-worker`
 
-### Firefox WASM network limitations
-- Firefox and Safari cannot make outbound HTTP calls from Emscripten WASM (errno 23 / EHOSTUNREACH)
-- The crash recovery system detects this via `isEmscriptenNetworkError()` and returns 502
+### Outbound request bodies
+
+Use [ADR 0015](../../../docs/architecture/adr/ADR-0015-firefox-request-body-buffering.md)
+for Firefox request-body handling. Do not assume all outbound HTTP fails in Firefox;
+GET downloads and buffered bodies have supported paths.
 
 ## Checklist for runtime-touching changes
 

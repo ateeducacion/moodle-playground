@@ -1,30 +1,12 @@
 ---
 name: moodle-internals
-description: Moodle LMS domain expert. Use when working with Moodle APIs, plugin system, database schema, install/upgrade lifecycle, config settings, course structure, user management, enrollment, caching (MUC), or any PHP code that interacts with Moodle core. Covers Moodle 4.4 through 5.1+ branch conventions.
+description: Change Moodle PHP integration, install/upgrade defaults, plugins, or SQLite compatibility patches in Moodle Playground.
 metadata:
   author: moodle-playground
   version: "1.0"
 ---
 
 # Moodle Internals Expert
-
-## Role
-
-You are a senior Moodle core developer with deep knowledge of Moodle's internal
-architecture, API conventions, database schema, plugin system, and install/upgrade
-lifecycle. You understand how Moodle works from `lib/setup.php` through to the
-admin tree, and you know where Moodle's assumptions break in non-standard
-environments (like WebAssembly with SQLite).
-
-## When to activate
-
-- Writing or reviewing PHP code that calls Moodle APIs (`$DB`, `$CFG`, `$PAGE`, etc.)
-- Generating PHP snippets for blueprint steps (user creation, course setup, enrollment)
-- Debugging Moodle-specific errors (redirect loops, missing capabilities, upgrade failures)
-- Working with the plugin type system (mod, block, theme, local, format, etc.)
-- Modifying install/upgrade flow or post-install defaults
-- Touching `config.php` generation or `$CFG` settings
-- Working with Moodle's caching framework (MUC)
 
 ## Moodle API Conventions
 
@@ -33,7 +15,8 @@ environments (like WebAssembly with SQLite).
 - All tables prefixed with `$CFG->prefix` (default `mdl_`)
 - Use DML functions: `$DB->insert_record()`, `$DB->get_record()`, `$DB->execute()`
 - DDL via `$DB->get_manager()` — but in this project we use direct SQL for WASM compat
-- SQLite has no `RANDOM()` — use `ABS(RANDOM())` or avoid; no `CONCAT()` — use `||`
+- Check SQL against the bundled SQLite driver; use existing compatibility helpers
+  instead of assuming MySQL functions are available.
 - No `AUTO_INCREMENT` keyword — SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT`
 - Moodle's deprecated SQLite PDO driver (`sqlite3_pdo_moodle_database.php`) is patched
   in `patches/shared/lib/dml/`
@@ -185,7 +168,7 @@ Branch-specific patches are copied literally relative to the Moodle source root:
 Do not put branch overrides under `patches/<branch>/moodle/...`; the script does not treat
 `moodle/` specially and would copy that path literally into the source tree.
 
-## Fragile Areas (from AGENTS.md)
+## Repository-specific pitfalls
 
 ### bootstrap.js
 - Many install-time compatibility shims live here and are easy to break accidentally
@@ -204,9 +187,6 @@ Do not put branch overrides under `patches/<branch>/moodle/...`; the script does
 ### remote/main.js
 - Historically, the nested iframe could stall with a valid URL/title but an empty body
   (this is now resolved; the watchdog recovery code remains as a safety net)
-
-### moodle-loader.js
-- Handles ZIP bundle download, caching, and extraction
 
 ## Checklist for Moodle-touching changes
 

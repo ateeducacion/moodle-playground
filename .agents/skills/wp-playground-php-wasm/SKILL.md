@@ -1,6 +1,6 @@
 ---
 name: wp-playground-php-wasm
-description: WordPress Playground and @php-wasm runtime expert. Use when working with the PHP WebAssembly runtime, PHP instance lifecycle, php.run() execution model, file system operations (writeFile, readFileAsBuffer, mkdir, isDir), php.ini configuration via setPhpIniEntries(), request/response conversion, or debugging issues that originate in the upstream @php-wasm/web and @php-wasm/universal packages.
+description: Change Moodle Playground PHP runtime creation, php-compat request conversion, php.ini settings, or outbound PHP networking.
 metadata:
   author: moodle-playground
   version: "1.0"
@@ -8,54 +8,21 @@ metadata:
 
 # WordPress Playground & @php-wasm Runtime Expert
 
-## Role
-
-You are an expert in WordPress Playground's PHP WebAssembly runtime — the `@php-wasm/web`
-and `@php-wasm/universal` packages that power the PHP execution layer. You understand the
-PHP instance lifecycle, the Emscripten virtual filesystem, and the bridge between JavaScript
-and PHP execution. You know where the upstream APIs behave unexpectedly and where our
-compatibility layer (`php-compat.js`) adapts the WP Playground API for Moodle's needs.
-
-## When to activate
-
-- Working with `src/runtime/php-loader.js` (PHP instance creation)
-- Working with `src/runtime/php-compat.js` (API adapter layer)
-- Debugging PHP execution issues (`php.run()` behavior, exit codes, output capture)
-- Investigating WASM-level crashes or memory issues
-- Configuring PHP settings (`setPhpIniEntries()`)
-- Working with the Emscripten MEMFS filesystem
-- Debugging file I/O operations in the PHP runtime
-- Investigating upstream issues in WordPress Playground
-
 ## Upstream repository
 
 **Source**: https://github.com/WordPress/wordpress-playground
 
-Key packages we depend on:
-- `@php-wasm/web` (v3.1.12+) — Browser-specific PHP runtime, WASM binary loading
-- `@php-wasm/universal` (v3.1.12+) — Platform-agnostic PHP API, filesystem, ini config
+Dependency versions are recorded in `package.json` and `package-lock.json`.
+Read installed upstream source when checking exact API behavior.
 
 ## PHP instance lifecycle
 
 ### Creation
 
-```javascript
-import { loadWebRuntime } from '@php-wasm/web';
-
-const php = await loadWebRuntime('8.3', {
-    // Options passed to Emscripten module
-});
-```
-
-In our project, `src/runtime/php-loader.js` wraps this:
-
-```javascript
-const rawPhp = await loadWebRuntime(phpVersion, emscriptenOptions);
-setPhpIniEntries(rawPhp, iniEntries);  // from @php-wasm/universal
-```
-
-The raw `PHP` instance is then wrapped by `php-compat.js` into a compatibility layer
-that maps WP Playground's API to the interface expected by `bootstrap.js` and `php-worker.js`.
+`src/runtime/php-loader.js` obtains a runtime ID from `loadWebRuntime()`, constructs
+`new PHP(runtimeId)`, applies ini entries, then wraps that instance in `php-compat.js`.
+The runtime ID itself is not a PHP instance. Reuse the loader so networking,
+filesystem initialization, and persistence are configured together.
 
 ### Execution model
 
@@ -129,15 +96,15 @@ The PHP instance exposes Emscripten's MEMFS through these methods:
 | `php.fileExists(path)` | Check if path exists (file or directory) |
 | `php.unlink(path)` | Delete a file |
 | `php.listFiles(path)` | List directory contents |
-| `php.analyzePath(path)` | Emscripten `FS.analyzePath()` — returns `{ exists, object }` |
+| `php.analyzePath(path)` | Compat-wrapper emulation, not a raw `PHP` method |
 
-**Important**: These operate on the raw `PHP` instance (`php._php` in our compat layer),
+**Important**: Except for the compat-only `analyzePath`, these operate on the raw `PHP` instance (`php._php` in our compat layer),
 not on the compatibility wrapper. The compat wrapper (`php-compat.js`) exposes a subset
 and adds error handling.
 
 **MEMFS characteristics**:
 - All data lives in JavaScript heap memory (RAM)
-- No durability — tab close = data loss
+- MEMFS itself is volatile; this project separately journals `/persist` to IndexedDB for reloads
 - No size limits beyond available heap memory
 - File operations are synchronous and fast (no I/O wait)
 - Permissions are emulated but not enforced
@@ -237,7 +204,7 @@ patch in `patches/shared/lib/classes/encryption.php` handles encryption needs.
 6. **MEMFS inspection** — use `php.listFiles()` and `php.readFileAsText()` to inspect
    the virtual filesystem during debugging
 
-## Fragile Areas (from AGENTS.md)
+## Repository-specific pitfalls
 
 These areas have repeatedly caused regressions and require extra care:
 
@@ -259,6 +226,8 @@ These areas have repeatedly caused regressions and require extra care:
 - `MOODLE_PLAYGROUND_PROXY_URL` must stay scope-aware (`/playground/<scope>/<runtime>/...`);
   plugins that choose the same-origin proxy path must not derive proxy URLs from
   `$CFG->wwwroot` alone.
+- The generated CA must avoid explicit `keyUsage`, `nsCertType`, and SAN IP
+  extensions: the upstream ASN.1 encoder mis-encodes them (PR #1926-style profile).
 - The Service Worker endpoint `__playground_proxy__` must preserve the incoming query
   string and forward it to the configured external proxy unchanged.
 - The supported and tested paths for GitHub feeds/assets from PHP are now both:

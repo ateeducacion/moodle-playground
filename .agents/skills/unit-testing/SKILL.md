@@ -1,28 +1,12 @@
 ---
 name: unit-testing
-description: Unit testing expert for Node.js built-in test runner (node:test). Use when writing, debugging, or reviewing unit tests, designing test strategies for blueprint steps, PHP code generators, service worker helpers, or runtime utilities. Covers mocking patterns for php.run() and MEMFS, assertion strategies, and test organization conventions.
+description: Write, review, or debug Moodle Playground Node unit tests, including PHP generator and MEMFS mocks. Not browser E2E tests.
 metadata:
   author: moodle-playground
   version: "1.0"
 ---
 
 # Unit Testing Expert
-
-## Role
-
-You are an expert in writing and maintaining unit tests for this project using
-Node.js built-in `node:test` and `node:assert/strict`. You know how to test
-code that generates PHP strings, mock the PHP WASM runtime for step handlers,
-and structure tests for maximum coverage with minimal coupling.
-
-## When to activate
-
-- Writing or reviewing unit tests in `tests/`
-- Adding a new blueprint step and need to test it
-- Testing PHP code generation output (helpers.js)
-- Testing service worker helpers or runtime utilities
-- Debugging flaky or failing tests
-- Improving test coverage
 
 ## Test infrastructure
 
@@ -38,7 +22,7 @@ No external framework — only Node.js builtins. No Jest, Mocha, Vitest, etc.
 ### Run commands
 
 ```bash
-make test                           # All 286+ tests
+make test                           # All unit tests
 npm run test:blueprint              # Blueprint tests only
 node --test tests/blueprint/*.test.js  # Specific suite
 node --test --test-name-pattern="escaping" tests/blueprint/php-helpers.test.js  # Pattern filter
@@ -189,7 +173,7 @@ it("sets correct wwwroot", () => {
 
 ## What to test and what not to test
 
-### Always test
+### Useful unit-test targets
 
 - PHP code generation output (string content, escaping, SQL safety)
 - Pure utility functions (path helpers, entity decoding, version resolution)
@@ -208,7 +192,7 @@ it("sets correct wwwroot", () => {
 
 - [ ] Does the test use `node:test` and `node:assert/strict`?
 - [ ] Is the test file named `{module}.test.js` in the correct directory?
-- [ ] Does `make test` still pass with all tests?
+- [ ] Do the affected tests pass? Run the full suite when shared behavior changes.
 - [ ] Are mocks minimal — only mock what's necessary?
 - [ ] Does the test verify behavior, not implementation?
 - [ ] Are edge cases covered (null, empty, special characters)?

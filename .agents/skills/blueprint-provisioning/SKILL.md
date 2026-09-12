@@ -1,30 +1,12 @@
 ---
 name: blueprint-provisioning
-description: Blueprint provisioning system expert. Use when working with blueprint JSON files, step handlers, the executor engine, resource resolution, PHP code generation for Moodle provisioning, or adding new blueprint step types. Covers the full pipeline from blueprint parsing through validation, constant substitution, resource loading, step execution, and progress reporting.
+description: Implement or debug Moodle Playground blueprint schemas, resources, step handlers, and provisioning PHP. Not WordPress Blueprints.
 metadata:
   author: moodle-playground
   version: "1.0"
 ---
 
 # Blueprint Provisioning System Expert
-
-## Role
-
-You are an expert in the Moodle Playground blueprint system — a declarative, step-based
-JSON format for describing the desired state of a playground instance. You understand
-the full pipeline from blueprint parsing through execution, and you know how to write
-PHP code generators that use Moodle's APIs correctly in CLI mode.
-
-## When to activate
-
-- Adding new blueprint step types
-- Modifying existing step handlers (`src/blueprint/steps/`)
-- Working with the blueprint schema or validation (`src/blueprint/schema.js`)
-- Generating PHP code for Moodle provisioning (`src/blueprint/php/helpers.js`)
-- Debugging blueprint execution failures
-- Working with resource resolution (URL, base64, bundled, VFS, literal)
-- Modifying the blueprint executor or progress reporting
-- Writing or updating blueprint examples
 
 ## Architecture overview
 
@@ -40,199 +22,32 @@ Blueprint JSON
         → php.run() (execute in WASM PHP)
 ```
 
-### Key files
+## Schema and step reference
 
-| File | LOC | Responsibility |
-|------|-----|----------------|
-| `src/blueprint/parser.js` | 87 | Parse JSON, base64, data-URL, object inputs |
-| `src/blueprint/schema.js` | 149 | Hand-written validator (no library dependencies) |
-| `src/blueprint/constants.js` | 32 | `{{KEY}}` substitution in string values |
-| `src/blueprint/resources.js` | 155 | `ResourceRegistry` for multi-format resources |
-| `src/blueprint/resolver.js` | 127 | Blueprint source resolution (URL, inline, sessionStorage) |
-| `src/blueprint/executor.js` | 88 | Sequential step runner with error handling |
-| `src/blueprint/storage.js` | 34 | sessionStorage persistence |
-| `src/blueprint/index.js` | 57 | Public API re-exports |
-| `src/blueprint/php/helpers.js` | 397 | PHP code generation for Moodle API calls |
-| `src/blueprint/steps/` | ~1700 | 20 handler files for 30+ step types |
+Use [the blueprint reference](../../../docs/blueprints/reference.md) for JSON shapes,
+resources, and step-specific options; [examples](../../../docs/blueprints/examples.md)
+for complete blueprints. Read only the relevant sections.
 
-## Blueprint JSON format
-
-### Top-level structure
-
-```json
-{
-    "$schema": "./assets/blueprints/blueprint-schema.json",
-    "landingPage": "/course/view.php?id=2",
-    "runtime": {
-        "debug": 0,
-        "debugdisplay": 0,
-        "timezone": "Europe/Madrid"
-    },
-    "constants": {
-        "COURSE_NAME": "My Course",
-        "TEACHER_EMAIL": "teacher@example.com"
-    },
-    "resources": {
-        "syllabus": {
-            "type": "url",
-            "url": "https://example.com/syllabus.pdf"
-        }
-    },
-    "steps": [
-        { "step": "installMoodle" },
-        { "step": "createUser", "username": "teacher1", "email": "{{TEACHER_EMAIL}}" },
-        { "step": "createCourse", "fullname": "{{COURSE_NAME}}", "shortname": "C1" },
-        { "step": "enrolUser", "username": "teacher1", "course": "C1", "role": "editingteacher" }
-    ]
-}
-```
-
-### Step types (30+)
-
-#### Installation and config
-| Step | Description |
-|------|-------------|
-| `installMoodle` | Declarative marker — actual install runs in bootstrap.js |
-| `setAdminAccount` | Set admin username, password, email |
-| `login` | Authenticate a user via HTTP (creates session cookie) |
-| `setConfig` | Set a single `$CFG` or admin setting |
-| `setConfigs` | Set multiple settings in one step |
-| `setLandingPage` | Override the default landing page URL |
-
-#### Users and enrollment
-| Step | Description |
-|------|-------------|
-| `createUser` | Create a single user |
-| `createUsers` | Create multiple users in one PHP execution |
-| `enrolUser` | Enrol a user in a course with a role |
-| `enrolUsers` | Bulk enrollment |
-
-#### Course structure
-| Step | Description |
-|------|-------------|
-| `createCategory` | Create a course category |
-| `createCategories` | Create multiple categories |
-| `createCourse` | Create a single course |
-| `createCourses` | Create multiple courses |
-| `createSection` | Add a section to a course |
-| `createSections` | Add multiple sections |
-| `restoreCourse` | Restore a `.mbz` course backup via `restore_controller` |
-
-`restoreCourse` (`steps/moodle-restore.js` → `phpRestoreCourse` in `php/helpers.js`) takes one
-source — `url` (downloaded inside PHP via `download_file_content($tofile)`, streamed to MEMFS, best
-for large files), `path` (an `.mbz` already in MEMFS), or `data` (embedded, small only) — plus
-`category` (name, auto-created), `fullname`/`shortname`/`visible`. It raises memory, guards Moodle's
-`exit(1)` handler (ADR-0005), and restores into a new course (`TARGET_NEW_COURSE`). Large/complex
-backups can fail (memory / SQLite-WASM limits) but fail gracefully. See
-`docs/architecture/adr/ADR-0007-course-restore-step.md`.
-
-#### Activities and modules
-| Step | Description |
-|------|-------------|
-| `addModule` | Add an activity module (label, assign, folder, forum, page, url, etc.) |
-
-Supported module types via `addModule`:
-- `label` — Text/HTML label in a section
-- `assign` — Assignment activity
-- `folder` — Folder resource (with file upload support)
-- `page` — Page resource
-- `url` — URL resource
-- `forum` — Forum activity
-- `choice` — Choice activity
-- `quiz` — Quiz activity (structure only, no questions)
-- `glossary` — Glossary activity
-- `wiki` — Wiki activity
-- `feedback` — Feedback activity
-- `lesson` — Lesson activity
-- `workshop` — Workshop activity
-- `data` — Database activity
-- `lti` — External tool (LTI)
-- `scorm` — SCORM package (requires resource)
-- `h5pactivity` — H5P activity
-
-#### Roles, scales and cohorts
-| Step | Description |
-|------|-------------|
-| `importRolePreset` / `importRoles` | Import native Moodle role preset XML (`core_role_preset`); inline `xml`/`resource` or array of XML refs |
-| `createRole` / `createRoles` | JSON-native roles: `capabilities` map, `contextlevels`, `allow*` relationships, `resetToArchetype` |
-| `createScale` / `createScales` | Grading scales; `items` array or CSV; `createScales` also accepts the `moodle-scale-export` envelope |
-| `createCohort` / `createCohorts` | Site cohorts; idempotent on `idnumber`/`name`; optional `members` usernames |
-
-`steps/moodle-roles.js`, `moodle-scales.js`, `moodle-cohorts.js` consume the shared
-`steps/payload.js` resolver, so each batch step's payload may be an inline array, a `@resource`
-reference, an inline resource descriptor (`{ "url": … }`), or a raw JSON/XML string — the same
-resource system used by `writeFile`/`unzip`. Generators (`phpImportRolePresets`, `phpCreateRoles`,
-`phpCreateScales`, `phpCreateCohorts`) install a graceful exception handler and are idempotent. See
-`docs/architecture/adr/ADR-0008-blueprint-roles-scales-cohorts-provisioning.md`.
-
-#### Plugins and themes
-| Step | Description |
-|------|-------------|
-| `installMoodlePlugin` | Download and install a Moodle plugin from ZIP URL |
-| `installTheme` | Download and install a theme (alias with theme-specific defaults) |
-
-#### Languages
-| Step | Description |
-|------|-------------|
-| `installLanguagePack` | Install language pack(s) via Moodle's `lang_installer` (`language`: code/CSV/array; `setDefault`) |
-
-`installLanguagePack` (`steps/moodle-language.js`) wraps `lang_installer`
-(`lib/componentlib.class.php`), which downloads from `download.moodle.org/langpack` through the
-github-proxy (allowlisted `/langpack/` paths, incl. `languages.md5`). The site language set in
-config (`installMoodle` `options.locale` / `siteOptions.locale`) is **auto-installed** on boot by
-`runLanguageAutoInstall()` in `bootstrap.js`. Both work in every browser (GET requests avoid the
-`duplex:'half'` WASM-network limit). See `docs/architecture/adr/ADR-0006-moodle-langpack-proxy-allowance.md`.
-
-#### Filesystem and code execution
-| Step | Description |
-|------|-------------|
-| `mkdir` | Create a directory in MEMFS |
-| `rmdir` | Remove a directory |
-| `writeFile` | Write content to a file |
-| `writeFiles` | Write multiple files |
-| `copyFile` | Copy a file within MEMFS |
-| `moveFile` | Move/rename a file |
-| `unzip` | Extract a ZIP archive |
-| `request` | Make an HTTP request through the PHP runtime |
-| `runPhpCode` | Execute arbitrary PHP code |
-| `runPhpScript` | Execute a PHP script file |
+The executable validator is `src/blueprint/schema.js`; the public schema is
+`assets/blueprints/blueprint-schema.json`; the registry is `src/blueprint/steps/index.js`.
+Check the handler and current exports in `src/blueprint/php/helpers.js` before using
+an API name. `installMoodle` is declarative; bootstrap performs the install.
 
 ## PHP code generation (`php/helpers.js`)
 
 ### Design principles
 
-1. **CLI_SCRIPT mode**: All provisioning PHP runs with `define('CLI_SCRIPT', true)`
+1. **CLI_SCRIPT mode**: Provisioning scripts define `CLI_SCRIPT` before loading Moodle;
+   `login` authenticates through HTTP instead.
 2. **Single-script batch**: Plural steps (e.g., `createUsers`) generate ONE PHP script
    that processes all entities — avoids per-entity `php.run()` overhead
 3. **Moodle API calls**: Use official APIs (`user_create_user()`, `create_course()`, etc.)
    where possible; fall back to direct `$DB->insert_record()` where WASM SQLite compat
    requires it (see ADR-0003 for course modules)
-4. **Error reporting**: PHP scripts should `echo json_encode(['success' => true, ...])` or
-   throw/die with descriptive error messages
-5. **Escaping**: All user-provided strings are escaped with `escapePHPString()` before
+4. **Error reporting**: Reuse `steps/check-result.js` and the existing `ok`/`error`
+   response convention; preserve graceful exception handling (ADR-0005).
+5. **Escaping**: All user-provided strings are escaped with `escapePhp()` before
    embedding in generated PHP code
-
-### Key helper functions
-
-```javascript
-// Generate CLI header (require config.php, set up globals)
-buildCliHeader()
-
-// Escape a string for embedding in PHP single-quoted strings
-escapePHPString(str)
-
-// Generate user creation PHP code
-buildCreateUserPhp(userData)
-
-// Generate course creation PHP code
-buildCreateCoursePhp(courseData)
-
-// Generate enrollment PHP code
-buildEnrolUserPhp(enrolData)
-
-// Generate module addition PHP code (delegates to type-specific generators)
-buildAddModulePhp(moduleData)
-```
 
 ### Direct DB insert pattern (ADR-0003)
 
@@ -259,41 +74,11 @@ $DB->update_record('course_sections', $section);
 context_module::instance($cmid);
 ```
 
-## Resource system
+## Resources
 
-Resources are named, typed data sources that steps can reference:
-
-```json
-{
-    "resources": {
-        "my-scorm": {
-            "type": "url",
-            "url": "https://example.com/package.zip"
-        },
-        "readme": {
-            "type": "literal",
-            "contents": "# Welcome\nThis is the course readme."
-        },
-        "logo": {
-            "type": "base64",
-            "data": "iVBORw0KGgo...",
-            "mimeType": "image/png"
-        }
-    }
-}
-```
-
-Resource types:
-
-| Type | Source | Resolution |
-|------|--------|-----------|
-| `url` | HTTP URL | Fetched at execution time |
-| `base64` | Base64-encoded string | Decoded in-memory |
-| `literal` | Plain text string | Used directly |
-| `bundled` | Path relative to assets/ | Loaded from app assets |
-| `vfs` | Path in MEMFS | Read from virtual filesystem |
-
-Steps reference resources by name with `@` prefix: `"resource": "@my-scorm"`.
+Use the shapes in [the blueprint reference](../../../docs/blueprints/reference.md)
+and the resolver in `src/blueprint/resources.js`. Batch payloads use the shared
+`src/blueprint/steps/payload.js`; reuse it instead of adding per-step parsers.
 
 ## Plugin installation flow
 
@@ -365,7 +150,7 @@ Blueprint tests live in `tests/blueprint/` and cover:
 - Parsing (JSON, base64, data-URL, raw objects)
 - Schema validation (required fields, step types, resource types)
 - Constant substitution (strings, nested objects, arrays)
-- Resource resolution (all 5 types)
+- Resource resolution
 - Executor behavior (ordering, failures, progress, critical steps)
 - PHP code generation (escaping, CLI header, all Moodle API generators)
 - Plugin installation (URL parsing, auto-detection, ZIP extraction)
@@ -375,12 +160,15 @@ Run with: `npm run test:blueprint`
 ## Checklist for blueprint changes
 
 - [ ] Is the new step type registered in `src/blueprint/steps/index.js`?
-- [ ] Is the step documented in `docs/blueprint-json.md`?
+- [ ] Is the step documented in `docs/blueprints/reference.md`?
 - [ ] Is the step added to `assets/blueprints/blueprint-schema.json`?
 - [ ] Does the PHP code use `CLI_SCRIPT` mode?
-- [ ] Are all user strings escaped with `escapePHPString()`?
+- [ ] Are all user strings escaped with `escapePhp()`?
 - [ ] Does the step work with SQLite (no MySQL-only syntax)?
 - [ ] Are there unit tests in `tests/blueprint/`?
 - [ ] Does batch mode generate a single PHP script, not per-entity calls?
 - [ ] Is error handling graceful (non-fatal by default)?
 - [ ] Does the step report meaningful progress messages?
+
+Rebuild with `npm run build-worker` after blueprint edits and clear Service Worker
+caches before browser verification; source unit tests do not detect stale bundles.
