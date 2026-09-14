@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: update
-        uses: devantler-tech/actions/update-agent-skills@v13.3.3
+        uses: devantler-tech/actions/update-agent-skills@v13.5.1
         with:
           dir: .agents/skills
 
