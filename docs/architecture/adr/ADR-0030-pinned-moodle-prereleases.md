@@ -99,5 +99,5 @@ do not promote this beta channel or change stable defaults implicitly.
 
 ## References
 
-- [Version resolver](../../../src/shared/version-resolver.js)
-- [Source fetcher](../../../scripts/fetch-moodle-source.sh)
+- [Version resolver](https://github.com/ateeducacion/moodle-playground/blob/f0b64ca/src/shared/version-resolver.js)
+- [Source fetcher](https://github.com/ateeducacion/moodle-playground/blob/f0b64ca/scripts/fetch-moodle-source.sh)
