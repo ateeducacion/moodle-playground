@@ -32,6 +32,10 @@ make up
 
 Then open <http://localhost:8080>.
 
+For the experimental Moodle 5.3 beta, use `?moodle=5.3&php=8.4` or select it
+in the version picker. It is pinned separately from `main` and does not change
+the default. See [build instructions and validation](docs/moodle-53-beta.md).
+
 ### Prerequisites
 
 - Node.js 18+

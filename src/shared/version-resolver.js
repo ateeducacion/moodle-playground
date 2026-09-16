@@ -65,6 +65,19 @@ export const MOODLE_BRANCHES = [
     default: false,
   },
   {
+    // Pinned prerelease channel; see ADR-0030-pinned-moodle-prereleases.md.
+    branch: "MOODLE_503_BETA",
+    version: "5.3",
+    label: "Moodle 5.3 beta (experimental)",
+    gitRef: "v5.3.0-beta",
+    webRoot: "/www/moodle/public",
+    manifestFile: "MOODLE_503_BETA.json",
+    bundleDir: "MOODLE_503_BETA",
+    snapshotDir: "MOODLE_503_BETA/snapshot",
+    phpVersions: ["8.3", "8.4"],
+    default: false,
+  },
+  {
     branch: "main",
     version: "dev",
     label: "Moodle 5.3dev (main)",

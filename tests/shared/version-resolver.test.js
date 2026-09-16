@@ -20,6 +20,27 @@ import {
 } from "../../src/shared/version-resolver.js";
 
 describe("getBranchMetadata", () => {
+  it("selects the pinned 5.3 beta without changing stable defaults", () => {
+    const branch = "MOODLE_503_BETA";
+    const meta = getBranchMetadata(branch);
+    assert.equal(resolveMoodleBranch("5.3"), branch);
+    assert.equal(meta.gitRef, "v5.3.0-beta");
+    assert.equal(meta.webRoot, "/www/moodle/public");
+    assert.deepEqual(meta.phpVersions, ["8.3", "8.4"]);
+    assert.equal(isCompatibleCombination("8.2", branch), false);
+    assert.equal(isCompatibleCombination("8.5", branch), false);
+    assert.equal(meta.default, false);
+    assert.equal(getDefaultBranch().branch, "MOODLE_500_STABLE");
+    assert.equal(buildRuntimeId("8.4", branch), "php84-moodle53");
+    assert.deepEqual(parseRuntimeId("php84-moodle53"), {
+      phpVersion: "8.4",
+      moodleBranch: branch,
+    });
+    assert.equal(
+      buildManifestUrl(branch, "https://example.org/playground/"),
+      "https://example.org/playground/assets/manifests/MOODLE_503_BETA.json",
+    );
+  });
   it("returns metadata for a known branch", () => {
     const meta = getBranchMetadata("MOODLE_500_STABLE");
     assert.ok(meta);

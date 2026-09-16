@@ -18,7 +18,7 @@ if [ -n "$BRANCH" ]; then
   MOODLE_DIR=$("$SCRIPT_DIR/fetch-moodle-source.sh" "$BRANCH")
   DIST_DIR=${DIST_DIR:-"$REPO_DIR/assets/moodle/$BRANCH"}
   MANIFEST_PATH="$MANIFEST_DIR/$BRANCH.json"
-  SOURCE_URL="https://github.com/moodle/moodle/tree/$BRANCH"
+  SOURCE_URL="https://github.com/moodle/moodle/tree/$(git -C "$MOODLE_DIR" rev-parse HEAD)"
 else
   # Legacy: download.moodle.org-based fetching
   ARCHIVE_PATH=$("$SCRIPT_DIR/fetch-moodle-release.sh" "$CHANNEL" tgz)
