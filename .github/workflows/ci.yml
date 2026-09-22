@@ -2,8 +2,14 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - '.agents/skills/**'
+      - '.claude/skills/**'
     branches: ["main"]
   pull_request:
+    paths-ignore:
+      - '.agents/skills/**'
+      - '.claude/skills/**'
     branches: ["main"]
     types: [opened, reopened, synchronize, closed]
   workflow_dispatch:
