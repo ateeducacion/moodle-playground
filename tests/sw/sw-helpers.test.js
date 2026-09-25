@@ -1,163 +1,22 @@
 /**
- * Tests for the pure helper functions in sw.js.
- * Since sw.js runs in a Service Worker context and doesn't export functions,
- * we replicate the pure logic here for testing — same approach as php-compat tests.
+ * Tests for the pure URL/HTML rewriting helpers used by sw.js.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+  buildScopedCacheKey,
+  decodeHtmlAttributeEntities,
+  escapeHtml,
+  extractScopedRuntime,
+  isSensitiveStaticPath,
+  markExternalAnchorsBlank,
+  rewriteHtmlAttributeUrl,
+  rewriteHtmlDocument,
+} from "../../src/shared/sw-url-rewrite.js";
 
-const STATIC_PREFIXES = [
-  "/assets/",
-  "/dist/",
-  "/src/",
-  "/php-worker.js",
-  "/sw.js",
-  "/remote.html",
-  "/index.html",
-  "/playground.config.json",
-  "/favicon.ico",
-  "/favicon-32x32.png",
-  "/apple-touch-icon.png",
-  "/logo.png",
-];
-
-// Replicate decodeHtmlAttributeEntities from sw.js
-function decodeHtmlAttributeEntities(value) {
-  return value
-    .replace(/&#x([0-9a-f]+);/giu, (_, hex) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#([0-9]+);/gu, (_, dec) =>
-      String.fromCodePoint(Number.parseInt(dec, 10)),
-    )
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&apos;", "'")
-    .replaceAll("&sol;", "/")
-    .replaceAll("&colon;", ":");
-}
-
-function stripAppBasePath(pathname, appBasePath = "/") {
-  if (appBasePath === "/") {
-    return pathname || "/";
-  }
-
-  if (pathname === appBasePath) {
-    return "/";
-  }
-
-  if (pathname.startsWith(`${appBasePath}/`)) {
-    return pathname.slice(appBasePath.length) || "/";
-  }
-
-  return pathname || "/";
-}
-
-function isStaticHostPath(pathname, appBasePath = "/") {
-  const strippedPathname = stripAppBasePath(pathname, appBasePath);
-  return STATIC_PREFIXES.some(
-    (prefix) =>
-      strippedPathname === prefix || strippedPathname.startsWith(prefix),
-  );
-}
-
-function isSensitiveStaticPath(pathname, appBasePath = "/") {
-  const strippedPathname = stripAppBasePath(pathname, appBasePath);
-  return (
-    strippedPathname === "/" ||
-    strippedPathname === "/index.html" ||
-    strippedPathname === "/remote.html" ||
-    strippedPathname === "/playground.config.json" ||
-    strippedPathname === "/assets/build-version.json" ||
-    /^\/assets\/manifests\/[^/]+\.json$/u.test(strippedPathname)
-  );
-}
-
-function rewriteHtmlAttributeUrl(
-  rawValue,
-  { origin, scopeId, runtimeId, appBasePath = "/" },
-) {
-  const decodedValue = decodeHtmlAttributeEntities(rawValue);
-  const scopedBasePath =
-    appBasePath === "/"
-      ? `/playground/${scopeId}/${runtimeId}`
-      : `${appBasePath}/playground/${scopeId}/${runtimeId}`;
-
-  if (!decodedValue) {
-    return decodedValue;
-  }
-
-  if (
-    decodedValue.startsWith("#") ||
-    decodedValue.startsWith("javascript:") ||
-    decodedValue.startsWith("data:") ||
-    decodedValue.startsWith("mailto:") ||
-    decodedValue.startsWith("tel:") ||
-    decodedValue.startsWith("//")
-  ) {
-    return decodedValue;
-  }
-
-  if (!decodedValue.startsWith("/") && !decodedValue.includes("://")) {
-    return decodedValue;
-  }
-
-  try {
-    const absolute = new URL(decodedValue, origin);
-    if (absolute.origin !== origin) {
-      return decodedValue;
-    }
-
-    const absolutePath = `${absolute.pathname}${absolute.search}${absolute.hash}`;
-    if (
-      absolute.pathname.startsWith(`${scopedBasePath}/`) ||
-      absolute.pathname === scopedBasePath
-    ) {
-      return absolutePath;
-    }
-
-    if (isStaticHostPath(absolute.pathname, appBasePath)) {
-      return absolutePath;
-    }
-
-    if (!absolute.pathname.startsWith("/")) {
-      return decodedValue;
-    }
-
-    if (
-      appBasePath !== "/" &&
-      absolute.pathname !== appBasePath &&
-      !absolute.pathname.startsWith(`${appBasePath}/`)
-    ) {
-      return decodedValue;
-    }
-
-    const runtimePath = `${stripAppBasePath(
-      absolute.pathname,
-      appBasePath,
-    )}${absolute.search}${absolute.hash}`;
-    return `${scopedBasePath}${
-      runtimePath.startsWith("/") ? runtimePath : `/${runtimePath}`
-    }`.replace(/\/{2,}/gu, "/");
-  } catch {
-    return decodedValue;
-  }
-}
-
-// Replicate escapeHtml from sw.js
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-// Replicate the attribute-rewrite step from rewriteHtmlDocument in sw.js: the
-// decoded, rewritten value must be re-encoded for HTML attribute context before
-// it is interpolated back between the quotes.
+// Reference (unoptimized) attribute pass: decode -> rewrite -> escapeHtml for
+// every matched value. rewriteHtmlDocument adds a fast path and a memo on top of
+// this and must stay byte-identical to it.
 function rewriteHtmlDocumentAttributes(html, scope) {
   return html.replace(
     /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
@@ -166,64 +25,11 @@ function rewriteHtmlDocumentAttributes(html, scope) {
   );
 }
 
-// Replicate the OPTIMIZED rewriteHtmlDocument attribute step from sw.js with
-// the fast-path filter + per-document memo. Used by the equivalence tests
-// below to prove the fast path is byte-identical to the unfiltered path.
-function rewriteHtmlDocumentAttributesFast(html, scope) {
-  const memo = new Map();
-  return html.replace(
-    /((?:href|src|action|data-[\w-]*url|data-url|data-action)=["'])([^"']*)(["'])/giu,
-    (match, prefix, rawValue, suffix) => {
-      if (
-        rawValue === "" ||
-        (!rawValue.startsWith("/") &&
-          !rawValue.includes("://") &&
-          !rawValue.includes("&") &&
-          !rawValue.includes("<") &&
-          !rawValue.includes(">"))
-      ) {
-        return match;
-      }
-      let encoded = memo.get(rawValue);
-      if (encoded === undefined) {
-        encoded = escapeHtml(rewriteHtmlAttributeUrl(rawValue, scope));
-        memo.set(rawValue, encoded);
-      }
-      return `${prefix}${encoded}${suffix}`;
-    },
-  );
-}
-
-// Replicate buildScopedCacheKey from sw.js
-function buildScopedCacheKey(origin, scopeId, runtimeId, requestPath) {
-  const queryIndex = requestPath.indexOf("?");
-  const pathPart =
-    queryIndex === -1 ? requestPath : requestPath.slice(0, queryIndex);
-  const searchPart = queryIndex === -1 ? "" : requestPath.slice(queryIndex);
-  const normalizedPath = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
-  const scopedPath =
-    `/playground/${scopeId}/${runtimeId}${normalizedPath}`.replace(
-      /\/{2,}/gu,
-      "/",
-    );
-  return new URL(`${scopedPath}${searchPart}`, origin).toString();
-}
-
-// Replicate extractScopedRuntime pattern from sw.js
-function extractScopedRuntime(pathname, search = "") {
-  const match = pathname.match(/\/playground\/([^/]+)\/([^/]+)(\/.*)?$/u);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    scopeId: match[1],
-    runtimeId: match[2],
-    requestPath: `${match[3] || "/"}${search}`,
-  };
-}
-
 describe("decodeHtmlAttributeEntities", () => {
+  it("decodes &amp; last so an escaped entity is not decoded twice", () => {
+    assert.strictEqual(decodeHtmlAttributeEntities("&amp;quot;"), "&quot;");
+  });
+
   it("decodes &amp;", () => {
     assert.strictEqual(decodeHtmlAttributeEntities("a&amp;b"), "a&b");
   });
@@ -339,6 +145,27 @@ describe("isSensitiveStaticPath", () => {
     );
   });
 
+  it("marks the generated build ID module and core bundles as network-first", () => {
+    assert.strictEqual(
+      isSensitiveStaticPath("/src/generated/build-version.js"),
+      true,
+    );
+    assert.strictEqual(
+      isSensitiveStaticPath("/assets/moodle/MOODLE_500_STABLE/moodle.tar.zst"),
+      true,
+    );
+  });
+
+  it("honours the app base path", () => {
+    assert.strictEqual(
+      isSensitiveStaticPath(
+        "/moodle-playground/remote.html",
+        "/moodle-playground",
+      ),
+      true,
+    );
+  });
+
   it("does not mark regular static assets as sensitive", () => {
     assert.strictEqual(isSensitiveStaticPath("/src/shell/main.js"), false);
     assert.strictEqual(
@@ -409,7 +236,7 @@ describe("rewriteHtmlAttributeUrl", () => {
   });
 });
 
-describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
+describe("rewriteHtmlDocument (attribute re-encoding)", () => {
   const scope = {
     origin: "https://ateeducacion.github.io",
     scopeId: "main",
@@ -422,7 +249,7 @@ describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
     // so the document rewrite must re-encode it back to &amp; (not raw &).
     const html =
       '<a href="/moodle-playground/admin/index.php?cache=1&amp;sesskey=abc">x</a>';
-    const out = rewriteHtmlDocumentAttributes(html, scope);
+    const out = rewriteHtmlDocument(html, scope);
     assert.strictEqual(
       out,
       '<a href="/moodle-playground/playground/main/php83-moodle50/admin/index.php?cache=1&amp;sesskey=abc">x</a>',
@@ -439,7 +266,7 @@ describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
     // from closing the attribute early and injecting markup into the iframe.
     const html =
       '<a href="foo.php?x=&quot;&gt;&lt;img src=x onerror=alert(1)&gt;">x</a>';
-    const out = rewriteHtmlDocumentAttributes(html, scope);
+    const out = rewriteHtmlDocument(html, scope);
     // The attribute must still be a single quoted value (not broken out of).
     const valueMatch = out.match(/href="([^"]*)"/u);
     assert.ok(valueMatch, "attribute should still be a single quoted value");
@@ -456,14 +283,14 @@ describe("rewriteHtmlDocumentAttributes (attribute re-encoding)", () => {
   it("re-encodes a single quote in a relative URL (single-quote breakout)", () => {
     // Single-quoted attribute with a decoded single quote in a relative URL.
     const html = "<a href='foo.php?n=&#39;a&#39;'>x</a>";
-    const out = rewriteHtmlDocumentAttributes(html, scope);
+    const out = rewriteHtmlDocument(html, scope);
     assert.ok(out.includes("&#39;"), "single quote must be encoded");
     assert.ok(!/n='a'/u.test(out), "raw single quotes must not appear");
   });
 
   it("leaves clean relative URLs intact after re-encoding", () => {
     const html = '<a href="upgradesettings.php">x</a>';
-    const out = rewriteHtmlDocumentAttributes(html, scope);
+    const out = rewriteHtmlDocument(html, scope);
     assert.strictEqual(out, '<a href="upgradesettings.php">x</a>');
   });
 });
@@ -510,8 +337,11 @@ describe("rewriteHtmlDocument fast-path equivalence", () => {
   for (const html of corpus) {
     it(`is byte-identical for: ${html.slice(0, 50)}`, () => {
       assert.strictEqual(
-        rewriteHtmlDocumentAttributesFast(html, scope),
-        rewriteHtmlDocumentAttributes(html, scope),
+        rewriteHtmlDocument(html, scope),
+        markExternalAnchorsBlank(
+          rewriteHtmlDocumentAttributes(html, scope),
+          scope.origin,
+        ),
       );
     });
   }
@@ -519,8 +349,11 @@ describe("rewriteHtmlDocument fast-path equivalence", () => {
   it("is byte-identical for a combined document", () => {
     const html = corpus.join("\n");
     assert.strictEqual(
-      rewriteHtmlDocumentAttributesFast(html, scope),
-      rewriteHtmlDocumentAttributes(html, scope),
+      rewriteHtmlDocument(html, scope),
+      markExternalAnchorsBlank(
+        rewriteHtmlDocumentAttributes(html, scope),
+        scope.origin,
+      ),
     );
   });
 });
@@ -580,38 +413,6 @@ describe("buildScopedCacheKey", () => {
     );
   });
 });
-
-// Replicate markExternalAnchorsBlank from sw.js. External links (e.g. the Moodle
-// plugin directory) can't be shown inside the playground iframe because those
-// sites send X-Frame-Options: sameorigin, so we re-target them to a new tab.
-function markExternalAnchorsBlank(html, origin) {
-  return html.replace(/<a\b([^>]*)>/giu, (match, attrs) => {
-    if (/\btarget\s*=/iu.test(attrs)) {
-      return match;
-    }
-    const hrefMatch = attrs.match(/\bhref\s*=\s*(["'])([^"']*)\1/iu);
-    if (!hrefMatch) {
-      return match;
-    }
-    const href = decodeHtmlAttributeEntities(hrefMatch[2]);
-    if (!href) {
-      return match;
-    }
-    let absolute;
-    try {
-      absolute = new URL(href, origin);
-    } catch {
-      return match;
-    }
-    if (absolute.protocol !== "http:" && absolute.protocol !== "https:") {
-      return match;
-    }
-    if (absolute.origin === origin) {
-      return match;
-    }
-    return `<a${attrs} target="_blank" rel="noopener noreferrer">`;
-  });
-}
 
 describe("markExternalAnchorsBlank", () => {
   const origin = "https://ateeducacion.github.io";
