@@ -408,7 +408,10 @@ function capturePhpInfoViaWorker(reason = "manual") {
   // Send capture request through the site iframe (remote.html), which forwards it to the worker.
   // The worker will respond via BroadcastChannel with a "phpinfo" message.
   if (els.frame?.contentWindow) {
-    els.frame.contentWindow.postMessage({ kind: "capture-phpinfo" }, "*");
+    els.frame.contentWindow.postMessage(
+      { kind: "capture-phpinfo" },
+      window.location.origin,
+    );
   } else {
     appendLog("Cannot capture PHP info: remote frame not available.", true);
   }
