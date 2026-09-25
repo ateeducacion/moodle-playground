@@ -747,6 +747,7 @@ async function handleGenericProxy(targetUrl, request) {
       "Content-Type",
       headers.get("Content-Type") || defaultGenericContentType(parsedUrl),
     );
+    // See docs/architecture/adr/ADR-0031-proxy-worker-response-sandboxing.md
     // Consumers read these bodies with fetch(). Never let upstream content
     // (e.g. HTML from an arbitrary Nextcloud host) act as a document or set
     // cookies on the proxy origin.
