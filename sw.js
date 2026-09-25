@@ -57,6 +57,10 @@ async function loadServiceWorkerConfig() {
       }
 
       return response.json();
+    }).catch((error) => {
+      // Do not memoize a failure: let the next request retry the fetch.
+      playgroundConfigPromise = null;
+      throw error;
     });
   }
 
