@@ -32,7 +32,7 @@ async function handleCreateCohorts(step, { php, resources }) {
     );
   }
   for (const c of cohorts) {
-    if (!c || !c.name)
+    if (!c?.name)
       throw new Error("createCohorts: each cohort requires a 'name'.");
   }
   await runCreateCohorts(cohorts, php);
