@@ -253,7 +253,6 @@ ${phpConstantDefines}require_once('${escapePhpSingleQuoted(moodleRoot)}/lib/setu
 `;
 }
 
-export const CHDIR_FIX_PATH = `${MOODLE_ROOT}/__chdir_fix.php`;
 export const CHDIR_FIX_PRELOAD_PATH =
   "/internal/shared/preload/moodle_chdir.php";
 

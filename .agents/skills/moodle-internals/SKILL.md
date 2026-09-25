@@ -155,7 +155,6 @@ script adds the `public/` prefix automatically for 5.1+ branches.
 Build-time Moodle patches use a layered layout:
 
 - `patches/shared/` — canonical shared patch root
-- `patches/moodle/` — legacy fallback if `patches/shared/` is absent
 - `patches/<branch>/` — optional branch-specific overrides
 
 Shared patches are branch-agnostic and target `lib/...` paths. `scripts/patch-moodle-source.sh`

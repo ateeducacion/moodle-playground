@@ -4,7 +4,6 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SHARED_PATCH_DIR="$SCRIPT_DIR/../patches/shared"
-LEGACY_PATCH_DIR="$SCRIPT_DIR/../patches/moodle"
 SOURCE_DIR=${1:-}
 BRANCH=${2:-}
 
@@ -13,15 +12,9 @@ if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
   exit 1
 fi
 
-# Determine which patch directory to use for shared file copies:
-# prefer patches/shared, fall back to legacy patches/moodle.
 # Shared patches are branch-agnostic and target lib/... paths; the script
 # adds the public/ prefix automatically for Moodle 5.1+ source trees.
-if [ -d "$SHARED_PATCH_DIR" ]; then
-  PATCH_DIR="$SHARED_PATCH_DIR"
-else
-  PATCH_DIR="$LEGACY_PATCH_DIR"
-fi
+PATCH_DIR="$SHARED_PATCH_DIR"
 
 # Per-branch patch directory (applied after shared patches).
 # Branch patches are copied literally relative to the Moodle source root.
