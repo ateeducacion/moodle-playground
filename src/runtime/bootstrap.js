@@ -6,6 +6,7 @@ import {
   extractTarStreamToPhp,
 } from "../../lib/streaming-tar-extract.js";
 import { buildInstallConfig } from "../blueprint/index.js";
+import { escapePhp as escapePhpSingleQuoted } from "../blueprint/php/helpers.js";
 import {
   DEFAULT_MOODLE_BRANCH,
   getBranchMetadata,
@@ -245,10 +246,6 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-function escapePhpSingleQuoted(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
-
 function createInstallCheckPhp() {
   return `<?php
 header('content-type: application/json; charset=utf-8');
@@ -305,9 +302,7 @@ function createInstallRunnerPhp(effectiveConfig) {
     "agree-license": true,
   };
 
-  const encodedOptions = JSON.stringify(options)
-    .replaceAll("\\", "\\\\")
-    .replaceAll("'", "\\'");
+  const encodedOptions = escapePhpSingleQuoted(JSON.stringify(options));
 
   return `<?php
 error_reporting(E_ALL);
