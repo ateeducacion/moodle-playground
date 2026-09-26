@@ -183,6 +183,17 @@ describe("rewriteHtmlAttributeUrl", () => {
     appBasePath: "/moodle-playground",
   };
 
+  it("leaves script and data schemes untouched in any case", () => {
+    for (const value of [
+      "javascript:alert(1)",
+      "JavaScript:alert(1)",
+      "vbscript:msgbox(1)",
+      "DATA:text/html,x",
+    ]) {
+      assert.strictEqual(rewriteHtmlAttributeUrl(value, scope), value);
+    }
+  });
+
   it("rewrites dynamic form actions under the app base path", () => {
     assert.strictEqual(
       rewriteHtmlAttributeUrl("/moodle-playground/course/edit.php", scope),

@@ -149,10 +149,7 @@ export function rewriteHtmlAttributeUrl(rawValue, scope) {
 
   if (
     decodedValue.startsWith("#") ||
-    decodedValue.startsWith("javascript:") ||
-    decodedValue.startsWith("data:") ||
-    decodedValue.startsWith("mailto:") ||
-    decodedValue.startsWith("tel:") ||
+    /^\s*(?:javascript|vbscript|data|mailto|tel):/iu.test(decodedValue) ||
     decodedValue.startsWith("//")
   ) {
     return decodedValue;
