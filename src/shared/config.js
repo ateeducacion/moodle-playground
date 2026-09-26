@@ -25,9 +25,3 @@ export async function loadPlaygroundConfig() {
 
   return configPromise;
 }
-
-export function getDefaultRuntime(config) {
-  return (
-    config.runtimes.find((runtime) => runtime.default) || config.runtimes[0]
-  );
-}

@@ -78,7 +78,6 @@ What changed:
 Files:
 
 - `src/runtime/config-template.js`
-- `lib/config-template.js`
 
 Relevant defaults seeded during this work:
 
@@ -109,8 +108,7 @@ Patch copier:
 
 Patch layout:
 
-- `patches/shared/` is the preferred shared patch root
-- `patches/moodle/` is a legacy fallback
+- `patches/shared/` is the shared patch root
 - `patches/<branch>/` contains optional branch-specific overrides copied relative to the source root
 
 For shared patches, the copier handles legacy-root vs `public/` source trees automatically.
@@ -225,7 +223,6 @@ These files contain runtime-only overrides and bootstrap workarounds:
 
 - `src/runtime/bootstrap.js`
 - `src/runtime/config-template.js`
-- `lib/config-template.js`
 - `src/remote/main.js`
 - `sw.js`
 - `vendor/php-cgi-wasm/PhpCgiBase.js`
@@ -285,7 +282,6 @@ Syntax checks:
 ```bash
 node --check src/runtime/bootstrap.js
 node --check src/runtime/config-template.js
-node --check lib/config-template.js
 node --check src/remote/main.js
 node --check sw.js
 node --check lib/moodle-loader.js
