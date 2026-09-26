@@ -2679,11 +2679,15 @@ export async function bootstrapMoodle({
       "Using persisted install marker to skip Moodle install checks.",
       0.87,
     );
-  } else if (hasSavedInstallState) {
-    publish("Checking whether Moodle is already installed.", 0.87);
+  } else {
+    publish(
+      hasSavedInstallState
+        ? "Checking whether Moodle is already installed."
+        : "No persisted install marker found. Checking if Moodle is already installed in the database.",
+      0.87,
+    );
     // A non-JSON / failed provisioning check must NOT abort the whole boot:
-    // fall through to snapshot load / fresh CLI install, exactly like the
-    // structurally identical no-marker branch below.
+    // fall through to snapshot load / fresh CLI install.
     try {
       installState = await runProvisioningCheck(php, webRoot);
       if (installState.error) {
@@ -2692,32 +2696,10 @@ export async function bootstrapMoodle({
           0.88,
         );
       } else if (installState.installed) {
-        publish("Moodle installation detected from the config table.", 0.885);
-        await writeJsonFile(php, installStatePath, {
-          ...manifestState,
-          dbName,
-          installed: true,
-          updatedAt: nowIso(),
-        });
-        installMarkerMatches = true;
-      }
-    } catch {
-      installState = null;
-      publish(
-        "Provisioning check failed — will proceed with fresh install.",
-        0.88,
-      );
-    }
-  } else {
-    publish(
-      "No persisted install marker found. Checking if Moodle is already installed in the database.",
-      0.87,
-    );
-    try {
-      installState = await runProvisioningCheck(php, webRoot);
-      if (installState.installed) {
         publish(
-          "Moodle installation detected from the config table (marker was missing).",
+          hasSavedInstallState
+            ? "Moodle installation detected from the config table."
+            : "Moodle installation detected from the config table (marker was missing).",
           0.885,
         );
         await writeJsonFile(php, installStatePath, {
@@ -2728,9 +2710,10 @@ export async function bootstrapMoodle({
         });
         installMarkerMatches = true;
       }
-    } catch {
+    } catch (error) {
+      installState = null;
       publish(
-        "Provisioning check failed — will proceed with fresh install.",
+        `Provisioning check failed (${error?.message || error}) — will proceed with fresh install.`,
         0.88,
       );
     }
