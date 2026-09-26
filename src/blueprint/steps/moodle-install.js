@@ -1,4 +1,4 @@
-import { phpLogin, phpSetAdminAccount } from "../php/helpers.js";
+import { escapePhp, phpLogin, phpSetAdminAccount } from "../php/helpers.js";
 
 /**
  * Install-related steps: installMoodle, setAdminAccount, login.
@@ -49,7 +49,7 @@ async function handleLogin(step, { php, webRoot }) {
     }
   } finally {
     try {
-      await php.run(`<?php @unlink('${scriptPath.replaceAll("'", "\\'")}');`);
+      await php.run(`<?php @unlink('${escapePhp(scriptPath)}');`);
     } catch {
       /* non-fatal */
     }

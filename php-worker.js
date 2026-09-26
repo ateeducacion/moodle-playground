@@ -3,6 +3,7 @@ import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protoco
 import { bootstrapMoodle, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
+import { escapePhp } from "./src/blueprint/php/helpers.js";
 import {
   getBranchMetadata,
   resolveRuntimeConfig,
@@ -280,7 +281,7 @@ async function reRegisterPluginsAfterRestore(php, webRoot, restoredPluginDirs = 
           ([, d]) => d === typeDir,
         )?.[0];
         if (!pluginType || !pluginName) return "";
-        const safeDir = dir.replaceAll("'", "\\'");
+        const safeDir = escapePhp(dir);
         return `\\core_component::playground_refresh_installed_plugin_cache('${pluginType}_${pluginName}', '${safeDir}');`;
       })
       .filter(Boolean)
