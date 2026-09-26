@@ -1,14 +1,12 @@
 import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
-import {
-  fetchAssetWithCache,
-  fetchBundleWithCache,
-} from "../../lib/moodle-loader.js";
+import { fetchAssetWithCache } from "../../lib/moodle-loader.js";
 import {
   createDecodedTarStream,
   extractTarStreamToPhp,
 } from "../../lib/streaming-tar-extract.js";
 import { buildInstallConfig } from "../blueprint/index.js";
+import { escapePhp as escapePhpSingleQuoted } from "../blueprint/php/helpers.js";
 import {
   DEFAULT_MOODLE_BRANCH,
   getBranchMetadata,
@@ -53,7 +51,6 @@ function buildRuntimePaths(webRoot) {
     INSTALL_CHECK_PATH: `${webRoot}/__install_check.php`,
     INSTALL_RUNNER_PATH: `${webRoot}/__install_database.php`,
     PDO_PROBE_PATH: `${webRoot}/__pdo_probe.php`,
-    PDO_DDL_PROBE_PATH: `${webRoot}/__pdo_ddl_probe.php`,
     CONFIG_NORMALIZER_PATH: `${webRoot}/__config_normalizer.php`,
     CACHE_CONFIG_PATH: `${webRoot}/cache/classes/config.php`,
     CACHE_ADMIN_HELPER_PATH: `${webRoot}/cache/classes/administration_helper.php`,
@@ -249,10 +246,6 @@ echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 `;
 }
 
-function escapePhpSingleQuoted(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
-
 function createInstallCheckPhp() {
   return `<?php
 header('content-type: application/json; charset=utf-8');
@@ -309,9 +302,7 @@ function createInstallRunnerPhp(effectiveConfig) {
     "agree-license": true,
   };
 
-  const encodedOptions = JSON.stringify(options)
-    .replaceAll("\\", "\\\\")
-    .replaceAll("'", "\\'");
+  const encodedOptions = escapePhpSingleQuoted(JSON.stringify(options));
 
   return `<?php
 error_reporting(E_ALL);
@@ -999,51 +990,6 @@ try {
     $result['error'] = [
         'type' => get_class($error),
         'message' => $error->getMessage(),
-    ];
-}
-
-$buffer = ob_get_clean();
-if ($buffer !== '') {
-    $result['output'] = $buffer;
-}
-
-echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-`;
-}
-
-function createPdoDdlProbePhp({ dbFile }) {
-  const dsn = `sqlite:${dbFile}`;
-
-  return `<?php
-header('content-type: application/json; charset=utf-8');
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-ob_start();
-
-$result = [
-    'pdoAvailable' => class_exists('PDO'),
-    'drivers' => class_exists('PDO') ? PDO::getAvailableDrivers() : [],
-    'dsn' => '${escapePhpSingleQuoted(dsn)}',
-    'dbFile' => '${escapePhpSingleQuoted(dbFile)}',
-];
-
-try {
-    $pdo = new PDO('${escapePhpSingleQuoted(dsn)}');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-    $pdo->exec('CREATE TABLE mdl_playground_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)');
-    $pdo->exec("INSERT INTO mdl_playground_probe (name) VALUES ('ok')");
-    $result['ok'] = true;
-    $result['rows'] = $pdo->query('SELECT * FROM mdl_playground_probe')->fetchAll(PDO::FETCH_ASSOC);
-    $pdo->exec('DROP TABLE IF EXISTS mdl_playground_probe');
-    $pdo = null;
-} catch (Throwable $error) {
-    $result['ok'] = false;
-    $result['error'] = [
-        'type' => get_class($error),
-        'message' => $error->getMessage(),
-        'file' => $error->getFile(),
-        'line' => $error->getLine(),
     ];
 }
 
@@ -1807,7 +1753,6 @@ async function prepareMoodleRuntime({
   configPhp,
   installRunnerPhp,
   pdoProbePhp,
-  pdoDdlProbePhp,
   configNormalizerPhp,
   publish,
   allowDiagnostics = false,
@@ -1891,10 +1836,6 @@ async function prepareMoodleRuntime({
     textEncoder.encode(installRunnerPhp),
   );
   await php.writeFile(rp.PDO_PROBE_PATH, textEncoder.encode(pdoProbePhp));
-  await php.writeFile(
-    rp.PDO_DDL_PROBE_PATH,
-    textEncoder.encode(pdoDdlProbePhp),
-  );
   await php.writeFile(
     rp.CONFIG_NORMALIZER_PATH,
     textEncoder.encode(configNormalizerPhp),
@@ -2252,20 +2193,6 @@ async function runPdoProbe(php, webRoot) {
   };
 }
 
-async function _runPdoDdlProbe(php, webRoot) {
-  const output = await requestRuntimeScript(
-    php,
-    "/__pdo_ddl_probe.php",
-    undefined,
-    webRoot,
-  );
-  const payload = output.trim();
-  const jsonStart = payload.indexOf("{");
-  const jsonPayload = jsonStart >= 0 ? payload.slice(jsonStart) : payload;
-
-  return jsonPayload ? JSON.parse(jsonPayload) : {};
-}
-
 async function runConfigNormalizer(php, webRoot) {
   const output = await requestRuntimeScript(
     php,
@@ -2600,7 +2527,7 @@ export async function bootstrapMoodle({
   // When the caller pre-started the download in parallel with php.refresh()
   // (php-worker getRuntimeState), await that promise; otherwise resolve it
   // inline for back-compat. tArchive then measures only the remaining wait.
-  let archive = await (archivePromise ||
+  const archive = await (archivePromise ||
     startArchiveResolution({
       moodleBranch: resolvedBranch,
       appBaseUrl,
@@ -2613,31 +2540,6 @@ export async function bootstrapMoodle({
     0.45,
   );
 
-  if (
-    runtime.mountStrategy === "zip-extract" &&
-    archive.manifest?.bundle?.url
-  ) {
-    const tZip = performance.now();
-    publish("Extracting Moodle ZIP bundle into writable MEMFS.", 0.5);
-    const zipBytes = await fetchBundleWithCache(
-      archive.manifest,
-      ({ ratio, cached }) => {
-        const progress = cached
-          ? 0.56
-          : 0.5 + (typeof ratio === "number" ? ratio * 0.12 : 0.12);
-        publish("Downloading writable Moodle ZIP bundle.", progress);
-      },
-    );
-
-    archive = {
-      kind: "zip",
-      manifest: archive.manifest,
-      bytes: zipBytes,
-      sourceUrl: archive.manifest.bundle.url,
-    };
-    const zipMs = Math.round(performance.now() - tZip);
-    publish(`ZIP extraction completed in ${zipMs}ms.`, 0.56);
-  }
   phases.extract.finish();
 
   const manifestState = buildManifestState(
@@ -2664,7 +2566,6 @@ export async function bootstrapMoodle({
   };
   const installRunnerPhp = createInstallRunnerPhp(effectiveConfig);
   const pdoProbePhp = createPdoProbePhp(dbConfig);
-  const pdoDdlProbePhp = createPdoDdlProbePhp(dbConfig);
   const configNormalizerPhp = createConfigNormalizerPhp(effectiveConfig.debug);
   const configPhp = createMoodleConfigPhp({
     adminDirectory: ADMIN_DIRECTORY,
@@ -2721,7 +2622,6 @@ export async function bootstrapMoodle({
     configPhp,
     installRunnerPhp,
     pdoProbePhp,
-    pdoDdlProbePhp,
     configNormalizerPhp,
     publish,
     allowDiagnostics: true,
@@ -2763,11 +2663,6 @@ export async function bootstrapMoodle({
     }
   }
 
-  publish(
-    "Skipping standalone SQLite DDL probe and continuing with Moodle bootstrap.",
-    0.869,
-  );
-
   let installState = null;
   const hasSavedInstallState = Boolean(savedInstallState?.installed);
   // Same computation as markerLikelyValid above (used to gate the prefetches);
@@ -2779,11 +2674,15 @@ export async function bootstrapMoodle({
       "Using persisted install marker to skip Moodle install checks.",
       0.87,
     );
-  } else if (hasSavedInstallState) {
-    publish("Checking whether Moodle is already installed.", 0.87);
+  } else {
+    publish(
+      hasSavedInstallState
+        ? "Checking whether Moodle is already installed."
+        : "No persisted install marker found. Checking if Moodle is already installed in the database.",
+      0.87,
+    );
     // A non-JSON / failed provisioning check must NOT abort the whole boot:
-    // fall through to snapshot load / fresh CLI install, exactly like the
-    // structurally identical no-marker branch below.
+    // fall through to snapshot load / fresh CLI install.
     try {
       installState = await runProvisioningCheck(php, webRoot);
       if (installState.error) {
@@ -2792,32 +2691,10 @@ export async function bootstrapMoodle({
           0.88,
         );
       } else if (installState.installed) {
-        publish("Moodle installation detected from the config table.", 0.885);
-        await writeJsonFile(php, installStatePath, {
-          ...manifestState,
-          dbName,
-          installed: true,
-          updatedAt: nowIso(),
-        });
-        installMarkerMatches = true;
-      }
-    } catch {
-      installState = null;
-      publish(
-        "Provisioning check failed — will proceed with fresh install.",
-        0.88,
-      );
-    }
-  } else {
-    publish(
-      "No persisted install marker found. Checking if Moodle is already installed in the database.",
-      0.87,
-    );
-    try {
-      installState = await runProvisioningCheck(php, webRoot);
-      if (installState.installed) {
         publish(
-          "Moodle installation detected from the config table (marker was missing).",
+          hasSavedInstallState
+            ? "Moodle installation detected from the config table."
+            : "Moodle installation detected from the config table (marker was missing).",
           0.885,
         );
         await writeJsonFile(php, installStatePath, {
@@ -2828,9 +2705,10 @@ export async function bootstrapMoodle({
         });
         installMarkerMatches = true;
       }
-    } catch {
+    } catch (error) {
+      installState = null;
       publish(
-        "Provisioning check failed — will proceed with fresh install.",
+        `Provisioning check failed (${error?.message || error}) — will proceed with fresh install.`,
         0.88,
       );
     }

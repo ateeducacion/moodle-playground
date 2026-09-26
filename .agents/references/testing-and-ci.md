@@ -74,20 +74,11 @@ The project uses [Biome](https://biomejs.dev/) for linting and formatting. Confi
 
 `make lint` runs in CI on every push to `main` and on pull requests.
 
-### Syntax checks
+### Bundle check
 
-```bash
-node --check sw.js
-node --check php-worker.js
-node --check lib/moodle-loader.js
-node --check src/runtime/bootstrap.js
-node --check src/runtime/php-loader.js
-node --check src/runtime/php-compat.js
-node --check src/runtime/crash-recovery.js
-node --check src/shell/main.js
-node --check src/remote/main.js
-node --check src/blueprint/index.js
-```
+CI runs `npm run build-worker` instead of per-file `node --check`: bundling
+resolves every import reachable from `php-worker.js` and `sw.js`, which the
+unit tests (importing sources directly) cannot detect.
 
 ## CI/CD
 
@@ -106,7 +97,7 @@ build (5 branches + docs) ──┬── e2e-chromium ────────�
 
 | Job | Trigger | What it does |
 |-----|---------|--------------|
-| `lint-and-test` | Always (except PR close) | Syntax check, `make test` (286+ unit tests), `make lint` |
+| `lint-and-test` | Always (except PR close) | `npm run build-worker`, `make test`, `make lint` |
 | `build` | Always (except PR close) | Build all 5 Moodle branches + docs, upload artifact |
 | `e2e-chromium` | After build | Playwright e2e tests in Chromium (2 workers) |
 | `e2e-firefox` | After build | Playwright e2e tests in Firefox (2 workers) |

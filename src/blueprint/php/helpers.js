@@ -1211,10 +1211,6 @@ echo json_encode(['ok' => true, 'roles' => $summary]);
 `;
 }
 
-export function phpCreateRole(role) {
-  return phpCreateRoles([role]);
-}
-
 // Create or customize roles from a JSON-native definition. Idempotent on
 // shortname. Capabilities are a {capability: allow|prevent|prohibit|inherit}
 // map; context levels accept names (course, module, ...) or numbers; allow*
@@ -1292,10 +1288,6 @@ echo json_encode(['ok' => true, 'roles' => $roleids]);
 `;
 }
 
-export function phpCreateScale(scale) {
-  return phpCreateScales([scale]);
-}
-
 // Create or update grade scales. Idempotent on (courseid, name) via the
 // grade_scale class. A 'course' shortname scopes the scale to that course;
 // omitting it creates a site-wide ("standard") scale (courseid = 0).
@@ -1348,10 +1340,6 @@ ${blocks.join("\n")}
 purge_all_caches();
 echo json_encode(['ok' => true, 'scales' => $results]);
 `;
-}
-
-export function phpCreateCohort(cohort) {
-  return phpCreateCohorts([cohort]);
 }
 
 // Create or update site-level cohorts. Idempotent on idnumber when provided,

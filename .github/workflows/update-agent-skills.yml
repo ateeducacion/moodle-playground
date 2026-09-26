@@ -21,10 +21,8 @@ on:
   workflow_dispatch:
 
 # Least privilege: the default token gets nothing; the job requests exactly
-# what pushing the update branch and opening the PR needs. The two third-party
-# actions are pinned to commit SHAs (Dependabot keeps the pins and the version
-# comments current); first-party actions/* stay on major tags like the rest of
-# the workflows here.
+# what pushing the update branch and opening the PR needs. Checkout and the skill updater use version tags by project preference;
+# create-pull-request also uses its major version tag.
 permissions: {}
 
 concurrency:
@@ -42,13 +40,13 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: update
-        uses: devantler-tech/actions/update-agent-skills@4f4e07a3ebf3e1161756a292966e36c91a65ee04 # v13.3.0
+        uses: devantler-tech/actions/update-agent-skills@v13.6.5
         with:
           dir: .agents/skills
 
       - name: Open pull request
         if: steps.update.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore(deps): update agent skills"
           title: "chore(deps): update agent skills"

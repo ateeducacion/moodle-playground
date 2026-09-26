@@ -4,9 +4,7 @@ export const MOODLE_ROOT = "/www/moodle";
 export const ADMIN_DIRECTORY = "admin";
 export const COMPONENT_CACHE_PATH = `${MOODLE_ROOT}/.playground/core_component.php`;
 
-function escapePhpSingleQuoted(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
+import { escapePhp as escapePhpSingleQuoted } from "../blueprint/php/helpers.js";
 
 // PHP constant names allowed in a blueprint's `phpConstants` map. Anything that
 // does not match this pattern is silently skipped so a blueprint can never emit
@@ -253,7 +251,6 @@ ${phpConstantDefines}require_once('${escapePhpSingleQuoted(moodleRoot)}/lib/setu
 `;
 }
 
-export const CHDIR_FIX_PATH = `${MOODLE_ROOT}/__chdir_fix.php`;
 export const CHDIR_FIX_PRELOAD_PATH =
   "/internal/shared/preload/moodle_chdir.php";
 

@@ -2,6 +2,8 @@
  * Low-level request step handlers: request, runPhpCode, runPhpScript.
  */
 
+import { escapePhp } from "../php/helpers.js";
+
 export function registerRequestSteps(register) {
   register("request", handleRequest);
   register("runPhpCode", handleRunPhpCode);
@@ -64,7 +66,7 @@ async function handleRunPhpScript(step, { php, webRoot }) {
     }
   } finally {
     try {
-      await php.run(`<?php @unlink('${tmpPath.replaceAll("'", "\\'")}');`);
+      await php.run(`<?php @unlink('${escapePhp(tmpPath)}');`);
     } catch {
       /* non-fatal */
     }

@@ -17,7 +17,15 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 CACHE_DIR=${CACHE_DIR:-"$REPO_DIR/.cache/moodle"}
 BRANCH=${1:-MOODLE_500_STABLE}
-GIT_REF=${GIT_REF:-$BRANCH}
+# Honor the shared metadata's pinned prerelease ref (ADR-0030).
+if [ -z "${GIT_REF:-}" ]; then
+  GIT_REF=$(node --input-type=module - "$REPO_DIR" "$BRANCH" <<'JS'
+import { pathToFileURL } from 'node:url';
+const { getBranchMetadata } = await import(pathToFileURL(`${process.argv[2]}/src/shared/version-resolver.js`));
+console.log(getBranchMetadata(process.argv[3])?.gitRef || process.argv[3]);
+JS
+)
+fi
 GITHUB_REPO="https://github.com/moodle/moodle.git"
 
 SOURCE_DIR="$CACHE_DIR/$BRANCH"

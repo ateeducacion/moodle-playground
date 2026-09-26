@@ -31,7 +31,7 @@ async function handleCreateScales(step, { php, resources }) {
     );
   }
   for (const s of scales) {
-    if (!s || !s.name)
+    if (!s?.name)
       throw new Error("createScales: each scale requires a 'name'.");
     if (!s.items)
       throw new Error(`createScales: scale '${s.name}' requires 'items'.`);

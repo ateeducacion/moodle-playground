@@ -130,7 +130,6 @@ Likely cause:
 Files:
 
 - `src/runtime/config-template.js`
-- `lib/config-template.js`
 - runtime override in `src/runtime/bootstrap.js`
 
 Notes:
@@ -150,7 +149,6 @@ Files:
 - `patches/shared/lib/classes/encryption.php`
 - runtime override in `src/runtime/bootstrap.js`
 - `src/runtime/config-template.js`
-- `lib/config-template.js`
 
 Current workaround:
 
@@ -372,7 +370,6 @@ Likely cause:
 Files:
 
 - `src/runtime/config-template.js`
-- `lib/config-template.js`
 - `src/runtime/bootstrap.js`
 
 Defaults currently seeded:
