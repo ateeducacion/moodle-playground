@@ -44,3 +44,4 @@ folder and keep their original lightweight format (see
 | [ADR-0028](ADR-0028-sentry-error-monitoring.md) | Sentry error monitoring via a minimal hand-rolled envelope client | Proposed | 2026-08-15 |
 | [ADR-0029](ADR-0029-build-identification-and-cache-versioning.md) | Timestamped Build IDs for deployment identification and cache versioning | Proposed | 2026-08-16 |
 | [ADR-0030](ADR-0030-pinned-moodle-prereleases.md) | Pinned Moodle prerelease channels | Proposed | 2026-09-16 |
+| [ADR-0031](ADR-0031-proxy-worker-response-sandboxing.md) | Proxy worker serves generic responses as sandboxed data | Proposed | 2026-09-25 |

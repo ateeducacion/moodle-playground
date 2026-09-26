@@ -1070,6 +1070,54 @@ describe("github-proxy-worker Nextcloud / ownCloud public shares", () => {
     assert.equal(calls, 1);
   });
 
+  it("blocks a same-host Nextcloud redirect outside the share/DAV paths", async () => {
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(null, {
+        status: 303,
+        headers: { Location: "https://cloud.example.org/phishing.html" },
+      });
+    };
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://cloud.example.org/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  });
+
+  it("serves share responses sandboxed, nosniff and without cookies", async () => {
+    global.fetch = async () =>
+      new Response("<script>alert(1)</script>", {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html",
+          "Set-Cookie": "session=abc; Path=/",
+        },
+      });
+
+    const response = await worker.fetch(
+      new Request(
+        `https://proxy.example/?url=${encodeURIComponent(
+          "https://attacker.example/s/aB3xToken9/download",
+        )}`,
+      ),
+      {},
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Content-Security-Policy"), "sandbox");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(response.headers.get("Set-Cookie"), null);
+  });
+
   it("blocks a Nextcloud share that redirects into an internal IP", async () => {
     let calls = 0;
     global.fetch = async () => {
@@ -1699,5 +1747,33 @@ describe("github-proxy-worker upstream status mapping", () => {
 
     assert.equal(response.status, 404);
     assert.equal((await response.json()).status, 404);
+  });
+});
+
+describe("github-proxy-worker repo/pr validation", () => {
+  for (const repo of ["owner", "owner/repo/extra", "../x", "x/..", "a/b?c"]) {
+    it(`rejects repo=${repo}`, async () => {
+      global.fetch = async () => {
+        throw new Error("must not fetch");
+      };
+      const response = await worker.fetch(
+        new Request(
+          `https://proxy.example/?repo=${encodeURIComponent(repo)}&branch=main`,
+        ),
+        {},
+      );
+      assert.equal(response.status, 400);
+    });
+  }
+
+  it("rejects a non-numeric pr", async () => {
+    global.fetch = async () => {
+      throw new Error("must not fetch");
+    };
+    const response = await worker.fetch(
+      new Request("https://proxy.example/?repo=owner/repo&pr=1/../../x"),
+      {},
+    );
+    assert.equal(response.status, 400);
   });
 });
