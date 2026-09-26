@@ -33,7 +33,7 @@ async function handleCreateRoles(step, { php, resources }) {
     throw new Error("createRoles: 'roles' must resolve to a non-empty array.");
   }
   for (const r of roles) {
-    if (!r || !r.shortname) {
+    if (!r?.shortname) {
       throw new Error("createRoles: each role requires a 'shortname'.");
     }
   }
