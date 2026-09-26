@@ -19,11 +19,9 @@ on:
         required: false
         type: string
 
+# Least privilege: jobs that need more request it themselves.
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  pull-requests: write
 
 concurrency:
   group: ci-${{ github.head_ref || github.ref }}
@@ -78,25 +76,15 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Generate build metadata
         run: npm run build:version
 
-      - name: Syntax check
-        run: |
-          node --check sw.js
-          node --check php-worker.js
-          node --check lib/moodle-loader.js
-          node --check lib/streaming-tar-extract.js
-          node --check src/runtime/bootstrap.js
-          node --check src/runtime/php-loader.js
-          node --check src/runtime/php-compat.js
-          node --check src/runtime/crash-recovery.js
-          node --check src/shell/main.js
-          node --check src/remote/main.js
-          node --check src/blueprint/index.js
-          node --check scripts/lib/tar-ustar.mjs
+      # Bundling resolves every import reachable from the worker and the
+      # Service Worker, which unit tests (importing sources directly) cannot.
+      - name: Build worker bundles
+        run: npm run build-worker
 
       - name: Run unit tests
         run: make test
@@ -104,11 +92,15 @@ jobs:
       - name: Lint
         run: make lint
 
-  # ── Build: all 6 Moodle branches + docs ──
+  # ── Build: all Moodle branches + docs ──
   build:
     if: github.event.action != 'closed'
     needs: build-id
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write # actions/configure-pages
+      pull-requests: write # preview URL comment
     env:
       BUILD_VERSION: ${{ needs.build-id.outputs.build_version }}
     steps:
@@ -126,13 +118,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: "8.3"
           tools: composer
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Generate build metadata
         run: npm run build:version
@@ -263,7 +255,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Playwright ${{ matrix.browser }}
         run: npx playwright install --with-deps ${{ matrix.browser }}
@@ -295,6 +287,9 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [lint-and-test, build, e2e]
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
