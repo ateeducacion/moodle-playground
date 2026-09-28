@@ -12,6 +12,11 @@ if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
   exit 1
 fi
 
+# Canonicalize SOURCE_DIR to an absolute, symlink-resolved path so that
+# traversal sequences (e.g. "../../etc") cannot cause later file operations
+# to escape the intended directory in unexpected/relative ways.
+SOURCE_DIR=$(CDPATH= cd -- "$SOURCE_DIR" && pwd)
+
 # Shared patches are branch-agnostic and target lib/... paths; the script
 # adds the public/ prefix automatically for Moodle 5.1+ source trees.
 PATCH_DIR="$SHARED_PATCH_DIR"
