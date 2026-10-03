@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures.mjs";
 import {
   getMoodleFrame,
+  navigateWithinPlayground,
   specTimeoutMs,
   waitForPlaygroundReady,
 } from "./helpers.mjs";
@@ -28,3 +29,17 @@ for (const php of ["8.3", "8.4"]) {
     expect(manifest.snapshot).toBeTruthy();
   });
 }
+
+// Moodle 5.3 reads composer.lock (core\composer) whenever the admin tree is
+// built (admin/settings/server.php, OAuth 2 server); the bundle must ship it.
+test("Moodle 5.3 site administration renders without composer errors", async ({
+  page,
+}) => {
+  await page.goto("/?moodle=5.3", { waitUntil: "domcontentloaded" });
+  await waitForPlaygroundReady(page);
+  await navigateWithinPlayground(page, "/admin/search.php");
+  await expect(getMoodleFrame(page).locator("#page")).toBeVisible();
+  const body = await getMoodleFrame(page).locator("body").innerText();
+  expect(body).not.toContain("not found in composer.lock");
+  expect(body).not.toContain("Exception - ");
+});
