@@ -134,6 +134,8 @@ and `$plugin->requires`. The component name must match the directory path.
 | `MOODLE_405_STABLE` | 4.5 | `/` (legacy) | PHP 8.1+ |
 | `MOODLE_500_STABLE` | 5.0 | `/` (legacy) | PHP 8.2+ |
 | `MOODLE_501_STABLE` | 5.1 | `/public/` | PHP 8.2+ |
+| `MOODLE_502_STABLE` | 5.2 | `/public/` | PHP 8.2+ |
+| `MOODLE_503_STABLE` | 5.3 LTS (default) | `/public/` | PHP 8.3+ |
 | `main` | dev | `/public/` | PHP 8.3+ |
 
 The `public/` webroot convention means `lib/` becomes `public/lib/` in the source tree.

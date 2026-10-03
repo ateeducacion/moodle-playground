@@ -243,7 +243,7 @@ function buildNetworkingBlueprint(siteName, files) {
       { step: "login", username: "admin" },
       ...[
         {
-          path: "/www/moodle/playground-ready.php",
+          path: "/www/moodle/public/playground-ready.php",
           literal:
             "<?php require(__DIR__ . '/config.php'); header('Content-Type: application/json'); echo json_encode(['ready' => true, 'moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND], JSON_PRETTY_PRINT);",
         },
@@ -314,7 +314,7 @@ test("PHP direct HTTPS to a self-signed local server still fails before proxy fa
 
   const bp = buildNetworkingBlueprint("PHP Local HTTPS Test", [
     {
-      path: "/www/moodle/playground-net-local-https.php",
+      path: "/www/moodle/public/playground-net-local-https.php",
       literal: `<?php require(__DIR__ . '/config.php'); $url = '${localHttpsBaseUrl}/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);`,
     },
   ]);
@@ -343,7 +343,7 @@ test("PHP can fetch GitHub releases atom feed through the same-origin playground
 
   const bp = buildNetworkingBlueprint("PHP Networking Test", [
     {
-      path: "/www/moodle/playground-net-github.php",
+      path: "/www/moodle/public/playground-net-github.php",
       literal:
         "<?php require(__DIR__ . '/config.php'); $base = defined('MOODLE_PLAYGROUND_PROXY_URL') && MOODLE_PLAYGROUND_PROXY_URL !== '' ? MOODLE_PLAYGROUND_PROXY_URL : rtrim($CFG->wwwroot, '/') . '/__playground_proxy__'; $url = $base . '?repo=exelearning%2Fexelearning&atom=releases'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
     },
@@ -375,7 +375,7 @@ test("PHP HTTP requests fall back to the configured phpCorsProxyUrl", async ({
 
   const bp = buildNetworkingBlueprint("PHP Networking Proxy Fallback Test", [
     {
-      path: "/www/moodle/playground-net-fallback.php",
+      path: "/www/moodle/public/playground-net-fallback.php",
       literal:
         "<?php require(__DIR__ . '/config.php'); $url = 'http://remote-server.example/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);",
     },
@@ -413,7 +413,7 @@ test("PHP direct HTTPS works for a CORS-open external URL", async ({
 
   const bp = buildNetworkingBlueprint("PHP Networking Direct Test", [
     {
-      path: "/www/moodle/playground-net-external-https.php",
+      path: "/www/moodle/public/playground-net-external-https.php",
       literal: `<?php require(__DIR__ . '/config.php'); $url = '${WORDPRESS_PLAYGROUND_README_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
     },
   ]);
@@ -447,7 +447,7 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub releases feed", async ({
 
   const bp = buildNetworkingBlueprint("PHP GitHub Feed Direct Test", [
     {
-      path: "/www/moodle/playground-net-github-feed-direct.php",
+      path: "/www/moodle/public/playground-net-github-feed-direct.php",
       literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASES_ATOM_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
     },
   ]);
@@ -481,7 +481,7 @@ test("PHP direct HTTPS can fetch the eXeLearning GitHub release ZIP asset", asyn
 
   const bp = buildNetworkingBlueprint("PHP GitHub Asset Direct Test", [
     {
-      path: "/www/moodle/playground-net-github-asset-direct.php",
+      path: "/www/moodle/public/playground-net-github-asset-direct.php",
       literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASE_ASSET_URL}'; $context = stream_context_create(['http' => ['header' => "Range: bytes=0-3\\r\\n"]]); $body = @file_get_contents($url, false, $context); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_RANGE => '0-3']); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_prefix_hex' => is_string($body) ? bin2hex(substr($body, 0, 4)) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_prefix_hex' => is_string($curlbody) ? bin2hex(substr($curlbody, 0, 4)) : null], JSON_PRETTY_PRINT);`,
     },
   ]);
@@ -521,11 +521,11 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     "PHP Networking Firefox Default",
     [
       {
-        path: "/www/moodle/playground-net-local-https.php",
+        path: "/www/moodle/public/playground-net-local-https.php",
         literal: `<?php require(__DIR__ . '/config.php'); $url = '${localHttpsBaseUrl}/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);`,
       },
       {
-        path: "/www/moodle/playground-net-external-https.php",
+        path: "/www/moodle/public/playground-net-external-https.php",
         literal: `<?php require(__DIR__ . '/config.php'); $url = '${WORDPRESS_PLAYGROUND_README_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
       },
     ],
@@ -534,7 +534,7 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     "PHP Networking Firefox Same-Origin Proxy",
     [
       {
-        path: "/www/moodle/playground-net-github.php",
+        path: "/www/moodle/public/playground-net-github.php",
         literal:
           "<?php require(__DIR__ . '/config.php'); $base = defined('MOODLE_PLAYGROUND_PROXY_URL') && MOODLE_PLAYGROUND_PROXY_URL !== '' ? MOODLE_PLAYGROUND_PROXY_URL : rtrim($CFG->wwwroot, '/') . '/__playground_proxy__'; $url = $base . '?repo=exelearning%2Fexelearning&atom=releases'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);",
       },
@@ -544,16 +544,16 @@ test("Firefox: PHP networking scenarios complete within three runtime boots", as
     "PHP Networking Firefox CORS Proxy",
     [
       {
-        path: "/www/moodle/playground-net-fallback.php",
+        path: "/www/moodle/public/playground-net-fallback.php",
         literal:
           "<?php require(__DIR__ . '/config.php'); $url = 'http://remote-server.example/plain'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body' => is_string($body) ? $body : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body' => is_string($curlbody) ? $curlbody : null], JSON_PRETTY_PRINT);",
       },
       {
-        path: "/www/moodle/playground-net-github-feed-direct.php",
+        path: "/www/moodle/public/playground-net-github-feed-direct.php",
         literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASES_ATOM_URL}'; $body = @file_get_contents($url); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10]); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_body_prefix' => is_string($body) ? substr($body, 0, 200) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_body_prefix' => is_string($curlbody) ? substr($curlbody, 0, 200) : null], JSON_PRETTY_PRINT);`,
       },
       {
-        path: "/www/moodle/playground-net-github-asset-direct.php",
+        path: "/www/moodle/public/playground-net-github-asset-direct.php",
         literal: `<?php require(__DIR__ . '/config.php'); $url = '${EXELEARNING_RELEASE_ASSET_URL}'; $context = stream_context_create(['http' => ['header' => "Range: bytes=0-3\\r\\n"]]); $body = @file_get_contents($url, false, $context); $fgcerror = error_get_last(); $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_RANGE => '0-3']); $curlbody = curl_exec($ch); $curlerrno = curl_errno($ch); $curlerror = curl_error($ch); $curlinfo = curl_getinfo($ch); curl_close($ch); header('Content-Type: application/json'); echo json_encode(['moodle_playground' => defined('MOODLE_PLAYGROUND') && MOODLE_PLAYGROUND, 'url' => $url, 'fgc_ok' => $body !== false, 'fgc_error' => $fgcerror['message'] ?? null, 'fgc_prefix_hex' => is_string($body) ? bin2hex(substr($body, 0, 4)) : null, 'curl_errno' => $curlerrno, 'curl_error' => $curlerror, 'curl_http_code' => $curlinfo['http_code'] ?? null, 'curl_prefix_hex' => is_string($curlbody) ? bin2hex(substr($curlbody, 0, 4)) : null], JSON_PRETTY_PRINT);`,
       },
     ],

@@ -49,7 +49,7 @@ mkdir -p "$DIST_DIR" "$MANIFEST_DIR"
 # directory not found" environment check (and can fatal on missing autoloaded
 # classes). Materialize vendor/ with native Composer on the build machine
 # before those steps; vendor/ then travels in the bundle (it is not excluded
-# from the zip, and PHP autoloading is self-contained — composer.json/lock stay
+# from the zip, and PHP autoloading is self-contained — composer.json stays
 # excluded). Pre-5.1 has no public/ webroot and ships its dependencies, so it is
 # skipped. Re-runs when vendor/ is missing OR composer.lock is newer than the
 # installed vendor/ — fetch-moodle-source.sh keeps the untracked vendor/ across
@@ -181,12 +181,14 @@ set -- -x ".git/*" -x "*/tests/*" -x "node_modules/*" -x "*/node_modules/*"
 set -- "$@" -x "*/amd/src/*"
 
 # Root-level docs and build/CI/IDE metadata — never in the runtime include
-# graph. security.txt is deliberately KEPT (it is a servable file).
+# graph. security.txt is deliberately KEPT (it is a servable file), and so is
+# composer.lock: Moodle 5.3+ core\composer reads it on every admin tree build
+# (admin/settings/server.php checks league/oauth2-server).
 set -- "$@" \
   -x "UPGRADING.md" -x "CONTRIBUTING.md" -x "README.md" -x "INSTALL.txt" \
   -x "COPYING.txt" -x "TRADEMARK.txt" \
   -x "Gruntfile.js" -x "package.json" -x "npm-shrinkwrap.json" \
-  -x "composer.json" -x "composer.lock" \
+  -x "composer.json" \
   -x ".github/*" -x ".grunt/*" -x ".upgradenotes/*" -x ".esbuild/*" -x ".jest/*" \
   -x ".eslintrc" -x ".stylelintrc" -x ".gherkin-lintrc" -x ".jshintrc" \
   -x ".jshintignore" -x ".nvmrc" -x ".shifter.json" -x ".phpstorm.meta.php" \
@@ -304,7 +306,7 @@ fi
 echo "Manifest written to $MANIFEST_PATH" >&2
 
 # If building the default branch, also copy manifest to latest.json for backward compat
-DEFAULT_BRANCH="MOODLE_500_STABLE"
+DEFAULT_BRANCH="MOODLE_503_STABLE"
 if [ "$BRANCH" = "$DEFAULT_BRANCH" ] && [ "$MANIFEST_PATH" != "$MANIFEST_DIR/latest.json" ]; then
   cp "$MANIFEST_PATH" "$MANIFEST_DIR/latest.json"
   echo "Also wrote $MANIFEST_DIR/latest.json (backward compat)" >&2

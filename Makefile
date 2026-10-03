@@ -1,7 +1,7 @@
 PORT ?= 8080
 LOCAL_PORT ?= 8081
 LOCAL_PHP ?= php84
-DEFAULT_BRANCH ?= MOODLE_500_STABLE
+DEFAULT_BRANCH ?= MOODLE_503_STABLE
 JOBS ?= 2
 # Auto-detect PHP 8.3 binary: check Homebrew paths (Apple Silicon, Intel), then system php
 PHP_BIN ?= $(or \

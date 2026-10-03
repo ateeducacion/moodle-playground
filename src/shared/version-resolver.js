@@ -38,7 +38,7 @@ export const MOODLE_BRANCHES = [
     bundleDir: "MOODLE_500_STABLE",
     snapshotDir: "MOODLE_500_STABLE/snapshot",
     phpVersions: ["8.2", "8.3", "8.4"],
-    default: true,
+    default: false,
   },
   {
     branch: "MOODLE_501_STABLE",
@@ -67,14 +67,14 @@ export const MOODLE_BRANCHES = [
   {
     branch: "MOODLE_503_STABLE",
     version: "5.3",
-    label: "Moodle 5.3.x",
+    label: "Moodle 5.3.x (LTS)",
     gitRef: "MOODLE_503_STABLE",
     webRoot: "/www/moodle/public",
     manifestFile: "MOODLE_503_STABLE.json",
     bundleDir: "MOODLE_503_STABLE",
     snapshotDir: "MOODLE_503_STABLE/snapshot",
     phpVersions: ["8.3", "8.4"],
-    default: false,
+    default: true,
   },
   {
     branch: "main",
@@ -92,7 +92,8 @@ export const MOODLE_BRANCHES = [
 
 export const ALL_PHP_VERSIONS = ["8.1", "8.2", "8.3", "8.4", "8.5"];
 export const DEFAULT_PHP_VERSION = "8.3";
-export const DEFAULT_MOODLE_BRANCH = "MOODLE_500_STABLE";
+// See docs/architecture/adr/ADR-0032-moodle-53-lts-default-branch.md
+export const DEFAULT_MOODLE_BRANCH = "MOODLE_503_STABLE";
 
 function normalizeStringParam(value) {
   if (value == null) {

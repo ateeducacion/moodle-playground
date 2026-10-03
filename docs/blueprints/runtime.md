@@ -26,7 +26,7 @@ There are two ways to select versions. URL parameters win for a quick one-off;
 
     ```json
     {
-      "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+      "preferredVersions": { "php": "8.3", "moodle": "5.3" },
       "steps": []
     }
     ```
@@ -35,7 +35,7 @@ Supported versions:
 
 | Component | Available | Default |
 | --------- | --------- | ------- |
-| Moodle branch | 4.4, 4.5, 5.0, 5.1, 5.2, 5.3, main (development) | 5.0 |
+| Moodle branch | 4.4, 4.5, 5.0, 5.1, 5.2, 5.3, main (development) | 5.3 (LTS) |
 | PHP | 8.1 – 8.5 | 8.3 (depends on the Moodle branch) |
 
 !!! note
@@ -113,7 +113,7 @@ runtimes. A copy lives at
   "$schema": "../blueprint-schema.json",
   "preferredVersions": {
     "php": "8.3",
-    "moodle": "5.0"
+    "moodle": "5.3"
   },
   "landingPage": "/course/index.php",
   "steps": [
