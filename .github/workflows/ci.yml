@@ -129,6 +129,88 @@ jobs:
       - name: Generate build metadata
         run: npm run build:version
 
+      - name: Build runtime worker
+        run: npm run build-worker
+
+      - name: Resolve Moodle cache inputs
+        id: moodle_cache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="https://github.com/moodle/moodle.git"
+          stable_fingerprint=""
+          stable_targets=()
+          main_sha=""
+
+          while IFS=$'\t' read -r branch git_ref; do
+            refs=$(git ls-remote "$repo" \
+              "$git_ref" \
+              "refs/heads/$git_ref" \
+              "refs/tags/$git_ref" \
+              "refs/tags/$git_ref^{}")
+
+            sha=$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+            if [ -z "$sha" ]; then
+              sha=$(printf '%s\n' "$refs" | awk '$2 ~ /^refs\/heads\// { print $1; exit }')
+            fi
+            if [ -z "$sha" ]; then
+              sha=$(printf '%s\n' "$refs" | awk '$2 ~ /^refs\/tags\// { print $1; exit }')
+            fi
+            if [ -z "$sha" ]; then
+              echo "Unable to resolve Moodle ref: $git_ref" >&2
+              exit 1
+            fi
+
+            printf '%-20s %s (%s)\n' "$branch" "$sha" "$git_ref"
+
+            if [ "$branch" = "main" ]; then
+              main_sha="$sha"
+            else
+              stable_fingerprint="${stable_fingerprint}${branch}:${git_ref}:${sha}\n"
+              stable_targets+=("bundle-$branch")
+            fi
+          done < <(
+            node --input-type=module <<'NODE'
+            import { MOODLE_BRANCHES } from "./src/shared/version-resolver.js";
+
+            for (const { branch, gitRef } of MOODLE_BRANCHES) {
+              console.log(`${branch}\t${gitRef}`);
+            }
+            NODE
+          )
+
+          if [ -z "$main_sha" ] || [ "${#stable_targets[@]}" -eq 0 ]; then
+            echo "Unable to derive Moodle cache inputs from version-resolver.js" >&2
+            exit 1
+          fi
+
+          stable_hash=$(printf '%b' "$stable_fingerprint" | sha256sum | cut -d' ' -f1)
+          {
+            printf 'stable_hash=%s\n' "$stable_hash"
+            printf 'main_sha=%s\n' "$main_sha"
+            printf 'stable_targets=%s\n' "${stable_targets[*]}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore stable Moodle bundles
+        id: cache_stable
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/MOODLE_*
+            assets/manifests/MOODLE_*.json
+            assets/manifests/latest.json
+          key: moodle-stable-bundles-v2-php83-node24-${{ steps.moodle_cache.outputs.stable_hash }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
+      - name: Restore Moodle main bundle
+        id: cache_main
+        uses: actions/cache@v6
+        with:
+          path: |
+            assets/moodle/main
+            assets/manifests/main.json
+          key: moodle-main-bundle-v2-php83-node24-${{ steps.moodle_cache.outputs.main_sha }}-${{ hashFiles('Makefile', 'package.json', 'package-lock.json', 'scripts/**', 'patches/**') }}
+
       - name: Restore snapshot cache
         uses: actions/cache@v6
         with:
@@ -137,8 +219,28 @@ jobs:
           restore-keys: |
             snapshots-
 
-      - name: Prepare runtime assets (all branches)
-        run: make prepare-all JOBS=2
+      - name: Build missing Moodle bundles
+        if: steps.cache_stable.outputs.cache-hit != 'true' || steps.cache_main.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          STABLE_CACHE_HIT: ${{ steps.cache_stable.outputs.cache-hit }}
+          MAIN_CACHE_HIT: ${{ steps.cache_main.outputs.cache-hit }}
+          STABLE_TARGETS: ${{ steps.moodle_cache.outputs.stable_targets }}
+        run: |
+          set -euo pipefail
+
+          targets=()
+          if [ "$STABLE_CACHE_HIT" != "true" ]; then
+            read -r -a stable_targets <<< "$STABLE_TARGETS"
+            targets+=("${stable_targets[@]}")
+          fi
+          if [ "$MAIN_CACHE_HIT" != "true" ]; then
+            targets+=(bundle-main)
+          fi
+
+          printf 'Building %d uncached Moodle bundle(s): %s\n' "${#targets[@]}" "${targets[*]}"
+          make check-php
+          make --no-print-directory -j 2 "${targets[@]}"
 
       - name: Install docs dependencies
         run: python -m pip install --default-timeout=120 -r requirements-docs.txt
