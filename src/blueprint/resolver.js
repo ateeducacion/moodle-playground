@@ -212,7 +212,7 @@ function deriveContextConstants(loc, blueprintUrlParam) {
 function buildMinimalDefault() {
   return {
     landingPage: "/",
-    preferredVersions: { php: "8.3", moodle: "5.0" },
+    preferredVersions: { php: "8.3", moodle: "5.3" },
     constants: {
       ADMIN_USER: "admin",
       ADMIN_PASS: "password",

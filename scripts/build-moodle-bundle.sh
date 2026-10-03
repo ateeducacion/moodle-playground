@@ -304,7 +304,7 @@ fi
 echo "Manifest written to $MANIFEST_PATH" >&2
 
 # If building the default branch, also copy manifest to latest.json for backward compat
-DEFAULT_BRANCH="MOODLE_500_STABLE"
+DEFAULT_BRANCH="MOODLE_503_STABLE"
 if [ "$BRANCH" = "$DEFAULT_BRANCH" ] && [ "$MANIFEST_PATH" != "$MANIFEST_DIR/latest.json" ]; then
   cp "$MANIFEST_PATH" "$MANIFEST_DIR/latest.json"
   echo "Also wrote $MANIFEST_DIR/latest.json (backward compat)" >&2

@@ -20,18 +20,23 @@ import {
 } from "../../src/shared/version-resolver.js";
 
 describe("getBranchMetadata", () => {
-  it("selects Moodle 5.3 stable without changing stable defaults", () => {
+  it("selects Moodle 5.3 LTS as the default branch", () => {
     const branch = "MOODLE_503_STABLE";
     const meta = getBranchMetadata(branch);
     assert.equal(resolveMoodleBranch("5.3"), branch);
-    assert.equal(meta.label, "Moodle 5.3.x");
+    assert.equal(meta.label, "Moodle 5.3.x (LTS)");
     assert.equal(meta.gitRef, "MOODLE_503_STABLE");
     assert.equal(meta.webRoot, "/www/moodle/public");
     assert.deepEqual(meta.phpVersions, ["8.3", "8.4"]);
     assert.equal(isCompatibleCombination("8.2", branch), false);
     assert.equal(isCompatibleCombination("8.5", branch), false);
-    assert.equal(meta.default, false);
-    assert.equal(getDefaultBranch().branch, "MOODLE_500_STABLE");
+    assert.equal(meta.default, true);
+    assert.equal(getDefaultBranch().branch, branch);
+    assert.equal(DEFAULT_MOODLE_BRANCH, branch);
+    assert.deepEqual(resolveVersions(), {
+      phpVersion: "8.3",
+      moodleBranch: branch,
+    });
     assert.equal(buildRuntimeId("8.4", branch), "php84-moodle53");
     assert.deepEqual(parseRuntimeId("php84-moodle53"), {
       phpVersion: "8.4",

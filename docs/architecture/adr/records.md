@@ -45,3 +45,4 @@ folder and keep their original lightweight format (see
 | [ADR-0029](ADR-0029-build-identification-and-cache-versioning.md) | Timestamped Build IDs for deployment identification and cache versioning | Proposed | 2026-08-16 |
 | [ADR-0030](ADR-0030-pinned-moodle-prereleases.md) | Pinned Moodle prerelease channels | Proposed | 2026-09-16 |
 | [ADR-0031](ADR-0031-proxy-worker-response-sandboxing.md) | Proxy worker serves generic responses as sandboxed data | Proposed | 2026-09-25 |
+| [ADR-0032](ADR-0032-moodle-53-lts-default-branch.md) | Moodle 5.3 LTS is the default branch | Accepted | 2026-10-03 |

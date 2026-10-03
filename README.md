@@ -32,8 +32,8 @@ make up
 
 Then open <http://localhost:8080>.
 
-For Moodle 5.3, use `?moodle=5.3&php=8.4` or select it in the version picker.
-It needs PHP 8.3 or 8.4 and does not change the default.
+The playground boots Moodle 5.3 LTS on PHP 8.3 by default. Pick another version
+with `?moodle=5.0&php=8.3` (for example) or the version picker.
 
 ### Prerequisites
 

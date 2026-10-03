@@ -14,7 +14,7 @@ boot. Steps run in order.
 ```json
 {
   "$schema": "https://ateeducacion.github.io/moodle-playground/assets/blueprints/blueprint-schema.json",
-  "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+  "preferredVersions": { "php": "8.3", "moodle": "5.3" },
   "landingPage": "/my/",
   "constants": { "SITE_NAME": "My Moodle" },
   "steps": [
@@ -34,7 +34,7 @@ boot. Steps run in order.
 | `runtime` | object | no | Boot-time `config.php` settings: `debug` (`0`/`5`/`15`/`32767`) and `debugdisplay` (`0`/`1`). See [Runtime and versions](runtime.md). |
 | `phpConstants` | object | no | PHP constants defined in `config.php` before `lib/setup.php`. Name → boolean / string / number. See [PHP constants](#php-constants). |
 | `landingPage` | string | no | Path opened after boot. Must start with `/`. |
-| `preferredVersions` | object | no | `{ "php": "8.3", "moodle": "5.0" }` — preferred runtime, subject to compatibility fallback. See [Runtime and versions](runtime.md). |
+| `preferredVersions` | object | no | `{ "php": "8.3", "moodle": "5.3" }` — preferred runtime, subject to compatibility fallback. See [Runtime and versions](runtime.md). |
 | `$schema` | string | no | Informational schema reference. |
 
 ## Constants

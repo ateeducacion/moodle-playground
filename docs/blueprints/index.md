@@ -61,7 +61,7 @@ Most blueprints only need `steps`. The other fields are optional:
 ```json
 {
   "$schema": "./blueprint-schema.json",
-  "preferredVersions": { "php": "8.3", "moodle": "5.0" },
+  "preferredVersions": { "php": "8.3", "moodle": "5.3" },
   "runtime": { "debug": 0, "debugdisplay": 0 },
   "constants": { "ADMIN_USER": "admin" },
   "landingPage": "/",

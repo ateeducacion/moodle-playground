@@ -38,7 +38,7 @@ one **Moodle bundle** (`assets/moodle/`). The targets below build them.
 
 === "First build"
 
-    Build the worker, then the default Moodle branch (5.0) and its install snapshot:
+    Build the worker, then the default Moodle branch (5.3 LTS) and its install snapshot:
 
     ```bash
     make prepare
@@ -66,7 +66,7 @@ When to use each command:
 | Command | What it does | Use it when |
 |---------|--------------|-------------|
 | `make prepare` | Installs deps and builds the **worker bundle only** (no Moodle). | First setup, before `make bundle`. |
-| `make bundle` | Builds **one** Moodle branch + install snapshot (default 5.0). | You need a runnable Moodle. Override with `BRANCH=...`. |
+| `make bundle` | Builds **one** Moodle branch + install snapshot (default 5.3 LTS). | You need a runnable Moodle. Override with `BRANCH=...`. |
 | `make prepare-all` | Worker + **all** Moodle branches. | Reproducing CI / hosting every version. Pass `JOBS=N` to parallelize. |
 | `npm run build-worker` | Rebuilds `dist/php-worker.bundle.js` only. | After editing anything in `src/runtime/**` or `src/blueprint/**`. |
 
@@ -192,13 +192,13 @@ BRANCH=MOODLE_500_STABLE LOCAL_PORT=8082 LOCAL_PHP=php83 make up-local
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `BRANCH` | `MOODLE_500_STABLE` | Which Moodle branch to serve. |
+| `BRANCH` | `MOODLE_503_STABLE` | Which Moodle branch to serve. |
 | `LOCAL_PORT` | `8081` | Port for the native `php -S` server. |
 | `LOCAL_PHP` | `php84` | PHP binary to launch (must have `pdo_sqlite`). |
 
 ## Selecting Moodle versions
 
-The build defaults to Moodle 5.0 (`MOODLE_500_STABLE`). Override it with `BRANCH=...` on
+The build defaults to Moodle 5.3 LTS (`MOODLE_503_STABLE`). Override it with `BRANCH=...` on
 `make bundle` or `make up-local`:
 
 ```bash
@@ -209,11 +209,11 @@ BRANCH=main make bundle
 | `BRANCH` value | Moodle version |
 |----------------|----------------|
 | `MOODLE_404_STABLE` | 4.4 |
-| `MOODLE_405_STABLE` | 4.5 |
-| `MOODLE_500_STABLE` | 5.0 (default) |
+| `MOODLE_405_STABLE` | 4.5 LTS |
+| `MOODLE_500_STABLE` | 5.0 |
 | `MOODLE_501_STABLE` | 5.1 |
 | `MOODLE_502_STABLE` | 5.2 |
-| `MOODLE_503_STABLE` | 5.3 |
+| `MOODLE_503_STABLE` | 5.3 LTS (default) |
 | `main` | development |
 
 At runtime you can switch versions without rebuilding by using the `moodle` and `php`

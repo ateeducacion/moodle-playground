@@ -15,7 +15,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 PORT=${1:-8081}
 PHP_BIN=${2:-php}
-BRANCH=${BRANCH:-MOODLE_500_STABLE}
+BRANCH=${BRANCH:-MOODLE_503_STABLE}
 BRANCH_KEY=$(printf '%s' "$BRANCH" | sed 's/[^A-Za-z0-9._-]/_/g')
 
 MOODLE_DIR="$REPO_DIR/.cache/moodle/$BRANCH"
