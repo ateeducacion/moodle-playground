@@ -170,15 +170,7 @@ jobs:
               stable_fingerprint="${stable_fingerprint}${branch}:${git_ref}:${sha}\n"
               stable_targets+=("bundle-$branch")
             fi
-          done < <(
-            node --input-type=module <<'NODE'
-            import { MOODLE_BRANCHES } from "./src/shared/version-resolver.js";
-
-            for (const { branch, gitRef } of MOODLE_BRANCHES) {
-              console.log(`${branch}\t${gitRef}`);
-            }
-            NODE
-          )
+          done < <(node --input-type=module -e 'import("./src/shared/version-resolver.js").then(({ MOODLE_BRANCHES }) => MOODLE_BRANCHES.forEach(({ branch, gitRef }) => console.log(`${branch}\\t${gitRef}`)))')
 
           if [ -z "$main_sha" ] || [ "${#stable_targets[@]}" -eq 0 ]; then
             echo "Unable to derive Moodle cache inputs from version-resolver.js" >&2
