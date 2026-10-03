@@ -16,7 +16,7 @@ For the fastest path from clone to a running instance, start with the
 | Python 3 | any | Moodle build helpers and the docs site (Zensical). |
 | Git | any | Cloning the repo. |
 | PHP | **8.3** with `pdo_sqlite` | Building Moodle bundles (`make bundle`) and the native server (`make up-local`). |
-| Composer | any | Only when building **Moodle 5.1+** bundles (`MOODLE_501_STABLE`, `MOODLE_502_STABLE`, `main`). |
+| Composer | any | Only when building **Moodle 5.1+** bundles (`MOODLE_501_STABLE`, `MOODLE_502_STABLE`, `MOODLE_503_STABLE`, `main`). |
 
 !!! note
     PHP 8.3 is only needed at **build time** (it generates the SQLite install snapshot
@@ -213,6 +213,7 @@ BRANCH=main make bundle
 | `MOODLE_500_STABLE` | 5.0 (default) |
 | `MOODLE_501_STABLE` | 5.1 |
 | `MOODLE_502_STABLE` | 5.2 |
+| `MOODLE_503_STABLE` | 5.3 |
 | `main` | development |
 
 At runtime you can switch versions without rebuilding by using the `moodle` and `php`

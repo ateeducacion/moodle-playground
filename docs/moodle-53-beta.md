@@ -1,5 +1,9 @@
 # Moodle 5.3 beta playground
 
+> **Retired.** Upstream released Moodle 5.3, so `MOODLE_503_BETA` was replaced by
+> the `MOODLE_503_STABLE` channel (#327). This page stays as the runbook for
+> future pinned prerelease channels.
+
 Select **Moodle 5.3 beta (experimental)** or use `?moodle=5.3&php=8.4`.
 PHP 8.3 also works with the declared compatibility matrix; 8.2 and 8.5 are not
 offered for this channel. The default remains Moodle 5.0/PHP 8.3.

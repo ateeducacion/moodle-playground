@@ -8,7 +8,7 @@ import {
 test.describe.configure({ timeout: specTimeoutMs });
 
 for (const php of ["8.3", "8.4"]) {
-  test(`Moodle 5.3 beta renders with PHP ${php}`, async ({ page }) => {
+  test(`Moodle 5.3 renders with PHP ${php}`, async ({ page }) => {
     await page.goto(`/?moodle=5.3&php=${php}`, {
       waitUntil: "domcontentloaded",
     });
@@ -21,10 +21,10 @@ for (const php of ["8.3", "8.4"]) {
     expect(body).not.toContain("Failed opening required");
     expect(body).not.toContain("Exception - ");
     const manifest = await page.evaluate(async () => {
-      const response = await fetch("assets/manifests/MOODLE_503_BETA.json");
+      const response = await fetch("assets/manifests/MOODLE_503_STABLE.json");
       return response.json();
     });
-    expect(manifest.release).toMatch(/^5\.3beta(?: |$)/);
+    expect(manifest.release).toMatch(/^5\.3(?:\.\d+)?\+?(?: |$)/);
     expect(manifest.snapshot).toBeTruthy();
   });
 }

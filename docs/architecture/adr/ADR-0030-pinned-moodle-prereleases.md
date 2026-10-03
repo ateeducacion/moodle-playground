@@ -88,7 +88,7 @@ Browser rendering must be checked; a successful bundle alone is insufficient.
 ## Validation
 
 Build the pinned source and SQLite snapshot; run resolver/unit tests and
-`tests/e2e/moodle-53-beta.spec.mjs` on Chromium and Firefox with PHP 8.3 and 8.4.
+`tests/e2e/moodle-53-beta.spec.mjs` (now `moodle-53.spec.mjs`) on Chromium and Firefox with PHP 8.3 and 8.4.
 See [the test/runbook](../../moodle-53-beta.md) for commands and recorded results.
 
 ## Follow-up work
@@ -96,6 +96,9 @@ See [the test/runbook](../../moodle-53-beta.md) for commands and recorded result
 For later prereleases update the pin, label and exact-release assertion together.
 For final, add `MOODLE_503_STABLE` after upstream creates it and validate again;
 do not promote this beta channel or change stable defaults implicitly.
+
+Done in #327: `MOODLE_503_STABLE` replaced `MOODLE_503_BETA` once upstream
+released 5.3; the default branch is unchanged.
 
 ## References
 

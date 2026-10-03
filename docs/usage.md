@@ -55,7 +55,7 @@ Click the **Toggle sidebar** button to open the panel. It has four tabs.
 
 The **Info** tab holds the runtime configuration:
 
-- **Moodle version** — pick a built branch (4.4, 4.5, 5.0 default, 5.1, 5.2, or
+- **Moodle version** — pick a built branch (4.4, 4.5, 5.0 default, 5.1, 5.2, 5.3, or
   `main`).
 - **PHP version** — pick a PHP version compatible with the selected branch
   (8.1–8.5; the list updates automatically, default 8.3).

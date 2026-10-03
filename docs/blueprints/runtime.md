@@ -35,7 +35,7 @@ Supported versions:
 
 | Component | Available | Default |
 | --------- | --------- | ------- |
-| Moodle branch | 4.4, 4.5, 5.0, 5.1, 5.2, main (development) | 5.0 |
+| Moodle branch | 4.4, 4.5, 5.0, 5.1, 5.2, 5.3, main (development) | 5.0 |
 | PHP | 8.1 – 8.5 | 8.3 (depends on the Moodle branch) |
 
 !!! note
