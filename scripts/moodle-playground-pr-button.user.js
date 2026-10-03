@@ -42,6 +42,7 @@
     MOODLE_500_STABLE: "5.0",
     MOODLE_501_STABLE: "5.1",
     MOODLE_502_STABLE: "5.2",
+    MOODLE_503_STABLE: "5.3",
     main: "dev",
     master: "dev",
   };

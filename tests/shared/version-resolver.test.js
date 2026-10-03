@@ -20,11 +20,12 @@ import {
 } from "../../src/shared/version-resolver.js";
 
 describe("getBranchMetadata", () => {
-  it("selects the pinned 5.3 beta without changing stable defaults", () => {
-    const branch = "MOODLE_503_BETA";
+  it("selects Moodle 5.3 stable without changing stable defaults", () => {
+    const branch = "MOODLE_503_STABLE";
     const meta = getBranchMetadata(branch);
     assert.equal(resolveMoodleBranch("5.3"), branch);
-    assert.equal(meta.gitRef, "v5.3.0-beta");
+    assert.equal(meta.label, "Moodle 5.3.x");
+    assert.equal(meta.gitRef, "MOODLE_503_STABLE");
     assert.equal(meta.webRoot, "/www/moodle/public");
     assert.deepEqual(meta.phpVersions, ["8.3", "8.4"]);
     assert.equal(isCompatibleCombination("8.2", branch), false);
@@ -38,7 +39,7 @@ describe("getBranchMetadata", () => {
     });
     assert.equal(
       buildManifestUrl(branch, "https://example.org/playground/"),
-      "https://example.org/playground/assets/manifests/MOODLE_503_BETA.json",
+      "https://example.org/playground/assets/manifests/MOODLE_503_STABLE.json",
     );
   });
   it("returns metadata for a known branch", () => {
@@ -60,6 +61,14 @@ describe("getBranchMetadata", () => {
   it("returns correct webRoot for <=5.0", () => {
     const meta = getBranchMetadata("MOODLE_500_STABLE");
     assert.strictEqual(meta.webRoot, "/www/moodle");
+  });
+
+  it("retires the pinned 5.3 beta channel", () => {
+    assert.equal(getBranchMetadata("MOODLE_503_BETA"), null);
+  });
+
+  it("labels main as the 6.0 development build", () => {
+    assert.equal(getBranchMetadata("main").label, "Moodle 6.0dev (main)");
   });
 
   it("returns metadata for MOODLE_502_STABLE", () => {
