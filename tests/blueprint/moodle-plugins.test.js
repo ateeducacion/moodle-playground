@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { getStepHandler } from "../../src/blueprint/steps/index.js";
 import { __testables } from "../../src/blueprint/steps/moodle-plugins.js";
+
+// Handler tests without a php mock must stop at the download step, offline.
+// Tests that need a successful download install their own fetch mock.
+const NETWORK_DISABLED = /network disabled in tests/;
+const realFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = async () => {
+    throw new Error("network disabled in tests");
+  };
+});
+after(() => {
+  globalThis.fetch = realFetch;
+});
 
 const SAMPLE_PLUGIN_ZIP_BASE64 =
   "UEsDBBQAAAAIAHcBgVyusmujBwAAAAUAAAAhAAAAbW9vZGxlLW1vZF9ib2FyZC1tYWluL3ZlcnNpb24ucGhws7EvyCgAAFBLAwQUAAAACAB3AYFczmE/Ew8AAAANAAAAKQAAAG1vb2RsZS1tb2RfYm9hcmQtbWFpbi9jbGFzc2VzL2V4YW1wbGUucGhws7EvyChQSE3OyFcwtAYAUEsBAhQDFAAAAAgAdwGBXK6ya6MHAAAABQAAACEAAAAAAAAAAAAAAIABAAAAAG1vb2RsZS1tb2RfYm9hcmQtbWFpbi92ZXJzaW9uLnBocFBLAQIUAxQAAAAIAHcBgVzOYT8TDwAAAA0AAAApAAAAAAAAAAAAAACAAUYAAABtb29kbGUtbW9kX2JvYXJkLW1haW4vY2xhc3Nlcy9leGFtcGxlLnBocFBLBQYAAAAAAgACAKYAAACcAAAAAAA=";
@@ -67,20 +80,10 @@ describe("auto-detection of pluginType and pluginName from GitHub URL", () => {
   const handler = getStepHandler("installMoodlePlugin");
 
   // These tests verify auto-detection by triggering the handler with URLs
-  // that match the GitHub archive pattern. The handler will fail at the
-  // fetch stage (no network in tests) but we verify it gets past validation.
+  // that match the GitHub archive pattern. Reaching the stubbed fetch proves
+  // the handler got past type/name validation.
   function assertPassesValidation(step) {
-    return assert.rejects(
-      () => handler(step, {}),
-      (err) => {
-        assert.ok(
-          !err.message.includes("pluginType") &&
-            !err.message.includes("pluginName"),
-          `Should auto-detect type and name but got: ${err.message}`,
-        );
-        return true;
-      },
-    );
+    return assert.rejects(() => handler(step, {}), NETWORK_DISABLED);
   }
 
   it("detects mod type: moodle-mod_board → mod/board", async () => {
@@ -175,16 +178,8 @@ describe("resolvePluginDir path mapping", () => {
         pluginName: name,
         url: "https://example.com/plugin.zip",
       };
-      await assert.rejects(
-        () => handler(step, {}),
-        (err) => {
-          assert.ok(
-            !err.message.includes("Unknown plugin type"),
-            `Type '${type}' should be valid but got: ${err.message}`,
-          );
-          return true;
-        },
-      );
+      // Reaching the stubbed fetch means resolvePluginDir accepted the type.
+      await assert.rejects(() => handler(step, {}), NETWORK_DISABLED);
     });
   }
 });
@@ -206,8 +201,7 @@ describe("popular free theme URLs are recognized", () => {
 
   it("installTheme accepts Moove pinned to MOODLE_500_STABLE (auto-detects name)", async () => {
     const handler = getStepHandler("installTheme");
-    // Handler passes validation but fails at fetch (no network). We verify it
-    // gets past the name-detection guard.
+    // Reaching the stubbed fetch proves it got past the name-detection guard.
     await assert.rejects(
       () =>
         handler(
@@ -216,13 +210,7 @@ describe("popular free theme URLs are recognized", () => {
           },
           {},
         ),
-      (err) => {
-        assert.ok(
-          !err.message.includes("pluginName"),
-          `Should auto-detect theme name but got: ${err.message}`,
-        );
-        return true;
-      },
+      NETWORK_DISABLED,
     );
   });
 });
