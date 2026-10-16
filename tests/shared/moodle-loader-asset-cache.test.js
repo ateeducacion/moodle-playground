@@ -119,6 +119,52 @@ describe("fetchAssetWithCache", () => {
     );
   });
 
+  it("shares one in-flight download between concurrent callers", async () => {
+    const url = "https://example.test/install.sq3";
+    const bytes = makeAsset(16 * 1024);
+    const info = { sha256: sha256Hex(bytes) };
+    mocks.responses.set(url, bytes);
+
+    // php-worker.js prefetch and bootstrap.js request the same asset before
+    // the first download finishes.
+    const [a, b] = await Promise.all([
+      fetchAssetWithCache(url, info),
+      fetchAssetWithCache(url, info),
+    ]);
+    assert.deepEqual(a, bytes);
+    assert.deepEqual(b, bytes);
+    assert.equal(globalThis.__fetchCount(), 1, "one network transfer");
+    assert.ok(mocks.store.has(url), "asset cached once");
+  });
+
+  it("forwards the completion event to a joining caller", async () => {
+    const url = "https://example.test/localcache.zip";
+    const bytes = makeAsset(4 * 1024);
+    mocks.responses.set(url, bytes);
+
+    const events = [];
+    await Promise.all([
+      fetchAssetWithCache(url, {}),
+      fetchAssetWithCache(url, {}, (e) => events.push(e)),
+    ]);
+    assert.deepEqual(events, [
+      { loaded: bytes.byteLength, total: bytes.byteLength, ratio: 1, url },
+    ]);
+  });
+
+  it("does not keep a failed download in flight", async () => {
+    const url = "https://example.test/install.sq3";
+    await assert.rejects(
+      () => fetchAssetWithCache(url, {}),
+      /Unable to download asset/,
+    );
+
+    const bytes = makeAsset(2 * 1024);
+    mocks.responses.set(url, bytes);
+    assert.deepEqual(await fetchAssetWithCache(url, {}), bytes);
+    assert.equal(globalThis.__fetchCount(), 2, "retry fetches again");
+  });
+
   it("throws when freshly downloaded bytes fail checksum verification", async () => {
     const url = "https://example.test/install.sq3";
     mocks.responses.set(url, makeAsset(4 * 1024));
