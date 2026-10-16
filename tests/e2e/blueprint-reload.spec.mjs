@@ -255,7 +255,8 @@ for (const [version, root] of [
         marker: "user-edited",
         file: "protected-user-edited",
       });
-      expect(downloads).toBe(1);
+      // No ZIP copy is kept: the reload downloads the plugin again (ADR-0036).
+      expect(downloads).toBe(2);
       expect(
         await page.evaluate(
           async (url) => (await fetch(url)).text(),

@@ -123,9 +123,8 @@ export function getReloadStep(step, completed, artifactPath) {
           critical: step.critical,
         }
       : null;
+  // Archives are fetched again from their original resource (ADR-0036).
   if (step.step === "unzip")
-    return isVolatilePath(step.destination || step.path)
-      ? { ...step, data: data(0) }
-      : null;
+    return isVolatilePath(step.destination || step.path) ? step : null;
   return null;
 }

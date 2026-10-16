@@ -188,5 +188,5 @@ async function handleUnzip(step, context) {
     }
     rawPhp.writeFile(fullPath, data);
   }
-  await preserveArtifact(context, destination, zipBytes);
+  // No archive copy: a reload resolves step.data again (ADR-0036).
 }
