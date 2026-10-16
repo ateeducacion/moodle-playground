@@ -14,7 +14,7 @@
 
 > Run a full Moodle site in the browser — no server required.
 
-Moodle Playground runs [Moodle™](https://moodle.org) entirely in the browser using WebAssembly, powered by [WordPress Playground](https://github.com/WordPress/wordpress-playground)'s `@php-wasm/web` runtime. Every page load boots a fresh Moodle instance with a pre-built SQLite snapshot — nothing is stored on disk and nothing leaves your browser.
+Moodle Playground runs [Moodle™](https://moodle.org) entirely in the browser using WebAssembly, powered by [WordPress Playground](https://github.com/WordPress/wordpress-playground)'s `@php-wasm/web` runtime. New instances start from a pre-built SQLite snapshot. Mutable data is journaled to IndexedDB per scope and can survive reloads; closing a tab does not guarantee deletion. Runtime code edits outside declared blueprint files are still volatile. Moodle executes locally, while runtime assets and blueprint resources are downloaded as needed.
 
 ## Getting Started
 

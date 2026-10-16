@@ -49,6 +49,8 @@ export function isCacheableScopedAssetResponse(requestPath, response) {
     /^(?:text|application)\/javascript(?:;|$)/iu.test(type) &&
     directives.includes("public") &&
     directives.includes("immutable") &&
+    // Defense in depth only: fetched response headers may hide Set-Cookie.
+    // Admission relies on the public ESM controller/path, never this check alone.
     !response.headers.has("set-cookie") &&
     !(response.headers.get("vary") || "")
       .split(",")

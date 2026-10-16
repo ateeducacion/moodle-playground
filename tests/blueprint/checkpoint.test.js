@@ -3,6 +3,7 @@ import { it } from "node:test";
 import {
   createBlueprintCheckpoint,
   getReloadStep,
+  isVolatilePath,
 } from "../../src/blueprint/checkpoint.js";
 import { executeBlueprint } from "../../src/blueprint/executor.js";
 import { registerStep } from "../../src/blueprint/steps/index.js";
@@ -39,22 +40,49 @@ it("checkpoints before provisioning and only marks completed steps after a succe
   assert.deepEqual([...checkpoint.completed], [0]);
 });
 
-it("rejects mismatched, malformed and unsupported checkpoints without provisioning", async () => {
+it("treats mismatched, malformed and unsupported checkpoints as a changed blueprint", async () => {
   for (const stored of [
     {},
     { version: 2 },
-    { version: 1, fingerprint: "different", completed: [] },
+    { version: 1, fingerprint: "different", completed: [0] },
   ]) {
-    await assert.rejects(
-      createBlueprintCheckpoint({
-        blueprint: { steps: [{}] },
-        php: { run: async () => ({ text: JSON.stringify(stored) }) },
-        dbFile: "/persist/db",
-        resume: true,
-      }),
-      /does not match/,
-    );
+    const checkpoint = await createBlueprintCheckpoint({
+      blueprint: { steps: [{}] },
+      php: { run: async () => ({ text: JSON.stringify(stored) }) },
+      dbFile: "/persist/db",
+      resume: true,
+    });
+    assert.equal(checkpoint.changed, true);
+    assert.equal(checkpoint.legacy, false);
+    assert.equal(checkpoint.completed.size, 0);
   }
+});
+
+it("keeps login and landing when the same source now has a different blueprint", async () => {
+  const ran = [];
+  registerStep("__changed_data", async () => ran.push("data"));
+  const php = {
+    writeFile: async () => {},
+    run: async () => ({ text: "" }),
+    request: async () => {
+      ran.push("login");
+      return new Response('{"ok":true}');
+    },
+  };
+  const result = await executeBlueprint(
+    { steps: [{ step: "__changed_data" }, { step: "login" }] },
+    {
+      php,
+      checkpoint: {
+        resuming: true,
+        changed: true,
+        completed: new Set(),
+        fingerprint: "f",
+      },
+    },
+  );
+  assert.equal(result.success, true);
+  assert.deepEqual(ran, ["login"]);
 });
 
 it("does not initialize a new checkpoint on legacy persisted sites", async () => {
@@ -75,6 +103,106 @@ it("does not initialize a new checkpoint on legacy persisted sites", async () =>
   assert.equal(calls, 1);
 });
 
+it("treats corrupt serialized metadata as changed, not legacy or a reason to lose login", async () => {
+  for (const text of ['{"invalid":true}', "false", "0", '""']) {
+    const checkpoint = await createBlueprintCheckpoint({
+      blueprint: { steps: [{}] },
+      php: { run: async () => ({ text }) },
+      dbFile: "/persist/db",
+      resume: true,
+    });
+    assert.equal(checkpoint.changed, true);
+    assert.equal(checkpoint.legacy, false);
+  }
+});
+
+it("restores declared journal-excluded cache files but never real persisted data", () => {
+  for (const directory of ["cache", "localcache", "temp", "muc"]) {
+    assert.equal(
+      isVolatilePath(`/persist/moodledata/${directory}/fixture`),
+      true,
+    );
+    assert.equal(
+      isVolatilePath(`/www/../persist/moodledata/${directory}/fixture`),
+      true,
+    );
+  }
+  for (const path of [
+    "/persist/moodledata/filedir/a",
+    "/persist/moodledata/cache-backup/a",
+    "/persist/moodledata/localcache/../filedir/a",
+  ]) {
+    assert.equal(isVolatilePath(path), false);
+  }
+});
+
+it("preserves critical on transformed copy and move reload steps", () => {
+  for (const step of [
+    { step: "copyFile", from: "/persist/a", to: "/www/a", critical: true },
+    { step: "moveFile", from: "/www/a", to: "/persist/a", critical: true },
+  ])
+    assert.equal(getReloadStep(step, true, "/persist/artifact").critical, true);
+});
+
+it("restores an unfinished plugin's saved ZIP without upgrading or declaring it complete", async () => {
+  const { strToU8, zipSync } = await import("fflate");
+  const files = [];
+  const scripts = [];
+  const result = await executeBlueprint(
+    {
+      steps: [
+        {
+          step: "installMoodlePlugin",
+          pluginType: "local",
+          pluginName: "partial",
+          url: "https://example.invalid/moving.zip",
+        },
+      ],
+    },
+    {
+      checkpoint: {
+        fingerprint: "partial",
+        resuming: true,
+        completed: new Set(),
+      },
+      php: {
+        readFile: async (path) => {
+          assert.equal(path, "/persist/blueprints/partial/0.zip");
+          return zipSync({ "partial/version.php": strToU8("<?php") });
+        },
+        _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
+        run: async (code) => {
+          scripts.push(code);
+          return { text: '{"ok":true}' };
+        },
+      },
+    },
+  );
+  assert.ok(files.includes("/www/moodle/local/partial/version.php"));
+  assert.ok(
+    scripts[0].indexOf("return;") < scripts[0].indexOf("upgrade_noncore(true)"),
+  );
+  assert.equal(result.success, false);
+  assert.match(result.error, /unfinished/);
+});
+
+it("warns when arbitrary PHP is skipped because volatile effects cannot be restored", async () => {
+  const messages = [];
+  await executeBlueprint(
+    { steps: [{ step: "runPhpCode", code: "sensitive-fixture" }] },
+    {
+      checkpoint: { resuming: true, completed: new Set([0]) },
+      publish: (message) => messages.push(message),
+    },
+  );
+  assert.ok(
+    messages.some((message) => /volatile.*not restored/i.test(message)),
+  );
+  assert.ok(
+    messages.every((message) => !message.includes("sensitive-fixture")),
+  );
+});
+
 it("restores only finished volatile operations, resolving mixed and traversing paths safely", () => {
   for (const step of [
     { step: "createCourse" },
@@ -93,7 +221,7 @@ it("restores only finished volatile operations, resolving mixed and traversing p
       true,
       "/persist/artifact",
     ),
-    { step: "deleteFile", path: "/www/a" },
+    { step: "deleteFile", path: "/www/a", critical: undefined },
   );
   assert.deepEqual(getReloadStep(volatile, true, "/persist/artifact"), {
     ...volatile,

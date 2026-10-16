@@ -27,6 +27,12 @@ discards retained state and reruns provisioning. Back up valuable data first.
 This is not persistence for arbitrary runtime code edits or plugin-manager changes
 under `/www`. See [ADR-0035](../architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
+Declared derived cache paths excluded from the journal are restored too. A saved
+plugin/overlay artifact may restore code after incomplete provisioning, but never
+reruns its install/upgrade or marks the step complete. A completed plugin removed
+from Moodle's installed-version registry is not reinstalled on reload. Failed
+artifact cleanup must not discard code needed by a partially changed database.
+
 ```json
 {
   "$schema": "https://ateeducacion.github.io/moodle-playground/assets/blueprints/blueprint-schema.json",

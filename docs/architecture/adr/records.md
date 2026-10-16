@@ -49,3 +49,8 @@ folder and keep their original lightweight format (see
 | [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md) | Moodle-owned JavaScript revisions and versioned RequireJS seeds | Proposed | 2026-10-16 |
 | [ADR-0034](ADR-0034-public-immutable-esm-cache.md) | Cache public immutable ESM responses inside the existing scope | Proposed | 2026-10-16 |
 | [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Proposed | 2026-10-16 |
+
+PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
+ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers
+early checkpoints, shell identity, partial artifacts and non-replayed crash recovery.
+All three remain Proposed.

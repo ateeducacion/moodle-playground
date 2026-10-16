@@ -12,3 +12,6 @@ update the table.
 | [SDD-0000](SDD-0000-template.md) | Template | Template | — |
 | [SDD-0001](SDD-0001-editable-blueprint-panel.md) | Editable blueprint panel | Implemented | 2026-07-03 |
 | [SDD-0002](SDD-0002-incremental-navigation-and-reload-correctness.md) | Incremental navigation and reload correctness | In Review | 2026-10-16 |
+
+SDD-0002 includes the PR #341 review follow-up, targeted browser validation and
+the remaining legacy/manual-plugin recovery limits; its status remains In Review.

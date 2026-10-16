@@ -5,6 +5,7 @@ import {
   replayFSJournal,
 } from "@php-wasm/fs-journal";
 import { __private__dont__use } from "@php-wasm/universal";
+import { isEphemeralMoodlePath as isEphemeralPath } from "../shared/paths.js";
 
 // Persist Moodle's mutable state (SQLite DB at /persist/moodledata/*.sq3.php,
 // moodledata/filedir, config under /persist) to IndexedDB via @php-wasm/fs-journal,
@@ -26,13 +27,6 @@ const FLUSH_DELAY_MS = 1500;
 // surfacing as `Class "CompiledContainer" not found` on reload after creating
 // content. Only real data — the SQLite DB, filedir, config, sessions — must
 // persist; let Moodle rebuild the caches each boot.
-const EPHEMERAL_RE =
-  /^\/persist\/moodledata\/(cache|localcache|temp|muc)(\/|$)/;
-
-function isEphemeralPath(path) {
-  return EPHEMERAL_RE.test(path || "");
-}
-
 function pathMatchesPrefix(path, pathPrefix) {
   if (!pathPrefix) return true;
   const normalizedPrefix = String(pathPrefix).replace(/\/$/u, "");

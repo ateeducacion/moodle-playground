@@ -406,6 +406,15 @@ describe("applyPrOverlay step", () => {
       new Uint8Array([1, 2, 3]),
     );
     assert.ok(!php.runCalls.some((code) => code.includes("upgrade_noncore")));
+    // No full purge on reload: it would bump jsrev/themerev every time.
+    assert.ok(!php.runCalls.some((code) => code.includes("purge_all_caches")));
+    assert.ok(php.runCalls.some((code) => code.includes("CompiledContainer")));
+    php.runCalls.length = 0;
+    await handler(
+      { ...step, purgeCaches: false },
+      { ...context, restoreOnly: true },
+    );
+    assert.equal(php.runCalls.length, 0);
     stored.set(
       context.overlayArchivePath,
       new TextEncoder().encode(
@@ -416,6 +425,45 @@ describe("applyPrOverlay step", () => {
       handler(step, { ...context, restoreOnly: true }),
       /Invalid saved overlay path/,
     );
+  });
+
+  it("checkpoints the applied subset and still purges/upgrades when a file is skipped", async () => {
+    const php = createMockPhp();
+    const stored = new Map();
+    php.writeFile = async (path, bytes) => stored.set(path, bytes);
+    const archive = "/persist/blueprints/fixture/0-overlay.json";
+    await withFetch(
+      async (url) =>
+        String(url).includes("missing")
+          ? { ok: false, status: 404 }
+          : okBytesResponse(new Uint8Array([7])),
+      () =>
+        getStepHandler("applyPrOverlay")(
+          {
+            runUpgrade: "on",
+            files: [
+              {
+                path: "lib/a.php",
+                rawUrl: "https://fixture.invalid/a",
+                status: "modified",
+              },
+              {
+                path: "lib/b.php",
+                rawUrl: "https://fixture.invalid/missing",
+                status: "modified",
+              },
+            ],
+          },
+          { php, overlayArchivePath: archive },
+        ),
+    );
+    const saved = JSON.parse(new TextDecoder().decode(stored.get(archive)));
+    assert.deepEqual(
+      saved.map((op) => op.path),
+      ["/www/moodle/lib/a.php"],
+    );
+    assert.ok(php.runCalls.some((code) => code.includes("purge_all_caches")));
+    assert.ok(php.runCalls.some((code) => code.includes("upgrade_noncore")));
   });
 
   it("writes added/modified files, deletes removed, and renames", async () => {

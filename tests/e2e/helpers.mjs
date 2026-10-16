@@ -103,6 +103,9 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
     shellState = await withDiagnosticDeadline(
       page.evaluate(() => {
         const addressInput = document.querySelector("#address-input");
+        const app = document
+          .querySelector("#site-frame")
+          ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
         return {
           title: document.title,
           href: window.location.href,
@@ -119,6 +122,18 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
           logPanel: document.querySelector("#log-panel")?.textContent || "",
           siteFrameSrc:
             document.querySelector("#site-frame")?.getAttribute("src") || null,
+          // Cross-check Firefox protocol metadata against the actual same-origin DOM.
+          appDom: app
+            ? {
+                path: app.location.pathname,
+                readyState: app.document.readyState,
+                pendingJs: app.M?.util?.pending_js ?? null,
+                jsrev: app.M?.cfg?.jsrev ?? null,
+                pluginVersion:
+                  app.document.querySelector("#plugin-version")?.textContent ??
+                  null,
+              }
+            : null,
         };
       }),
     );
@@ -298,23 +313,15 @@ async function waitForRemoteOverlayHidden(page, timeout = readyTimeoutMs) {
 }
 
 /**
- * Full wait: shell ready + remote boot overlay hidden + Moodle content rendered.
- * Use for tests that need to interact with Moodle UI (forms, navigation).
- *
- * Readiness stages verified:
- * 1. Shell: runtime label populated + address bar enabled (= worker sent "ready")
- * 2. Remote: boot overlay hidden (= bootstrap complete, frame navigated)
- * 3. Moodle: content visible inside nested iframe (= PHP page rendered)
- */
-/**
- * Poll the Moodle iframe until at least one of the given selectors is present.
+ * Poll the Moodle iframe until at least one of the given selectors is visible.
  * Tolerates frame-not-ready errors while the nested iframe is still loading.
  */
-async function waitForMoodleContent(
+export async function waitForMoodleContent(
   moodleFrame,
   selectors,
   timeout = readyTimeoutMs,
 ) {
+  let matchedFrame;
   await expect
     .poll(
       async () => {
@@ -323,7 +330,15 @@ async function waitForMoodleContent(
         if (!frame) return false;
         for (const selector of selectors) {
           try {
-            if (await frame.locator(selector).count()) return true;
+            if (
+              await withDiagnosticDeadline(
+                frame.locator(selector).first().isVisible(),
+                1000,
+              )
+            ) {
+              matchedFrame = frame;
+              return true;
+            }
           } catch {
             /* frame not ready yet */
           }
@@ -333,6 +348,7 @@ async function waitForMoodleContent(
       { timeout },
     )
     .toBeTruthy();
+  return matchedFrame;
 }
 
 const MOODLE_CONTENT_SELECTORS = [
@@ -438,7 +454,7 @@ export async function navigateWithinPlayground(page, path) {
 
   // Wait for Moodle content to render after navigation
   await waitForMoodleContent(
-    getMoodleFrame(page),
+    () => findMoodleFrame(page),
     [...MOODLE_CONTENT_SELECTORS, "form"],
     30_000,
   );
@@ -450,22 +466,13 @@ export async function waitForMoodlePath(page, expectedPath) {
   await expect
     .poll(
       async () => {
-        const frameMatched = page.frames().some((frame) => {
-          const parent = frame.parentFrame();
-          if (!parent?.url().includes("/remote.html")) {
-            return false;
-          }
-
-          try {
-            return new URL(frame.url()).pathname.endsWith(expectedPathname);
-          } catch {
-            return false;
-          }
-        });
-        if (frameMatched) {
-          return true;
+        try {
+          return new URL(findMoodleFrame(page)?.url()).pathname.endsWith(
+            expectedPathname,
+          );
+        } catch {
+          return false;
         }
-        return false;
       },
       { timeout: readyTimeoutMs },
     )

@@ -57,8 +57,15 @@ Selected. Unknown/ambiguous paths retain ordinary routing.
 - Moodle `42622298fe06f9626d988d60b2bf589bd8f850e8`, ESM controller:
   `cookies:false`, GET only, registry lookup, revision validation and immutable
   headers (`public/lib/classes/route/controller/esm_controller.php`).
-- Audit F2 measured fewer warm PHP requests (dashboard57→5 with F1+F2).
-  Cold-start improvement was not established by that experiment.
+- The initial exploratory audit measured fewer warm PHP requests with F1+F2
+  (dashboard57→5), not an isolated F2 effect. Cold-start improvement was not
+  established by that experiment.
+- Coherent 3.1.57 series: F1 dashboard already makes zero ESM requests to PHP
+  in all ten measured navigations. Remaining routes are `/my/`,
+  `/lib/ajax/service.php` and `/lib/ajax/service-nologin.php` (one sample also
+  loads four previously uncached theme/editor images). F2 does not reduce
+  their median request count. Its isolated two-fetch test proves an ESM cache hit,
+  not an incremental latency gain in a navigation whose HTTP/module caches are warm.
 
 ## Decision
 
@@ -66,6 +73,9 @@ Only GET requests for canonical `/r.php/core/esm/<positive-safe-integer>/<specif
 paths without query strings are ESM cache candidates. Cache only HTTP200 JavaScript
 responses with explicit public and immutable directives; reject private/no-store/
 no-cache, Set-Cookie and Vary:*. Recheck these rules on cache hits as well.
+The Set-Cookie check is defense in depth for visible headers only: browser fetch
+can filter this header. Public controller semantics, canonical path, content type
+and explicit immutable/public cache directives are the admission boundary.
 Ambiguous encodings, generic router endpoints and protected PHP PATH_INFO take
 the normal PHP route. Static extensions apply only to non-PHP paths; retain the
 existing explicit legacy PHP asset allowlist.

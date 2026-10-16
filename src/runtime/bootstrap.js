@@ -5,6 +5,7 @@ import {
   createDecodedTarStream,
   extractTarStreamToPhp,
 } from "../../lib/streaming-tar-extract.js";
+import { createBlueprintCheckpoint } from "../blueprint/checkpoint.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import { escapePhp as escapePhpSingleQuoted } from "../blueprint/php/helpers.js";
 import {
@@ -1875,9 +1876,17 @@ async function prepareMoodleRuntime({
   }
 }
 
-async function loadInstallSnapshot(
+export async function loadInstallSnapshot(
   php,
-  { dbFile, appBaseUrl, publish, moodleBranch, manifest, prefetched },
+  {
+    dbFile,
+    appBaseUrl,
+    publish,
+    moodleBranch,
+    manifest,
+    prefetched,
+    blueprint,
+  },
 ) {
   const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
   const meta = getBranchMetadata(branch);
@@ -1945,12 +1954,52 @@ async function loadInstallSnapshot(
   }
 
   await php.writeFile(dbFile, bytes);
+  // Store provenance before a marker/seed/language task can survive a crash.
+  const checkpoint = blueprint?.steps?.length
+    ? await createBlueprintCheckpoint({ blueprint, php, dbFile, resume: false })
+    : null;
 
   // Note: $CFG->wwwroot comes from config.php (already written by
   // prepareMoodleRuntime), not from mdl_config. No DB rewriting needed.
 
   publish(`Pre-installed snapshot loaded (${bytes.length} bytes).`, 0.885);
-  return true;
+  return { checkpoint };
+}
+
+export async function flushBlueprintPersistence(php, publish) {
+  if (typeof php.flushPersistence !== "function") return;
+  const start = performance.now();
+  let result;
+  try {
+    result = await php.flushPersistence();
+  } catch (error) {
+    result = { ok: false, reason: error?.message || "flush-failed" };
+  }
+  publish(
+    `Blueprint persistence flush: ${Math.round(performance.now() - start)}ms, ${result.hydratedBytes || 0} bytes, ${result.flushedOps || 0} ops.`,
+    0.95,
+  );
+  if (!result.ok || result.enabled === false) {
+    publish(
+      `Could not save the provisioned state to browser storage (${result.reason || "persistence unavailable"}); this session works, but a reload may not keep it.`,
+      0.95,
+    );
+  }
+  return result;
+}
+
+export async function resetRecoveredMoodleCaches(php) {
+  // Bootstrap warmed MUC against the previous DB; discard it before re-login (ADR-0035).
+  const result = await php.run(`<?php
+define('CLI_SCRIPT', true);
+require('/www/moodle/config.php');
+\\cache_helper::purge_all();
+echo 'recovery-caches-cleared';
+`);
+  if (result.text.trim() !== "recovery-caches-cleared")
+    throw new Error(
+      "Moodle caches could not be cleared after database recovery.",
+    );
 }
 
 /**
@@ -2742,6 +2791,7 @@ export async function bootstrapMoodle({
   const resumeBlueprint = Boolean(
     installMarkerMatches || installState?.installed,
   );
+  let checkpoint = null;
 
   if (!installMarkerMatches && !installState?.installed) {
     const tInstall = performance.now();
@@ -2754,9 +2804,11 @@ export async function bootstrapMoodle({
       moodleBranch: resolvedBranch,
       manifest: archive.manifest,
       prefetched: snapshotPrefetch,
+      blueprint,
     });
 
     if (snapshotLoaded) {
+      checkpoint = snapshotLoaded.checkpoint;
       await writeJsonFile(php, installStatePath, {
         ...manifestState,
         dbName,
@@ -2804,6 +2856,14 @@ export async function bootstrapMoodle({
           `Moodle CLI provisioning failed (incomplete stages: ${provisioningResult.missingStages.join(", ")}; ${detail}). ` +
             `Output: ${provisioningResult.output.slice(-1200)}`,
         );
+      }
+      if (blueprint?.steps?.length) {
+        checkpoint = await createBlueprintCheckpoint({
+          blueprint,
+          php,
+          dbFile,
+          resume: false,
+        });
       }
       await writeJsonFile(php, installStatePath, {
         ...manifestState,
@@ -2994,10 +3054,7 @@ export async function bootstrapMoodle({
   if (blueprint?.steps?.length > 0) {
     try {
       const { executeBlueprint } = await import("../blueprint/executor.js");
-      const { createBlueprintCheckpoint } = await import(
-        "../blueprint/checkpoint.js"
-      );
-      const checkpoint = await createBlueprintCheckpoint({
+      checkpoint ||= await createBlueprintCheckpoint({
         blueprint,
         php,
         dbFile,
@@ -3006,6 +3063,11 @@ export async function bootstrapMoodle({
       if (checkpoint.legacy) {
         publish(
           "Legacy persisted instance has no blueprint checkpoint; data-changing steps will not be replayed. Volatile resources with unknown provenance require an explicit rebuild.",
+          0.94,
+        );
+      } else if (checkpoint.changed) {
+        publish(
+          "The blueprint changed since this instance was provisioned; existing data was kept and only login/landing steps run. Use Reset Playground to apply the new blueprint.",
           0.94,
         );
       }
@@ -3019,6 +3081,7 @@ export async function bootstrapMoodle({
         runtimeId: resolvedRuntimeId,
         onPluginInstalled,
         checkpoint,
+        dbFile,
       });
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;
@@ -3054,13 +3117,9 @@ export async function bootstrapMoodle({
     }
   }
   // Flush DB checkpoints and saved artifacts before live recovery can snapshot.
-  if (blueprint?.steps?.length && typeof php.flushPersistence === "function") {
-    const flushed = await php.flushPersistence();
-    if (!flushed.ok)
-      throw new Error(
-        "Blueprint persistence checkpoint failed; runtime is not ready.",
-      );
-  }
+  // A failed flush keeps the previous journal intact (it is replaced as a whole),
+  // so a reload stays coherent; only this session's persistence is at risk.
+  if (blueprint?.steps?.length) await flushBlueprintPersistence(php, publish);
   phases.blueprints.finish();
 
   // Auto-login: create a Moodle session for the admin user so the playground

@@ -77,6 +77,40 @@ function decodeBase64Bytes(base64) {
   return Uint8Array.from(Buffer.from(base64, "base64"));
 }
 
+it("does not resurrect an explicitly uninstalled completed plugin or theme on reload", async () => {
+  for (const [step, pluginType] of [
+    ["installMoodlePlugin", "local"],
+    ["installTheme", "theme"],
+  ]) {
+    let reads = 0;
+    const result = await getStepHandler(step)(
+      {
+        url: "https://example.invalid/moving.zip",
+        pluginType,
+        pluginName: "removed",
+      },
+      {
+        restoreOnly: true,
+        previouslyCompleted: true,
+        dbFile: "/persist/db'fixture",
+        php: {
+          run: async (code) => {
+            assert.match(code, /mdl_config_plugins/);
+            assert.match(code, /db\\'fixture/);
+            return { text: "false" };
+          },
+          readFile: async () => {
+            reads++;
+            throw new Error("Must not restore removed code");
+          },
+        },
+      },
+    );
+    assert.equal(result.skipped, true);
+    assert.equal(reads, 0);
+  }
+});
+
 describe("installMoodlePlugin step handler", () => {
   const handler = getStepHandler("installMoodlePlugin");
 

@@ -84,19 +84,34 @@ export async function executeBlueprint(blueprint, context) {
       ? `/persist/blueprints/${checkpoint.fingerprint}/${i}-files`
       : null;
     if (checkpoint?.resuming) {
-      step = getReloadStep(
-        step,
-        checkpoint.completed.has(i),
-        filesystemArtifactPath,
-      );
+      const runtimeOnly = checkpoint.legacy || checkpoint.changed;
+      step =
+        runtimeOnly && !["login", "setLandingPage"].includes(stepName)
+          ? null
+          : getReloadStep(
+              step,
+              checkpoint.completed.has(i),
+              filesystemArtifactPath,
+            );
+      if (
+        !runtimeOnly &&
+        !checkpoint.completed.has(i) &&
+        !["login", "setLandingPage"].includes(stepName)
+      ) {
+        firstFailure ||= {
+          failedStep: `${i + 1}:${stepName}`,
+          error:
+            "Previously unfinished step was not replayed automatically; saved code may only be restored.",
+        };
+      }
+      if (["runPhpCode", "runPhpScript"].includes(stepName)) {
+        publish(
+          `Blueprint step ${i + 1}: arbitrary PHP was not replayed; volatile file effects are not restored. Declare files with filesystem steps.`,
+          progress,
+        );
+      }
       if (!step) {
         recordTiming(i + 1, stepName, label, startMs, "skipped");
-        if (!checkpoint.completed.has(i) && !checkpoint.legacy) {
-          firstFailure ||= {
-            failedStep: `${i + 1}:${stepName}`,
-            error: "Previously unfinished step was not replayed automatically.",
-          };
-        }
         continue;
       }
     }
@@ -119,6 +134,9 @@ export async function executeBlueprint(blueprint, context) {
       const result = await handler(step, {
         ...stepContext,
         restoreOnly: Boolean(checkpoint?.resuming),
+        previouslyCompleted: Boolean(
+          checkpoint?.resuming && checkpoint.completed.has(i),
+        ),
         filesystemArtifactPath,
         pluginArchivePath: checkpoint
           ? `/persist/blueprints/${checkpoint.fingerprint}/${i}.zip`

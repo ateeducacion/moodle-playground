@@ -252,6 +252,25 @@ if (function_exists('theme_reset_all_caches')) {
 if (function_exists('purge_all_caches')) {
     purge_all_caches();
 }
+${OPCACHE_CLEAR_BLOCK}
+// Clear the stored version hash so the next request re-detects pending upgrades.
+set_config('allversionshash', '');
+echo json_encode(['ok' => true]);
+`;
+}
+
+// Reload restore of code the DB already saw (ADR-0035): drop only what is not
+// keyed by jsrev/themerev — the seeded DI container and bytecode. A full purge
+// here would bump the revisions and miss every revisioned cache on each reload.
+export function phpDropUnversionedCaches() {
+  return `${CLI_HEADER}
+${GRACEFUL_HANDLER}
+@unlink($CFG->localcachedir . '/di/CompiledContainer.php');
+${OPCACHE_CLEAR_BLOCK}
+echo json_encode(['ok' => true]);
+`;
+}
+
 // OPcache holds compiled bytecode for files already included this session. The
 // runtime runs with opcache.validate_timestamps=0 and opcache.file_cache_only=1,
 // so an overwritten core/plugin file would keep serving its OLD bytecode. Reset
@@ -259,7 +278,7 @@ if (function_exists('purge_all_caches')) {
 // because file_cache_only keeps bytecode on disk where reset() may not reach it,
 // delete the on-disk file cache so the next request recompiles from the current
 // sources. All best-effort and non-fatal.
-if (function_exists('opcache_reset')) {
+const OPCACHE_CLEAR_BLOCK = `if (function_exists('opcache_reset')) {
     @opcache_reset();
 }
 $ocdir = @ini_get('opcache.file_cache');
@@ -272,12 +291,7 @@ if (is_string($ocdir) && $ocdir !== '' && is_dir($ocdir)) {
         if ($ocentry->isDir()) { @rmdir($ocentry->getPathname()); }
         else { @unlink($ocentry->getPathname()); }
     }
-}
-// Clear the stored version hash so the next request re-detects pending upgrades.
-set_config('allversionshash', '');
-echo json_encode(['ok' => true]);
-`;
-}
+}`;
 
 // Best-effort Moodle upgrade after a core-file overlay. Mirrors the essential
 // steps of admin/cli/upgrade.php: reset the component cache, load the (overlaid)

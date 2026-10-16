@@ -90,8 +90,10 @@ continue using Moodle's own revision changes and the existing per-module fallbac
   revision; rebuild assets to regain the combine. They do not break loading.
 - A purge or revision change may use the slower per-module path until a
   matching seed is available; correctness takes precedence over stale code.
-- The existing directory guard selects cachejs=false after a purge, making the
-  client use jsrev=-1 and development ESM. This phase does not optimize that tail.
+- When the seed is advertised, cachejs stays on after a purge (no `is_dir`
+  guard). The patched requirejs.php never builds a combine; without a matching
+  one it serves modules individually under the positive revision. The client
+  keeps a valid jsrev, so ESM stays public/immutable instead of dropping to -1.
 
 ### Neutral
 

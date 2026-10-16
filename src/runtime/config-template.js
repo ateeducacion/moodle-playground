@@ -116,10 +116,11 @@ ${
 // See docs/architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md.
 // - The runtime NEVER builds the combine (lib/requirejs.php is patched at build
 //   time; find_all_amd_modules is unreliable on the Emscripten VFS).
-// - 'Purge all caches' wipes localcache including requirejs/, so the is_dir()
-//   probe flips cachejs back to false (dev-mode per-module serving — today's
-//   behavior) for the rest of the session; the next boot re-extracts the seed.
-$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');`
+// - Keep cachejs on after a purge or revision change: with no matching combine,
+//   the patched requirejs.php serves modules one by one under the positive
+//   revision, so ESM stays public/immutable and per-module AMD stays cacheable.
+//   Falling back to jsrev=-1 would make every page uncacheable.
+$CFG->cachejs = true;`
     : `// cachejs stays false: without the build-time RequireJS seed, enabling it makes
 // the runtime build the combine itself, which fails silently in the WASM
 // environment ("No define call for core/first" RequireJS errors). See ADR 0013.

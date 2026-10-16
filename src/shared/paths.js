@@ -1,3 +1,10 @@
+// These derived directories are rebuilt, never hydrated from the journal.
+export function isEphemeralMoodlePath(path) {
+  return /^\/persist\/moodledata\/(cache|localcache|temp|muc)(\/|$)/u.test(
+    path || "",
+  );
+}
+
 export function getBasePath() {
   const segments = window.location.pathname.split("/").filter(Boolean);
 

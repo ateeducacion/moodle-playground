@@ -67,16 +67,45 @@ Store version1, SHA-256 of the blueprint and completed zero-based step indices i
 `mdl_config.playground_blueprint_checkpoint`. Save an empty checkpoint before
 first provisioning and update it after each successful handler. A failed save
 aborts subsequent mutations; ordinary handler failures retain ADR-0005 semantics.
-Reject incompatible/mismatched metadata without replaying provisioning.
+Treat incompatible/mismatched metadata as a changed blueprint (the source key can
+stay the same while its content changes): keep the data, replay nothing but
+login/landing, and warn that Reset applies the new blueprint.
+Reset re-resolves and saves the selected source before recreating the remote;
+different-source clean boots consume their source key only after SW control and
+remote URL assignment, not before a possible control-related shell reload.
+Moodle can clear the origin's sessionStorage on jsrev/login changes. The shell
+handles the resulting storage-clear event by restoring only its active scope,
+source identity, selected blueprint and navigation state, not Moodle's caches.
+Create the empty checkpoint immediately after writing the install snapshot (or
+after successful CLI installation), before the installed marker, seed and language
+tasks. An interruption in those later tasks is unfinished provisioning, not legacy.
 
 On persisted boot, skip durable mutations and arbitrary PHP/HTTP requests. Repeat
 login/landing-page selection; restore only completed explicit `/www` or `/tmp`
 filesystem operations, filtering mixed batches and normalized traversal paths.
-Never overwrite `/persist` data on reload. Preserve the exact downloaded plugin
+Also restore declared derived `moodledata/{cache,localcache,temp,muc}` paths using
+the journal's shared exclusion predicate. Never overwrite durable `/persist` data
+on reload; transformed copy/move operations retain `critical`.
+Preserve the exact downloaded plugin
 ZIP and applied overlay files below `/persist/blueprints/<fingerprint>/`; restore
-files/discovery without repeating install/upgrade scripts. Flush existing
-persistence before publishing runtime readiness so future live recovery snapshots
-cannot reference unflushed artifacts. No new IndexedDB database or core journal.
+files/discovery without repeating install/upgrade scripts or a full cache purge
+(only the unversioned DI container and bytecode are dropped; `purgeCaches:false`
+drops nothing). An overlay with skipped files or a failed upgrade still saves what
+it applied, so reload restores the code the DB saw. Flush existing persistence
+before publishing runtime readiness so future live recovery snapshots cannot
+reference unflushed artifacts. A failed flush warns instead of blocking: the
+journal is replaced atomically, so the previous state stays coherent. No new IndexedDB database or core journal.
+Flush rejection and unavailable persistence also warn without aborting the session;
+record elapsed time, hydrated bytes and operation count for profiling.
+After live crash-snapshot DB restoration, discard MUC warmed by bootstrap against
+the older DB before plugin refresh/re-login. Use `cache_helper::purge_all()`, not
+`purge_all_caches()`: derived values must match the recovered DB without bumping
+asset revisions. Failure to clear those caches must not publish a ready runtime.
+After a non-idempotent request crashes and runtime reset is allowed, return the
+503 without replaying it, then bootstrap the replacement runtime inside the
+existing serial queue. Otherwise the rotation progress locks the toolbar while
+recovery waits for a GET the locked toolbar cannot send. Failed recovery emits
+an error instead of leaving readiness pending forever.
 Apply the installation locale only on fresh installs; otherwise bootstrap would
 undo a checkpointed `setConfig(lang)` before the executor skips that completed step.
 
@@ -87,6 +116,16 @@ a move from `/persist` to `/www` must not delete persisted data again.
 Legacy instances without metadata do not replay mutations. They emit an explicit
 warning because the provenance of volatile files is unknown. Previously unfinished
 steps are not retried automatically and remain a visible blueprint failure.
+An unfinished plugin/overlay may restore an already saved artifact, without
+downloading or running install/upgrade again; it remains unfinished. Keep that
+code even after registration failure because the retained DB may contain partial
+schema changes. Do not delete all failed-step artifacts as quota cleanup.
+A previously completed plugin/theme absent from the retained installed-plugin
+registry is treated as uninstalled and is not restored from its old ZIP.
+Legacy sites still require explicit recovery: downloading a moving URL cannot
+establish compatibility with the code that produced their database.
+Skipped arbitrary PHP emits a warning that its volatile filesystem effects are
+not restored; no PHP payload is logged.
 
 ## Consequences
 

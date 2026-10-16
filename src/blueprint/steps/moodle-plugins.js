@@ -90,6 +90,8 @@ async function handleInstallMoodlePlugin(step, context) {
   }
 
   const targetDir = resolvePluginDir(pluginType, pluginName, context.webRoot);
+  if (await wasUninstalled(`${pluginType}_${pluginName}`, context))
+    return { skipped: true };
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade(pluginType, pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
@@ -109,9 +111,32 @@ async function handleInstallTheme(step, context) {
   }
 
   const targetDir = resolvePluginDir("theme", pluginName, context.webRoot);
+  if (await wasUninstalled(`theme_${pluginName}`, context))
+    return { skipped: true };
   await installPluginFiles(step.url, targetDir, context);
   await runMoodleUpgrade("theme", pluginName, targetDir, context);
   context.onPluginInstalled?.(targetDir);
+}
+
+async function wasUninstalled(
+  component,
+  { php, restoreOnly, previouslyCompleted, dbFile, publish },
+) {
+  if (!restoreOnly || !previouslyCompleted || !dbFile) return false;
+  // Moodle's installed-plugin registry is in the retained DB, not volatile MUC.
+  const result = await php.run(`<?php
+$pdo = new PDO('sqlite:${escapePhp(dbFile)}');
+$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$query = $pdo->prepare("SELECT 1 FROM mdl_config_plugins WHERE plugin = :plugin AND name = 'version'");
+$query->execute([':plugin' => '${escapePhp(component)}']);
+echo json_encode($query->fetchColumn() !== false);
+`);
+  const installed = JSON.parse(result.text);
+  if (installed !== true && installed !== false)
+    throw new Error("Invalid installed-plugin registry response");
+  if (!installed)
+    publish?.(`Not restoring uninstalled plugin ${component}.`, 0.935);
+  return !installed;
 }
 
 function resolvePluginDir(pluginType, pluginName, webRoot) {

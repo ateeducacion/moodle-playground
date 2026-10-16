@@ -14,6 +14,7 @@
 import { isVolatilePath } from "../checkpoint.js";
 import {
   escapePhp,
+  phpDropUnversionedCaches,
   phpPurgeMoodleCaches,
   phpRunCoreUpgrade,
 } from "../php/helpers.js";
@@ -80,8 +81,16 @@ async function handleApplyPrOverlay(
         await writePath(php, op.path, await php.readFile(op.dataPath));
       else throw new Error("Invalid saved overlay operation.");
     }
-    // Discard derived caches, but never repeat an upgrade on the persisted DB.
-    await handlePurgeMoodleCaches({}, { php });
+    // Never repeat the upgrade or a full purge: the first boot already bumped
+    // jsrev/themerev, so the revisioned seeds miss on their own.
+    if (step.purgeCaches !== false) {
+      await runPhpGraceful(
+        php,
+        phpDropUnversionedCaches(),
+        "applyPrOverlay restore cache reset",
+        publish,
+      );
+    }
     return;
   }
 
@@ -173,11 +182,9 @@ async function handleApplyPrOverlay(
       0.94,
     );
   }
+  // Save what was actually applied, even if some files were skipped: the DB is
+  // purged/upgraded against these files, so a reload must restore the same set.
   if (overlayArchivePath) {
-    if (skipped)
-      throw new Error(
-        "Incomplete overlay was not checkpointed; reload will not replay its upgrade.",
-      );
     await writePath(
       php,
       overlayArchivePath,
@@ -213,10 +220,6 @@ async function handleApplyPrOverlay(
         0.95,
       );
     }
-    if (!res.ok && overlayArchivePath)
-      throw new Error(
-        "Overlay upgrade did not complete; no successful checkpoint was recorded.",
-      );
   }
 }
 

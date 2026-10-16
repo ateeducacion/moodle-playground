@@ -146,12 +146,10 @@ describe("createMoodleConfigPhp", () => {
       requirejsSeeded: true,
     });
     assert.ok(!config.includes("$CFG->jsrev ="));
-    // cachejs flips back to false (self-heal) if localcache/requirejs is purged.
-    assert.ok(
-      config.includes(
-        "$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');",
-      ),
-    );
+    // Stays on after a purge: the patched requirejs.php falls back per module
+    // under the positive revision instead of dropping to jsrev=-1.
+    assert.ok(config.includes("$CFG->cachejs = true;"));
+    assert.ok(!config.includes("is_dir($CFG->localcachedir . '/requirejs')"));
     // Must NOT also emit the unconditional disable.
     assert.ok(!config.includes("$CFG->cachejs = false;"));
   });

@@ -44,11 +44,10 @@ serving old code under a new revision. Purging localcache can make navigation
 slower. Rebuild assets to get a matching seed; never relabel the old combine.
 See [ADR-0033](architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md).
 
-The existing `is_dir(requirejs)` guard still disables `cachejs` after a purge.
-Moodle then emits client jsrev=-1 and development ESM bypasses the immutable cache,
-even though the database revision is valid. Post-purge latency can remain high;
-this phase prevents stale code but does not claim to optimize that path. Keeping
-production mode without a combine needs a separate controlled compatibility test.
+`cachejs` stays enabled after a purge when the seed is advertised. Without a
+matching combine, the patched `requirejs.php` serves AMD modules individually
+under the valid revision, and ESM stays public/immutable. The first page after a
+purge is still slower (per-module AMD, theme CSS compiled in WASM).
 
 ### Persisted blueprint replay
 
@@ -62,6 +61,17 @@ persistence layer. Reload after a manual plugin upgrade is not validated: its
 persisted database version can be newer than the blueprint's saved ZIP. Back up
 the instance before testing that workflow. See
 [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
+
+An unfinished plugin can restore its saved code without rerunning registration;
+the incomplete step remains a warning/error. Completed plugins removed through
+Moodle are not resurrected if their installed-version record is absent. Legacy
+sites without an exact saved artifact still need explicit recovery, not an
+automatic download from a potentially changed URL.
+
+Live crash recovery clears MUC after restoring the database and before re-login,
+without changing JS/theme revisions, so bootstrap's old cached configuration is
+not served against the recovered DB. This does not guarantee recovery from every
+real memory-corruption or out-of-memory failure.
 
 ## 2. PHP CLI / proc_open is not available in the WASM runtime
 

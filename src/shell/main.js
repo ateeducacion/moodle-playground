@@ -3,6 +3,7 @@ import {
   encodeBlueprintParam,
   parseBlueprint,
   resolveBlueprint,
+  saveBlueprint,
   validateBlueprint,
 } from "../blueprint/index.js";
 import { BUILD_VERSION } from "../generated/build-version.js";
@@ -308,6 +309,12 @@ async function updateFrame() {
   // failed boot before pointing the frame at the runtime again.
   els.frame.removeAttribute("srcdoc");
   els.frame.src = url.toString();
+  // Only consume a source change after SW control and the clean URL are ready.
+  // ensureRuntimeServiceWorker may reload the shell before reaching this point.
+  window.sessionStorage.setItem(
+    `blueprint-source:${scopeId}`,
+    blueprintSourceKey(window.location.href),
+  );
   pendingCleanBoot = false;
 }
 
@@ -342,8 +349,8 @@ function navigateWithinRuntime(path) {
   void updateFrame();
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: called via postToRemote from remote.html
 function refreshWithinRuntime() {
+  if (uiLocked) return;
   if (remoteFrameBooted && postToRemote({ kind: "refresh-site" })) {
     appendLog(`Refreshing ${currentPath}`);
     return;
@@ -351,6 +358,23 @@ function refreshWithinRuntime() {
 
   void updateFrame();
 }
+
+window.addEventListener("storage", (event) => {
+  if (
+    event.storageArea !== window.sessionStorage ||
+    event.key !== null ||
+    !activeBlueprint
+  )
+    return;
+  // Moodle clears shared sessionStorage on jsrev/login changes; retain shell identity, not its caches (ADR-0035).
+  window.sessionStorage.setItem("moodle-playground:active", scopeId);
+  window.sessionStorage.setItem(
+    `blueprint-source:${scopeId}`,
+    blueprintSourceKey(window.location.href),
+  );
+  saveBlueprint(scopeId, activeBlueprint);
+  saveState();
+});
 
 function setPhpInfoContent(html = "") {
   latestPhpInfoHtml = typeof html === "string" ? html : "";
@@ -743,7 +767,6 @@ async function main() {
   if (previousBlueprintKey !== null && previousBlueprintKey !== blueprintKey) {
     pendingCleanBoot = true;
   }
-  window.sessionStorage.setItem(blueprintStoreKey, blueprintKey);
 
   // Resolve versions from URL params > blueprint > defaults
   const urlParams = parseQueryParams(window.location);
@@ -873,9 +896,7 @@ els.back.addEventListener("click", () => {
   navigateWithinRuntime(previousPath);
 });
 
-els.refresh.addEventListener("click", () => {
-  navigateWithinRuntime(currentPath);
-});
+els.refresh.addEventListener("click", refreshWithinRuntime);
 
 els.panelToggle.addEventListener("click", toggleSidePanel);
 els.panelClose.addEventListener("click", () => {
@@ -935,21 +956,15 @@ els.reset.addEventListener("click", async () => {
     return;
   }
   clearScopeSession(scopeId);
-  // Clear the imported blueprint unless it was supplied via URL parameter,
-  // so a plain reset boots without any previously loaded blueprint.
-  const url = new URL(window.location.href);
-  if (
-    !url.searchParams.has("blueprint") &&
-    !url.searchParams.has("blueprint-url")
-  ) {
-    clearBlueprint(scopeId);
-    activeBlueprint = await resolveBlueprint({
-      scopeId,
-      location: window.location,
-      defaultBlueprintUrl: config.defaultBlueprintUrl,
-    });
-    updateBlueprintTextarea();
-  }
+  // Re-resolve and save the requested source before the new remote reads it.
+  // A bare URL still resolves the default, never an old imported blueprint.
+  clearBlueprint(scopeId);
+  activeBlueprint = await resolveBlueprint({
+    scopeId,
+    location: window.location,
+    defaultBlueprintUrl: config.defaultBlueprintUrl,
+  });
+  updateBlueprintTextarea();
   currentPath = activeBlueprint?.landingPage || config.landingPath || "/";
   backStack.length = 0;
   updateBackButton();

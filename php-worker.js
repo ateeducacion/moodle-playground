@@ -1,6 +1,6 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
-import { bootstrapMoodle, startArchiveResolution } from "./src/runtime/bootstrap.js";
+import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
@@ -647,6 +647,7 @@ async function getRuntimeState() {
     // that contains all courses, users, and config changes.
     if (snapshot.hasPendingRestore) {
       const restoreResult = await snapshot.restore(php);
+      if (restoreResult?.restored) await resetRecoveredMoodleCaches(php);
       // If plugin files were restored, re-register them with Moodle
       // (reset component cache + run upgrade) before re-login.
       if (restoreResult?.pluginsRestored) {
@@ -853,6 +854,14 @@ function installBridgeListener() {
               ? `Runtime restarting after crash. Non-idempotent request was not retried.\n\n${detail}`
               : `Runtime restart limit reached.\n\n${detail}`;
           await respondError(data.id, message, status);
+          if (didReset && !isRetry && !canReplay) {
+            // Unlock the toolbar via ready without replaying the POST (ADR-0035).
+            try {
+              await getRuntimeState();
+            } catch (recoveryError) {
+              postShell({ kind: "error", detail: `Runtime recovery failed: ${formatErrorDetail(recoveryError)}` });
+            }
+          }
           return;
         }
 

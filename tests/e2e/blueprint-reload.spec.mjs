@@ -6,6 +6,7 @@ import {
   findMoodleFrame,
   readyTimeoutMs,
   specTimeoutMs,
+  waitForMoodleContent,
   waitForShellReady,
 } from "./helpers.mjs";
 
@@ -51,13 +52,10 @@ echo $OUTPUT->footer();`,
 
 async function ready(page) {
   await waitForShellReady(page);
-  await expect
-    .poll(() => Boolean(findMoodleFrame(page)), { timeout: readyTimeoutMs })
-    .toBe(true);
-  const frame = findMoodleFrame(page);
-  await expect(frame.locator("#reload-state")).toBeVisible({
-    timeout: readyTimeoutMs,
-  });
+  const frame = await waitForMoodleContent(
+    () => findMoodleFrame(page),
+    ["#reload-state"],
+  );
   await frame.waitForFunction(
     () => typeof M !== "undefined" && M.util.pending_js.length === 0,
     undefined,
@@ -160,7 +158,7 @@ for (const [version, root] of [
         `./?moodle=${version}&blueprint=${encodeURIComponent(encoded)}`,
         { waitUntil: "domcontentloaded" },
       );
-      let frame = await ready(page);
+      const frame = await ready(page);
       const initial = JSON.parse(
         await frame.locator("#reload-state").textContent(),
       );
@@ -218,10 +216,33 @@ for (const [version, root] of [
         )
         .toBe(true);
       await page.reload({ waitUntil: "domcontentloaded" });
-      frame = await ready(page);
-      const retained = JSON.parse(
-        await frame.locator("#reload-state").textContent(),
-      );
+      await waitForShellReady(page);
+      // Firefox can report about:blank after reload; inspect the rendered DOM directly.
+      const rendered = () =>
+        page.evaluate(() => {
+          const app = document
+            .querySelector("#site-frame")
+            ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+          const state = app?.document.querySelector("#reload-state");
+          return {
+            visible: Boolean(state?.getBoundingClientRect().height),
+            readyState: app?.document.readyState,
+            pendingJs: app?.M?.util?.pending_js,
+            text: state?.textContent,
+            protectedFile: app?.document.querySelector("#protected-file")?.href,
+            staticUrl: state
+              ? new URL("../../checkpoint-static.txt", app.document.baseURI)
+                  .href
+              : null,
+          };
+        });
+      await expect.poll(rendered, { timeout: readyTimeoutMs }).toMatchObject({
+        visible: true,
+        readyState: "complete",
+        pendingJs: [],
+      });
+      const restored = await rendered();
+      const retained = JSON.parse(restored.text);
       expect(retained).toEqual({
         ...initial,
         value: "user-edited",
@@ -230,19 +251,18 @@ for (const [version, root] of [
       });
       expect(downloads).toBe(1);
       expect(
-        await frame.evaluate(async () =>
-          (await fetch("../../checkpoint-static.txt")).text(),
+        await page.evaluate(
+          async (url) => (await fetch(url)).text(),
+          restored.staticUrl,
         ),
       ).toBe("restored-volatile-file");
-      const protectedFile = await frame
-        .locator("#protected-file")
-        .getAttribute("href");
-      const fetched = await frame.evaluate(async (url) => {
+      const protectedFile = restored.protectedFile;
+      const fetched = await page.evaluate(async (url) => {
         const response = await fetch(url);
         return { status: response.status, text: await response.text() };
       }, protectedFile);
       expect(fetched).toEqual({ status: 200, text: "protected-user-edited" });
-      const fileUrl = new URL(protectedFile, frame.url());
+      const fileUrl = new URL(protectedFile);
       const [, scope, runtime, path] = fileUrl.pathname.match(
         /\/playground\/([^/]+)\/([^/]+)(\/.*)$/,
       );

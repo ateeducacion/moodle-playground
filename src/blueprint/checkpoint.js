@@ -1,3 +1,4 @@
+import { isEphemeralMoodlePath } from "../shared/paths.js";
 import { escapePhp } from "./php/helpers.js";
 
 // See docs/architecture/adr/ADR-0035-blueprint-reload-checkpoints.md.
@@ -19,31 +20,26 @@ export async function createBlueprintCheckpoint({
 $pdo = new PDO('sqlite:${escapePhp(dbFile)}');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $value = $pdo->query("SELECT value FROM mdl_config WHERE name = 'playground_blueprint_checkpoint'")->fetchColumn();
-echo json_encode($value === false ? null : json_decode($value, true, 512, JSON_THROW_ON_ERROR));
+echo json_encode($value === false ? null : (json_decode($value, true) ?? ['invalid' => true]));
 `);
   const stored = JSON.parse(query.text);
-  if (
-    stored !== null &&
-    (stored.version !== 1 ||
-      stored.fingerprint !== fingerprint ||
-      !Array.isArray(stored.completed) ||
-      stored.completed.some(
-        (index) =>
-          !Number.isInteger(index) ||
-          index < 0 ||
-          index >= blueprint.steps.length,
-      ))
-  ) {
-    throw new Error(
-      "Persisted blueprint checkpoint does not match this blueprint; provisioning was not replayed.",
+  const matches =
+    stored?.version === 1 &&
+    stored.fingerprint === fingerprint &&
+    Array.isArray(stored.completed) &&
+    stored.completed.every(
+      (index) =>
+        Number.isInteger(index) && index >= 0 && index < blueprint.steps.length,
     );
-  }
-  const completed = new Set(stored?.completed || []);
+  const completed = new Set(matches ? stored.completed : []);
   const checkpoint = {
     fingerprint,
     completed,
     resuming: Boolean(resume),
-    legacy: Boolean(resume && !stored),
+    legacy: Boolean(resume && stored === null),
+    // The source key can stay the same while its content changes (edited
+    // blueprint-url, new default). Keep the data; replay only login/landing.
+    changed: Boolean(stored !== null && !matches),
     async save(index) {
       const next = new Set(completed);
       if (index !== undefined) next.add(index);
@@ -79,17 +75,20 @@ export function isVolatilePath(path) {
     if (segment === "..") segments.pop();
     else if (segment && segment !== ".") segments.push(segment);
   }
-  // Restore only explicit application/tmp files, never persisted data or devices.
-  return ["www", "tmp"].includes(segments[0]);
+  // Include derived data excluded by the journal, but never DB/filedir/devices.
+  return (
+    ["www", "tmp"].includes(segments[0]) ||
+    isEphemeralMoodlePath(`/${segments.join("/")}`)
+  );
 }
 
 export function getReloadStep(step, completed, artifactPath) {
   const data = (index) => ({ vfs: `${artifactPath}-${index}.bin` });
   if (["login", "setLandingPage"].includes(step.step)) return step;
-  if (!completed) return null;
   if (["installMoodlePlugin", "installTheme"].includes(step.step)) return step;
   if (step.step === "applyPrOverlay")
     return isVolatilePath(step.root || "/www/moodle") ? step : null;
+  if (!completed) return null;
   if (step.step === "writeFile")
     return isVolatilePath(step.path) ? { ...step, data: data(0) } : null;
   if (["mkdir", "rmdir", "deleteFile"].includes(step.step))
@@ -109,12 +108,17 @@ export function getReloadStep(step, completed, artifactPath) {
   if (step.step === "moveFile") {
     if (isVolatilePath(step.to)) return step;
     return isVolatilePath(step.from)
-      ? { step: "deleteFile", path: step.from }
+      ? { step: "deleteFile", path: step.from, critical: step.critical }
       : null;
   }
   if (step.step === "copyFile")
     return isVolatilePath(step.to)
-      ? { step: "writeFile", path: step.to, data: data(0) }
+      ? {
+          step: "writeFile",
+          path: step.to,
+          data: data(0),
+          critical: step.critical,
+        }
       : null;
   if (step.step === "unzip")
     return isVolatilePath(step.destination || step.path)

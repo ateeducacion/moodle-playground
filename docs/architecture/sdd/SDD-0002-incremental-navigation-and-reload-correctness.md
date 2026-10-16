@@ -114,7 +114,9 @@ not fall further with F2. Do not assign the sequential-series latency difference
 to F2 without controlling host variance. A no-store ESM fetch test independently
 confirms the SW hit. Five final persisted reloads have no blueprint failures;
 their median is 12066ms (MAD1852ms), with 193MiB linear memory versus 160.8125MiB
-on fresh boots. Post-purge development mode and SCSS remain expensive.
+on fresh boots. After a purge, cachejs now stays on (per-module AMD under the
+valid revision) instead of switching to development mode; this was not part of
+the measured series. Post-purge SCSS remains expensive.
 
 ## Testing strategy
 
@@ -187,6 +189,34 @@ reports its app frame as `about:blank` and cannot find `#reload-state` within120
 No page errors or failed requests were recorded. This narrows the investigation
 but does not prove an automation-only cause; keep the PR draft until Firefox
 verification is stable. Do not increase timeouts or bypass the content assertions.
+
+## Review follow-up (working tree, 2026-10-16)
+
+The follow-up preserves the maintainer's fixes for changed-blueprint login/landing,
+partial overlays, nonfatal persistence and production JS after purges. Additional
+coverage requires early snapshot checkpoints, unfinished plugin code restoration,
+uninstall preservation, declared journal-excluded cache files and critical flags.
+Do not delete failed plugin artifacts blindly or restore legacy code from moving
+URLs. ADR-0035 records those boundaries; ADR-0034 distinguishes actual ESM hits
+from warm HTML/AJAX requests that F2 cannot eliminate.
+
+Browser tests exposed two real shell gaps as well as stale-frame automation:
+Refresh was wired to same-URL navigation instead of the existing refresh-site
+handler; Reset did not re-resolve and save the requested blueprint source.
+Consume the blueprint-source key only after SW control and assigning the remote
+URL, so a control-related shell reload cannot swallow a pending clean boot.
+Tests require retained data/login on same-source edits, fresh data on Reset/source
+changes, retained shell identity when Moodle clears shared sessionStorage,
+the applied overlay subset with stable revisions, real uninstall and v2
+plugin AMD after clicking Refresh. Earlier failed/interrupted batches remain
+evidence; verification is not a claim that all browser lifecycle issues are fixed.
+
+Local Node checks cover flush failure/rejection/unavailable persistence, and log
+elapsed flush time, hydrated bytes and operation count. These byte counts are not
+physical IndexedDB I/O measurements.
+The synthetic post-commit crash probe also found stale MUC values after live DB
+restore: direct SQLite read1 but `get_config()` false. Clear MUC only after DB
+restore and before re-login; do not bump JS/theme revisions or replay the POST.
 
 ## References
 

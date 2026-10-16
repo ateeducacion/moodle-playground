@@ -6,6 +6,7 @@ import {
   findMoodleFrame,
   readyTimeoutMs,
   specTimeoutMs,
+  waitForMoodleContent,
   waitForPlaygroundReady,
 } from "./helpers.mjs";
 
@@ -13,8 +14,11 @@ test.describe.configure({ timeout: specTimeoutMs });
 
 async function ready(page) {
   await waitForPlaygroundReady(page);
-  const frame = findMoodleFrame(page);
-  await frame.waitForLoadState("load");
+  const frame = await waitForMoodleContent(
+    () => findMoodleFrame(page),
+    ["#page-content", "[role=main]"],
+  );
+  await frame.waitForLoadState("load", { timeout: readyTimeoutMs });
   await frame.waitForFunction(
     () => typeof M !== "undefined" && M.util.pending_js.length === 0,
     undefined,
@@ -217,11 +221,41 @@ for (const version of ["5.3", "5.0"]) {
     });
     expect(upgraded.status).toBe(200);
     expect(Number(upgraded.body.version)).toBe(2026101601);
-    await frame.goto(frame.url(), { waitUntil: "domcontentloaded" });
-    await ready(page);
-    await expect(frame.locator("#plugin-version")).toHaveText("v2");
-    expect(
-      Number(await frame.locator("#stored-revision").textContent()),
-    ).not.toBe(before);
+    // Exercise the same native iframe reload as a user, not Frame.goto's
+    // Firefox lifecycle bookkeeping (which can stall after a SW navigation).
+    await page.locator("#refresh-button").click();
+    // Firefox's frame protocol can retain the old execution context even when
+    // the screenshot shows v2. Read the actual same-origin DOM, not stale metadata.
+    const rendered = () =>
+      page.evaluate(() => {
+        const app = document
+          .querySelector("#site-frame")
+          ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+        const probe = app?.document.querySelector("#plugin-version");
+        if (!probe) return null;
+        const rect = probe.getBoundingClientRect();
+        return {
+          version: probe.textContent,
+          visible:
+            rect.width > 0 &&
+            rect.height > 0 &&
+            app.getComputedStyle(probe).visibility !== "hidden",
+          readyState: app.document.readyState,
+          pendingJs: app.M?.util?.pending_js,
+          jsrev: Number(app.M?.cfg?.jsrev),
+          storedRevision: Number(
+            app.document.querySelector("#stored-revision")?.textContent,
+          ),
+        };
+      });
+    await expect.poll(rendered, { timeout: readyTimeoutMs }).toMatchObject({
+      version: "v2",
+      visible: true,
+      readyState: "complete",
+      pendingJs: [],
+    });
+    const state = await rendered();
+    expect(state.storedRevision).not.toBe(before);
+    expect(state.jsrev).toBeGreaterThan(1);
   });
 }

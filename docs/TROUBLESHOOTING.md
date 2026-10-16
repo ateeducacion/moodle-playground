@@ -62,10 +62,18 @@ declared volatile files and saved plugins/overlays, recreates login, and skips
 persisted data mutations and arbitrary PHP/HTTP requests. A previously unfinished
 step remains an error rather than being retried automatically. Legacy instances
 without checkpoints log a warning; do not clear valuable data just to silence it.
+If the blueprint behind the same URL changed, reload keeps the data, runs only
+login/landing and warns; use Reset Playground to apply the new blueprint.
 Back up before an explicit Reset/rebuild. Runtime code edits outside declared steps
 are not persistent. A manual plugin upgrade can leave the retained DB newer than
 the blueprint's saved ZIP; that reload workflow is not validated. Back up before
 testing it. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
+
+`Blueprint persistence flush` reports elapsed milliseconds, hydrated bytes and
+operations. Quota failures or unavailable persistence warn that reload may lose
+this session's changes; they do not block using the live instance. Back up before
+reloading. Do not delete failed plugin artifacts: partially applied schema may
+still require that code. Skipped arbitrary PHP warns about unrestored volatile files.
 
 ## First place to look
 
