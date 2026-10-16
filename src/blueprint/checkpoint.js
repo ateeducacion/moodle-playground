@@ -32,9 +32,16 @@ echo json_encode($value === false ? null : (json_decode($value, true) ?? ['inval
         Number.isInteger(index) && index >= 0 && index < blueprint.steps.length,
     );
   const completed = new Set(matches ? stored.completed : []);
+  // SHA-256 of the archive each plugin/theme step extracted (ADR-0037).
+  // Malformed entries are dropped; the step then behaves as if none was stored.
+  const archives = new Map();
+  if (matches)
+    for (const [index, hash] of Object.entries(stored.archives ?? {}))
+      if (/^[a-f0-9]{64}$/.test(hash)) archives.set(Number(index), hash);
   const checkpoint = {
     fingerprint,
     completed,
+    archives,
     resuming: Boolean(resume),
     legacy: Boolean(resume && stored === null),
     // The source key can stay the same while its content changes (edited
@@ -47,6 +54,7 @@ echo json_encode($value === false ? null : (json_decode($value, true) ?? ['inval
         version: 1,
         fingerprint,
         completed: [...next],
+        ...(archives.size ? { archives: Object.fromEntries(archives) } : {}),
       });
       const result = await php.run(`<?php
 $pdo = new PDO('sqlite:${escapePhp(dbFile)}');

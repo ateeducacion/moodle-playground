@@ -49,7 +49,8 @@ folder and keep their original lightweight format (see
 | [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md) | Moodle-owned JavaScript revisions and versioned RequireJS seeds | Accepted | 2026-10-16 |
 | [ADR-0034](ADR-0034-public-immutable-esm-cache.md) | Cache public immutable ESM responses inside the existing scope | Accepted | 2026-10-16 |
 | [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Accepted (amended by ADR-0036) | 2026-10-16 |
-| [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md) | Download blueprint plugin and unzip archives again on reload | Accepted | 2026-10-16 |
+| [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md) | Download blueprint plugin and unzip archives again on reload | Accepted (extended by ADR-0037) | 2026-10-16 |
+| [ADR-0037](ADR-0037-blueprint-archive-hash-verification-on-reload.md) | Verify re-downloaded blueprint archives against a checkpointed hash on reload | Accepted | 2026-10-16 |
 | [ADR-0038](ADR-0038-opcache-file-cache-timestamp-validation.md) | Validate OPcache file-cache timestamps and blacklist the eval script path | Accepted | 2026-10-16 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
@@ -59,3 +60,7 @@ All three were accepted when PR #341 merged.
 
 The second-review follow-up also clears the separate on-disk hook registries
 on plugin/overlay restore; ADR-0035 records this distinction from MUC.
+
+ADR-0037 (issue #345) adds the SHA-256 of each installed archive to the ADR-0035
+checkpoint so an ADR-0036 re-download can be verified before it runs, and retries
+failed plugin downloads with a message that names the archive.

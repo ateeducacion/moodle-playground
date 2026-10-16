@@ -66,10 +66,16 @@ If the blueprint behind the same URL changed, reload keeps the data, runs only
 login/landing and warns; use Reset Playground to apply the new blueprint.
 Back up before an explicit Reset/rebuild. Runtime code edits outside declared steps
 are not persistent. Plugin/theme ZIPs are downloaded again on reload (no copy is
-kept, ADR-0036), so an offline reload cannot restore them and a moving URL can
-bring newer code than the retained DB. A manual plugin upgrade can leave the
-retained DB newer than the downloaded ZIP; that reload workflow is not validated. Back up before
-testing it. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
+kept, ADR-0036). A failed download is retried twice; if it still fails the log names
+the archive (`Failed to download plugin ZIP from …`) and the plugin stays missing
+from disk until a reload with network access. The checkpoint keeps the SHA-256 of
+each installed archive (ADR-0037): when the URL serves a newer version on reload,
+the code is installed, the log warns and Moodle asks for the upgrade on the next
+admin page; when it serves different content without a newer version — or an older
+one than the retained DB, e.g. after a manual plugin upgrade — extraction is skipped
+with a warning. Use Reset Playground to install the current archive. See
+[ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md) and
+[ADR-0037](architecture/adr/ADR-0037-blueprint-archive-hash-verification-on-reload.md).
 
 Restored plugins/overlays invalidate MUC, both `hookcallbacks.php` registries,
 DI and bytecode without changing JS/theme revisions. An overlay with

@@ -43,6 +43,72 @@ it("checkpoints before provisioning and only marks completed steps after a succe
   assert.deepEqual([...checkpoint.completed], [0]);
 });
 
+it("persists archive hashes with the completed steps and reads them back", async () => {
+  const hash = "a".repeat(64);
+  let stored = "null";
+  const php = {
+    run: async (code) => {
+      if (code.includes("SELECT value")) return { text: stored };
+      stored = code.match(/:value' => '(.+?)'\]/)[1];
+      return { text: "checkpoint-saved" };
+    },
+  };
+  const blueprint = { steps: [{}, {}] };
+  const first = await createBlueprintCheckpoint({
+    blueprint,
+    php,
+    dbFile: "/persist/db",
+    resume: false,
+  });
+  assert.equal(first.archives.size, 0);
+  assert.doesNotMatch(stored, /archives/);
+  first.archives.set(1, hash);
+  await first.save(1);
+  assert.deepEqual(JSON.parse(stored), {
+    version: 1,
+    fingerprint: first.fingerprint,
+    completed: [1],
+    archives: { 1: hash },
+  });
+
+  const reloaded = await createBlueprintCheckpoint({
+    blueprint,
+    php,
+    dbFile: "/persist/db",
+    resume: true,
+  });
+  assert.equal(reloaded.changed, false);
+  assert.deepEqual([...reloaded.archives], [[1, hash]]);
+
+  // Malformed hashes are dropped without invalidating the checkpoint.
+  stored = JSON.stringify({
+    version: 1,
+    fingerprint: first.fingerprint,
+    completed: [1],
+    archives: { 1: "not-a-hash" },
+  });
+  const malformed = await createBlueprintCheckpoint({
+    blueprint,
+    php,
+    dbFile: "/persist/db",
+    resume: true,
+  });
+  assert.equal(malformed.changed, false);
+  assert.equal(malformed.archives.size, 0);
+});
+
+it("passes each step its index so archive steps can address their checkpoint entry", async () => {
+  const seen = [];
+  registerStep("__index_probe", async (_step, context) =>
+    seen.push(context.stepIndex),
+  );
+  await executeBlueprint(
+    { steps: [{ step: "__index_probe" }, { step: "__index_probe" }] },
+    {},
+  );
+  assert.deepEqual(seen, [0, 1]);
+});
+
 it("treats mismatched, malformed and unsupported checkpoints as a changed blueprint", async () => {
   for (const stored of [
     {},

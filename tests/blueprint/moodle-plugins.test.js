@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, before, describe, it } from "node:test";
+import { strToU8, zipSync } from "fflate";
 import { getStepHandler } from "../../src/blueprint/steps/index.js";
 import { __testables } from "../../src/blueprint/steps/moodle-plugins.js";
 
@@ -7,13 +9,17 @@ import { __testables } from "../../src/blueprint/steps/moodle-plugins.js";
 // Tests that need a successful download install their own fetch mock.
 const NETWORK_DISABLED = /network disabled in tests/;
 const realFetch = globalThis.fetch;
+const realRetryDelays = [...__testables.retryDelaysMs];
 before(() => {
   globalThis.fetch = async () => {
     throw new Error("network disabled in tests");
   };
+  // Thrown download errors are retried with backoff; do not wait for it here.
+  __testables.retryDelaysMs.fill(0);
 });
 after(() => {
   globalThis.fetch = realFetch;
+  __testables.retryDelaysMs.splice(0, Infinity, ...realRetryDelays);
 });
 
 const SAMPLE_PLUGIN_ZIP_BASE64 =
@@ -99,6 +105,272 @@ it("surfaces a failed plugin upgrade so it cannot receive a successful checkpoin
 function decodeBase64Bytes(base64) {
   return Uint8Array.from(Buffer.from(base64, "base64"));
 }
+
+const sha256Hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const pluginZip = (version, extra = {}) =>
+  zipSync({
+    "plugin-main/version.php": strToU8(`<?php $plugin->version = ${version};`),
+    ...Object.fromEntries(
+      Object.entries(extra).map(([name, text]) => [
+        `plugin-main/${name}`,
+        strToU8(text),
+      ]),
+    ),
+  });
+const STEP = {
+  pluginType: "local",
+  pluginName: "drift",
+  url: "https://example.invalid/plugin.zip",
+};
+
+// A completed plugin step on a persisted reload (ADR-0037): the registry
+// query answers with the installed version, every other PHP run succeeds.
+function reloadContext({ archives, installedVersion = "2026101600" }) {
+  const files = [];
+  const scripts = [];
+  const messages = [];
+  let saves = 0;
+  const checkpoint = {
+    fingerprint: "f",
+    resuming: true,
+    completed: new Set([3]),
+    archives,
+    save: async () => {
+      saves++;
+    },
+  };
+  const context = {
+    restoreOnly: true,
+    previouslyCompleted: true,
+    dbFile: "/persist/db",
+    stepIndex: 3,
+    checkpoint,
+    publish: (message) => messages.push(message),
+    php: {
+      _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
+      run: async (code) => {
+        scripts.push(code);
+        return {
+          text: code.includes("mdl_config_plugins")
+            ? JSON.stringify(installedVersion)
+            : '{"ok":true}',
+        };
+      },
+    },
+  };
+  return { context, files, scripts, messages, saves: () => saves };
+}
+
+async function serving(zip, fn) {
+  const offline = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(zip);
+  };
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = offline;
+  }
+  return calls;
+}
+
+it("records the archive hash on first install so the checkpoint can verify reloads", async () => {
+  const zip = pluginZip(2026101600);
+  const archives = new Map();
+  await serving(zip, () =>
+    getStepHandler("installMoodlePlugin")(STEP, {
+      stepIndex: 2,
+      checkpoint: {
+        resuming: false,
+        archives,
+        save: async () => assert.fail("the executor saves completed steps"),
+      },
+      php: {
+        _php: { mkdirTree() {}, writeFile() {} },
+        run: async () => ({ text: '{"ok":true}' }),
+      },
+    }),
+  );
+  assert.deepEqual([...archives], [[2, sha256Hex(zip)]]);
+});
+
+it("reload with the same archive restores it without warnings", async () => {
+  const zip = pluginZip(2026101600);
+  const fixture = reloadContext({ archives: new Map([[3, sha256Hex(zip)]]) });
+  await serving(zip, () =>
+    getStepHandler("installMoodlePlugin")(STEP, fixture.context),
+  );
+  assert.ok(fixture.files.includes("/www/moodle/local/drift/version.php"));
+  assert.equal(fixture.saves(), 0);
+  assert.ok(!fixture.messages.some((m) => /changed|newer/.test(m)));
+  const restore = fixture.scripts.at(-1);
+  assert.doesNotMatch(
+    restore.slice(0, restore.indexOf("return;")),
+    /allversionshash/,
+  );
+});
+
+it("reload with a changed archive but no newer version warns and does not extract it", async () => {
+  const installed = pluginZip(2026101600);
+  const changed = pluginZip(2026101600, { "lib.php": "<?php // edited" });
+  const fixture = reloadContext({
+    archives: new Map([[3, sha256Hex(installed)]]),
+  });
+  const result = await (async () => {
+    let value;
+    await serving(changed, async () => {
+      value = await getStepHandler("installMoodlePlugin")(
+        STEP,
+        fixture.context,
+      );
+    });
+    return value;
+  })();
+  assert.deepEqual(result, { skipped: true });
+  assert.deepEqual(fixture.files, []);
+  assert.equal(fixture.scripts.length, 1, "only the registry query ran");
+  assert.equal(fixture.saves(), 0);
+  const warning = fixture.messages.find((m) => /changed since/.test(m));
+  assert.match(warning, /local_drift/);
+  assert.match(warning, /https:\/\/example\.invalid\/plugin\.zip/);
+  assert.match(warning, /archive version 2026101600, installed 2026101600/);
+});
+
+it("reload with an older archive than the persisted DB warns and does not extract it", async () => {
+  const older = pluginZip(2026101500);
+  const fixture = reloadContext({
+    archives: new Map([[3, sha256Hex(pluginZip(2026101600))]]),
+  });
+  await serving(older, () =>
+    getStepHandler("installMoodlePlugin")(STEP, fixture.context),
+  );
+  assert.deepEqual(fixture.files, []);
+  assert.ok(fixture.messages.some((m) => /changed since/.test(m)));
+});
+
+it("reload with a newer archive installs it, warns and makes Moodle ask for the upgrade", async () => {
+  const newer = pluginZip(2026101601);
+  const archives = new Map([[3, sha256Hex(pluginZip(2026101600))]]);
+  const fixture = reloadContext({ archives });
+  await serving(newer, () =>
+    getStepHandler("installMoodlePlugin")(STEP, fixture.context),
+  );
+  assert.ok(fixture.files.includes("/www/moodle/local/drift/version.php"));
+  const warning = fixture.messages.find((m) => /newer than/.test(m));
+  assert.match(warning, /2026101601 > 2026101600/);
+  assert.match(warning, /run the Moodle upgrade/);
+  const restore = fixture.scripts.at(-1);
+  const restoreCode = restore.slice(0, restore.indexOf("return;"));
+  assert.match(restoreCode, /set_config\('allversionshash', ''\)/);
+  assert.doesNotMatch(restoreCode, /upgrade_noncore/);
+  assert.equal(fixture.saves(), 1, "the accepted archive hash is persisted");
+  assert.equal(archives.get(3), sha256Hex(newer));
+});
+
+it("reload with a checkpoint that predates archive hashes adopts the current archive", async () => {
+  const zip = pluginZip(2026101600);
+  const archives = new Map();
+  const fixture = reloadContext({ archives });
+  await serving(zip, () =>
+    getStepHandler("installMoodlePlugin")(STEP, fixture.context),
+  );
+  assert.ok(fixture.files.includes("/www/moodle/local/drift/version.php"));
+  assert.equal(fixture.saves(), 1);
+  assert.equal(archives.get(3), sha256Hex(zip));
+  assert.ok(!fixture.messages.some((m) => /changed|newer/.test(m)));
+});
+
+it("retries a thrown download error and then installs", async () => {
+  const offline = globalThis.fetch;
+  let calls = 0;
+  const messages = [];
+  globalThis.fetch = async () => {
+    if (++calls < 3) throw new TypeError("Failed to fetch");
+    return new Response(pluginZip(2026101600));
+  };
+  try {
+    await getStepHandler("installMoodlePlugin")(STEP, {
+      publish: (message) => messages.push(message),
+      php: {
+        _php: { mkdirTree() {}, writeFile() {} },
+        run: async () => ({ text: '{"ok":true}' }),
+      },
+    });
+  } finally {
+    globalThis.fetch = offline;
+  }
+  assert.equal(calls, 3);
+  assert.equal(
+    messages.filter((m) => /retrying in/.test(m)).length,
+    2,
+    "each retry is announced",
+  );
+});
+
+it("gives up after bounded retries with a message naming the archive", async () => {
+  const offline = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new TypeError("Failed to fetch");
+  };
+  try {
+    await assert.rejects(
+      () => getStepHandler("installMoodlePlugin")(STEP, {}),
+      /Failed to download plugin ZIP from https:\/\/example\.invalid\/plugin\.zip: Failed to fetch\. Check the network and the addon proxy, then reload when online\./,
+    );
+  } finally {
+    globalThis.fetch = offline;
+  }
+  assert.equal(calls, 1 + __testables.retryDelaysMs.length);
+});
+
+it("does not retry a definitive HTTP error", async () => {
+  const offline = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response("missing", { status: 404 });
+  };
+  try {
+    await assert.rejects(
+      () => getStepHandler("installMoodlePlugin")(STEP, {}),
+      /plugin\.zip: HTTP 404\./,
+    );
+  } finally {
+    globalThis.fetch = offline;
+  }
+  assert.equal(calls, 1);
+});
+
+it("reads the plugin version from the archive's root version.php", () => {
+  const entries = (files) =>
+    Object.entries(files).map(([path, text]) => ({
+      path,
+      data: strToU8(text),
+    }));
+  const { readPluginVersion } = __testables;
+  assert.equal(
+    readPluginVersion(
+      entries({
+        "repo-main/version.php": "<?php\n$plugin->version   = 2024042200.01;",
+        "repo-main/sub/version.php": "<?php $plugin->version = 1;",
+      }),
+      "repo-main/",
+    ),
+    "2024042200.01",
+  );
+  assert.equal(
+    readPluginVersion(
+      entries({ "version.php": "<?php $plugin->version='2026101600';" }),
+      "",
+    ),
+    "2026101600",
+  );
+  assert.equal(readPluginVersion(entries({ "lib.php": "<?php" }), ""), null);
+});
 
 it("does not resurrect an explicitly uninstalled completed plugin or theme on reload", async () => {
   for (const [step, pluginType] of [

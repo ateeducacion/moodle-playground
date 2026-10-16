@@ -300,3 +300,103 @@ for (const [version, root] of [
     }
   });
 }
+
+// A moving URL can serve newer plugin code on reload (ADR-0037): the code is
+// installed, the log warns and Moodle is made to ask for the upgrade. The
+// database is never upgraded by the reload itself.
+test("reload with a newer plugin archive installs it, warns and requests the Moodle upgrade", async ({
+  page,
+}) => {
+  test.setTimeout(specTimeoutMs + readyTimeoutMs);
+  const build = (version) =>
+    zipSync(
+      Object.fromEntries(
+        Object.entries({
+          ...files,
+          "version.php": files["version.php"].replace(
+            "2026101600",
+            String(version),
+          ),
+          "classes/hook_listener.php": files[
+            "classes/hook_listener.php"
+          ].replace("'restored-hook'", `'hook-${version}'`),
+          "index.php": `<?php
+require(__DIR__.'/../../config.php'); require_login();
+$PAGE->set_context(context_system::instance()); $PAGE->set_url('/local/checkpointrestore/index.php');
+$PAGE->set_title('Archive drift fixture');
+echo $OUTPUT->header();
+echo '<pre id="reload-state">'.s(json_encode(['dbVersion'=>get_config('local_checkpointrestore','version'),
+    'hook'=>$GLOBALS['checkpoint_hook'] ?? null,'allversionshash'=>get_config('core','allversionshash')])).'</pre>';
+echo $OUTPUT->footer();`,
+        }).map(([name, text]) => [`checkpointrestore/${name}`, strToU8(text)]),
+      ),
+    );
+  let served = build(2026101600);
+  let downloads = 0;
+  const server = createServer((_request, response) => {
+    downloads++;
+    response.writeHead(200, {
+      "content-type": "application/zip",
+      "access-control-allow-origin": "*",
+    });
+    response.end(served);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const pluginUrl = `http://127.0.0.1:${server.address().port}/moving-plugin.zip`;
+  try {
+    const blueprint = {
+      landingPage: "/local/checkpointrestore/index.php",
+      steps: [
+        { step: "installMoodle", options: { locale: "en" } },
+        {
+          step: "installMoodlePlugin",
+          pluginType: "local",
+          pluginName: "checkpointrestore",
+          url: pluginUrl,
+        },
+        { step: "login" },
+      ],
+    };
+    const encoded = Buffer.from(JSON.stringify(blueprint)).toString("base64");
+    await page.goto(`./?moodle=5.3&blueprint=${encodeURIComponent(encoded)}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const frame = await ready(page);
+    const initial = JSON.parse(
+      await frame.locator("#reload-state").textContent(),
+    );
+    expect(initial).toMatchObject({
+      dbVersion: "2026101600",
+      hook: "hook-2026101600",
+    });
+    expect(initial.allversionshash).not.toBe("");
+
+    served = build(2026101601);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForShellReady(page);
+    // Firefox can report about:blank after reload; inspect the rendered DOM directly.
+    const state = () =>
+      page.evaluate(() => {
+        const app = document
+          .querySelector("#site-frame")
+          ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+        return (
+          app?.document.querySelector("#reload-state")?.textContent ?? null
+        );
+      });
+    await expect.poll(state, { timeout: readyTimeoutMs }).not.toBeNull();
+    expect(JSON.parse(await state())).toEqual({
+      dbVersion: "2026101600",
+      hook: "hook-2026101601",
+      allversionshash: "",
+    });
+    expect(downloads).toBe(2);
+    const log = await page.locator("#log-panel").textContent();
+    expect(log).toMatch(
+      /local_checkpointrestore: the archive at .*moving-plugin\.zip is newer than the installed version \(2026101601 > 2026101600\)/,
+    );
+    expect(log).not.toMatch(/Blueprint failed|Blueprint execution error/);
+  } finally {
+    server.close();
+  }
+});
