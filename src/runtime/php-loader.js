@@ -14,6 +14,8 @@ import {
   createChdirFixPhp,
   createPhpIniEntries,
   MOODLE_ROOT,
+  OPCACHE_BLACKLIST,
+  OPCACHE_BLACKLIST_PATH,
 } from "./config-template.js";
 import { wrapPhpInstance } from "./php-compat.js";
 
@@ -70,11 +72,25 @@ function buildPhpIniEntries({ tcpOverFetchEnabled = false } = {}) {
   };
 }
 
+// php.run({ code }) compiles every snippet from /internal/eval.php; the OPcache
+// file cache must never store it. PHP reads opcache.blacklist_filename at
+// startup, so the file has to exist before the first request.
+// See docs/architecture/adr/ADR-0038-opcache-file-cache-timestamp-validation.md.
+function writeOpcacheBlacklist(php, FS) {
+  try {
+    FS.mkdirTree("/internal/shared");
+  } catch {
+    /* exists */
+  }
+  php.writeFile(OPCACHE_BLACKLIST_PATH, OPCACHE_BLACKLIST);
+}
+
 export const __testing = {
   buildPhpIniEntries,
   getTcpOverFetchOptions,
   resolveCorsProxyUrl,
   TCP_OVER_FETCH_CA_PATH,
+  writeOpcacheBlacklist,
 };
 
 /**
@@ -186,6 +202,8 @@ export function createPhpRuntime(
           `${certificateToPEM(tcpOverFetch.CAroot.certificate)}\n`,
         );
       }
+
+      writeOpcacheBlacklist(php, FS);
 
       // Apply Moodle php.ini settings to /internal/shared/php.ini
       await setPhpIniEntries(
@@ -309,6 +327,8 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
           `${certificateToPEM(tcpOverFetch.CAroot.certificate)}\n`,
         );
       }
+
+      writeOpcacheBlacklist(php, FS2);
 
       // Apply Moodle php.ini settings so phpinfo reflects correct values
       await setPhpIniEntries(
