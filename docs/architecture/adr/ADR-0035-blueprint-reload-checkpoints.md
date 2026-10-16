@@ -1,13 +1,13 @@
 ---
 id: ADR-0035
 title: "Checkpoint provisioning and restore volatile blueprint artifacts"
-status: Proposed
+status: Accepted
 date: 2026-10-16
-deciders: []
+deciders: [erseco]
 reviewers: []
 related:
   issues: []
-  prs: []
+  prs: [341]
   sdds: [SDD-0002]
   adrs: [ADR-0005, ADR-0027]
 supersedes: []
@@ -21,8 +21,8 @@ ai_assistance:
 
 ## Status
 
-Proposed. The maintainer explicitly approved the replay policy during this task;
-this record still awaits repository review.
+Accepted (2026-10-16), after the PR #341 reviews and green CI in Chromium and
+Firefox. The maintainer approved the replay policy.
 
 ## Context
 

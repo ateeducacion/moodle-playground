@@ -26,7 +26,7 @@ folder and keep their original lightweight format (see
 | [ADR-0010](ADR-0010-build-time-localcache-seed.md) | Build-time localcache seed (theme CSS + DI container) | Accepted | 2026-06 |
 | [ADR-0011](ADR-0011-bundle-trim-and-runtime-tuning.md) | Bundle content trim and php.ini / runtime tuning (amends ADR-0004) | Accepted | 2026-06 |
 | [ADR-0012](ADR-0012-worker-static-fast-path.md) | Static-file fast path bypassing the serial PHP request queue | Accepted | 2026-06 |
-| [ADR-0013](ADR-0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Accepted | 2026-06 |
+| [ADR-0013](ADR-0013-build-time-requirejs-combined-bundle-seed.md) | Build-time RequireJS combined-bundle seed (re-enable cachejs) | Superseded by ADR-0033 | 2026-06 |
 | [ADR-0014](ADR-0014-production-require-of-tests-files-patch.md) | Patch production code that require_once()s files under tests/ | Accepted | 2026-06 |
 | [ADR-0015](ADR-0015-firefox-request-body-buffering.md) | Buffer the request body synchronously for Firefox (SW fetch handler) | Accepted | 2026-06 |
 | [ADR-0016](ADR-0016-runtime-pr-file-overlay.md) | Runtime PR file overlay for Moodle core PR previews (`applyPrOverlay`) | Accepted | 2026-06-28 |
@@ -46,9 +46,9 @@ folder and keep their original lightweight format (see
 | [ADR-0030](ADR-0030-pinned-moodle-prereleases.md) | Pinned Moodle prerelease channels | Proposed | 2026-09-16 |
 | [ADR-0031](ADR-0031-proxy-worker-response-sandboxing.md) | Proxy worker serves generic responses as sandboxed data | Proposed | 2026-09-25 |
 | [ADR-0032](ADR-0032-moodle-53-lts-default-branch.md) | Moodle 5.3 LTS is the default branch | Accepted | 2026-10-03 |
-| [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md) | Moodle-owned JavaScript revisions and versioned RequireJS seeds | Proposed | 2026-10-16 |
-| [ADR-0034](ADR-0034-public-immutable-esm-cache.md) | Cache public immutable ESM responses inside the existing scope | Proposed | 2026-10-16 |
-| [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Proposed | 2026-10-16 |
+| [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md) | Moodle-owned JavaScript revisions and versioned RequireJS seeds | Accepted | 2026-10-16 |
+| [ADR-0034](ADR-0034-public-immutable-esm-cache.md) | Cache public immutable ESM responses inside the existing scope | Accepted | 2026-10-16 |
+| [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Accepted | 2026-10-16 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers

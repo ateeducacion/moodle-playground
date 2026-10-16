@@ -1,13 +1,13 @@
 ---
 id: SDD-0002
 title: "Incremental navigation and reload correctness"
-status: In Review
+status: Implemented
 date: 2026-10-16
 authors: []
 reviewers: []
 related:
   issues: []
-  prs: []
+  prs: [341]
   adrs: [ADR-0033, ADR-0034, ADR-0035]
   sdds: []
 supersedes: []

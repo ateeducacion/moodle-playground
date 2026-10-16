@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted (2026-06).
+Accepted (2026-06). **Superseded by [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md)**
+(2026-10-16): config.php no longer forces `$CFG->jsrev = 1`; Moodle owns the revision and the
+seed is built and validated for the snapshot's own revision. The build-time combine,
+core/first-only serving and no-runtime-combine constraints below still apply.
 
 ## Context and Problem
 

@@ -1,13 +1,13 @@
 ---
 id: ADR-0033
 title: "Moodle-owned JavaScript revisions and versioned RequireJS seeds"
-status: Proposed
+status: Accepted
 date: 2026-10-16
-deciders: []
+deciders: [erseco]
 reviewers: []
 related:
   issues: []
-  prs: []
+  prs: [341]
   sdds: [SDD-0002]
   adrs: [ADR-0013]
 supersedes: [ADR-0013]
@@ -21,7 +21,7 @@ ai_assistance:
 
 ## Status
 
-Proposed replacement for ADR-0013's fixed revision; its build-time combine,
+Accepted (2026-10-16). Replaces ADR-0013's fixed revision; its build-time combine,
 core/first-only serving and no-runtime-combine constraints remain unchanged.
 
 ## Context

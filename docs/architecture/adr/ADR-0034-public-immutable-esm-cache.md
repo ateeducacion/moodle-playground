@@ -1,13 +1,13 @@
 ---
 id: ADR-0034
 title: "Cache public immutable ESM responses inside the existing scope"
-status: Proposed
+status: Accepted
 date: 2026-10-16
-deciders: []
+deciders: [erseco]
 reviewers: []
 related:
   issues: []
-  prs: []
+  prs: [341]
   sdds: [SDD-0002]
   adrs: [ADR-0001, ADR-0033]
 supersedes: []
@@ -21,7 +21,7 @@ ai_assistance:
 
 ## Status
 
-Proposed.
+Accepted (2026-10-16).
 
 ## Context
 
