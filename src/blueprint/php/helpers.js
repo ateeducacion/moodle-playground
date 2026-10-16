@@ -262,6 +262,9 @@ echo json_encode(['ok' => true]);
 // Reload restore of code the DB already saw (ADR-0035): drop only what is not
 // keyed by jsrev/themerev — the seeded DI container and bytecode. A full purge
 // here would bump the revisions and miss every revisioned cache on each reload.
+// ponytail: MUC warmed before the restore can keep overlay-changed strings/hooks
+// for this session; cache_helper::purge_all() here broke Firefox e2e frame
+// readiness (cause not established), so it waits for a browser-verified fix.
 export function phpDropUnversionedCaches() {
   return `${CLI_HEADER}
 ${GRACEFUL_HANDLER}

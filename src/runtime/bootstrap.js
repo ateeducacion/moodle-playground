@@ -1996,7 +1996,8 @@ require('/www/moodle/config.php');
 \\cache_helper::purge_all();
 echo 'recovery-caches-cleared';
 `);
-  if (result.text.trim() !== "recovery-caches-cleared")
+  // includes(): debugdisplay notices from config.php may precede the marker.
+  if (!result.text.includes("recovery-caches-cleared"))
     throw new Error(
       "Moodle caches could not be cleared after database recovery.",
     );
@@ -3050,7 +3051,9 @@ export async function bootstrapMoodle({
   // Blueprint step execution: run user-defined provisioning steps (categories,
   // courses, users, enrolments, etc.) between config normalization and auto-login.
   let blueprintLandingPage = null;
-  const hasLoginStep = blueprint?.steps?.some((s) => s.step === "login");
+  // True only once the executor ran: if it never starts (e.g. the checkpoint
+  // query throws), its login step never ran either, so auto-login must.
+  let hasLoginStep = false;
   if (blueprint?.steps?.length > 0) {
     try {
       const { executeBlueprint } = await import("../blueprint/executor.js");
@@ -3083,6 +3086,7 @@ export async function bootstrapMoodle({
         checkpoint,
         dbFile,
       });
+      hasLoginStep = blueprint.steps.some((s) => s.step === "login");
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;
       }

@@ -78,8 +78,10 @@ can filter this header. Public controller semantics, canonical path, content typ
 and explicit immutable/public cache directives are the admission boundary.
 Ambiguous encodings, generic router endpoints and protected PHP PATH_INFO take
 the normal PHP route. Static extensions apply only to non-PHP paths; retain the
-existing explicit legacy PHP asset allowlist.
-Exclude development AMD revisions (`requirejs.php/-1/...`) and honor private,
+existing explicit legacy PHP asset allowlist, plus TinyMCE's revisioned
+`lib/editor/tiny/{loader,lang}.php/<rev>/` (cached by Moodle only for a valid
+revision), which the PATH_INFO exclusion would otherwise send through PHP.
+Exclude development revisions (`requirejs.php/-1/...`, Tiny `-1`) and honor private,
 no-store and no-cache directives on legacy assets too. The plugin-upgrade browser
 test demonstrated stale v1 code after a successful v2 upgrade without this guard.
 

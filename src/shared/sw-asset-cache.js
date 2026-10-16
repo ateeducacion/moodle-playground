@@ -1,7 +1,10 @@
 const STATIC_EXTENSION =
   /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|map)$/iu;
 const PHP_ASSET =
-  /^\/(theme\/(?:styles|image|font|fonts)\.php|lib\/(?:javascript|requirejs|yui)\.php)\//u;
+  /^\/(theme\/(?:styles|image|font|fonts)\.php|lib\/(?:javascript|requirejs|yui|editor\/tiny\/(?:loader|lang))\.php)\//u;
+// Revisioned like requirejs.php: only a positive revision is cached by Moodle.
+const REVISIONED_JS =
+  /^\/lib\/(?:requirejs|javascript|editor\/tiny\/(?:loader|lang))\.php\//u;
 
 // See docs/architecture/adr/ADR-0034-public-immutable-esm-cache.md.
 export function isCacheableScopedAssetPath(requestPath) {
@@ -10,8 +13,8 @@ export function isCacheableScopedAssetPath(requestPath) {
   if (path.includes("%") || path.includes("\\")) return false;
   // Purges can select development AMD; caching its -1 URL serves stale plugins.
   if (
-    /^\/lib\/(?:requirejs|javascript)\.php\//u.test(path) &&
-    !/^\/lib\/(?:requirejs|javascript)\.php\/[1-9]\d*\//u.test(path)
+    REVISIONED_JS.test(path) &&
+    !/^\/lib\/[a-z/]+\.php\/[1-9]\d*\//u.test(path)
   )
     return false;
   if (path.startsWith("/r.php/")) {

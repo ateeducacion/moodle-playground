@@ -647,7 +647,15 @@ async function getRuntimeState() {
     // that contains all courses, users, and config changes.
     if (snapshot.hasPendingRestore) {
       const restoreResult = await snapshot.restore(php);
-      if (restoreResult?.restored) await resetRecoveredMoodleCaches(php);
+      // restore() consumed the snapshot: a throw here would wedge this runtime
+      // and discard the recovered DB, so report stale caches instead.
+      if (restoreResult?.restored) {
+        try {
+          await resetRecoveredMoodleCaches(php);
+        } catch (error) {
+          postShell({ kind: "error", detail: `[snapshot] ${formatErrorDetail(error)} Purge caches before trusting cached settings.` });
+        }
+      }
       // If plugin files were restored, re-register them with Moodle
       // (reset component cache + run upgrade) before re-login.
       if (restoreResult?.pluginsRestored) {

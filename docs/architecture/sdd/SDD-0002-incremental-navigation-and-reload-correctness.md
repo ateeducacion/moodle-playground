@@ -202,7 +202,11 @@ from warm HTML/AJAX requests that F2 cannot eliminate.
 
 Browser tests exposed two real shell gaps as well as stale-frame automation:
 Refresh was wired to same-URL navigation instead of the existing refresh-site
-handler; Reset did not re-resolve and save the requested blueprint source.
+handler; Reset did not save the requested blueprint source again. refresh-site
+performs a forced GET of the current path, never `location.reload()`, which would
+resubmit a page rendered from a POST. Reset re-saves the source resolved on page
+load for `?blueprint`/`?blueprint-url` instead of re-fetching it, because the
+resolver silently falls back to the default blueprint on a network error.
 Consume the blueprint-source key only after SW control and assigning the remote
 URL, so a control-related shell reload cannot swallow a pending clean boot.
 Tests require retained data/login on same-source edits, fresh data on Reset/source

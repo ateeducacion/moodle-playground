@@ -94,11 +94,13 @@ async function handleApplyPrOverlay(
     return;
   }
 
+  // A durable root is journaled already and never restored: do not copy it.
+  const archivePath = isVolatilePath(root) ? overlayArchivePath : null;
   const saved = [];
   const preserveWrite = async (path, bytes) => {
     await writePath(php, path, bytes);
-    if (overlayArchivePath) {
-      const dataPath = `${overlayArchivePath}-${saved.length}.bin`;
+    if (archivePath) {
+      const dataPath = `${archivePath}-${saved.length}.bin`;
       await writePath(php, dataPath, bytes);
       saved.push({ operation: "write", path, dataPath });
     }
@@ -184,10 +186,10 @@ async function handleApplyPrOverlay(
   }
   // Save what was actually applied, even if some files were skipped: the DB is
   // purged/upgraded against these files, so a reload must restore the same set.
-  if (overlayArchivePath) {
+  if (archivePath) {
     await writePath(
       php,
-      overlayArchivePath,
+      archivePath,
       new TextEncoder().encode(JSON.stringify(saved)),
     );
   }

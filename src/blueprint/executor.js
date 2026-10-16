@@ -1,4 +1,4 @@
-import { getReloadStep } from "./checkpoint.js";
+import { getReloadStep, RUNTIME_STEPS } from "./checkpoint.js";
 import { substituteConstants } from "./constants.js";
 import { ResourceRegistry } from "./resources.js";
 import { getStepHandler } from "./steps/index.js";
@@ -80,24 +80,23 @@ export async function executeBlueprint(blueprint, context) {
     publish(`Blueprint step ${i + 1}/${steps.length}: ${stepName}`, progress);
 
     const checkpoint = context.checkpoint;
-    const filesystemArtifactPath = checkpoint
-      ? `/persist/blueprints/${checkpoint.fingerprint}/${i}-files`
+    // Per runtime: each runtime has its own DB, but the scope shares /persist.
+    const artifactRoot = checkpoint
+      ? `/persist/blueprints/${context.runtimeId || "runtime"}/${checkpoint.fingerprint}/${i}`
       : null;
+    const filesystemArtifactPath = artifactRoot && `${artifactRoot}-files`;
     if (checkpoint?.resuming) {
       const runtimeOnly = checkpoint.legacy || checkpoint.changed;
+      const isRuntimeStep = RUNTIME_STEPS.has(stepName);
       step =
-        runtimeOnly && !["login", "setLandingPage"].includes(stepName)
+        runtimeOnly && !isRuntimeStep
           ? null
           : getReloadStep(
               step,
               checkpoint.completed.has(i),
               filesystemArtifactPath,
             );
-      if (
-        !runtimeOnly &&
-        !checkpoint.completed.has(i) &&
-        !["login", "setLandingPage"].includes(stepName)
-      ) {
+      if (!runtimeOnly && !isRuntimeStep && !checkpoint.completed.has(i)) {
         firstFailure ||= {
           failedStep: `${i + 1}:${stepName}`,
           error:
@@ -138,12 +137,8 @@ export async function executeBlueprint(blueprint, context) {
           checkpoint?.resuming && checkpoint.completed.has(i),
         ),
         filesystemArtifactPath,
-        pluginArchivePath: checkpoint
-          ? `/persist/blueprints/${checkpoint.fingerprint}/${i}.zip`
-          : null,
-        overlayArchivePath: checkpoint
-          ? `/persist/blueprints/${checkpoint.fingerprint}/${i}-overlay.json`
-          : null,
+        pluginArchivePath: artifactRoot && `${artifactRoot}.zip`,
+        overlayArchivePath: artifactRoot && `${artifactRoot}-overlay.json`,
       });
       // setLandingPage step can override the landing page
       if (stepName === "setLandingPage" && step.path) {
@@ -169,8 +164,9 @@ export async function executeBlueprint(blueprint, context) {
       }
       // Non-fatal by default (ADR-0005): keep provisioning the remaining steps
       // so one transient failure (e.g. a resource download) does not discard
-      // the whole playground. `critical: true` opts a step into aborting.
-      if (step.critical) {
+      // the whole playground. `critical: true` opts a step into aborting —
+      // except on reload, where nothing mutates and login/landing must still run.
+      if (step.critical && !checkpoint?.resuming) {
         return { success: false, landingPage, ...firstFailure, timings };
       }
       continue;

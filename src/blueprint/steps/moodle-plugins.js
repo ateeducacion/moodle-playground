@@ -350,6 +350,9 @@ ${
 // Restore discovery only: the plugin's install/upgrade already changed this DB.
 \\core_plugin_manager::reset_caches();
 @unlink($CFG->localcachedir . '/di/CompiledContainer.php');
+// Boot requests filled MUC (hooks, callbacks, strings) before this code existed;
+// purge_all() empties it without bumping jsrev/themerev.
+\\cache_helper::purge_all();
 echo json_encode(['ok' => true]);
 return;
 `

@@ -32,8 +32,17 @@ describe("scoped asset cache policy", () => {
       "/lib/test.js?rev=1",
       "/theme/styles.php/boost/123/all",
       "/lib/requirejs.php/123/core/first.js",
+      "/lib/editor/tiny/loader.php/123/tinymce/tinymce.js",
+      "/lib/editor/tiny/lang.php/123/es",
     ]) {
       assert.equal(isCacheableScopedAssetPath(path), true);
+    }
+    // Uncached TinyMCE revisions stay on the PHP path, like development AMD.
+    for (const path of [
+      "/lib/editor/tiny/loader.php/-1/tinymce/tinymce.js",
+      "/lib/editor/tiny/lang.php/-1/es",
+    ]) {
+      assert.equal(isCacheableScopedAssetPath(path), false);
     }
   });
 

@@ -75,16 +75,19 @@ export function isVolatilePath(path) {
     if (segment === "..") segments.pop();
     else if (segment && segment !== ".") segments.push(segment);
   }
-  // Include derived data excluded by the journal, but never DB/filedir/devices.
-  return (
-    ["www", "tmp"].includes(segments[0]) ||
-    isEphemeralMoodlePath(`/${segments.join("/")}`)
-  );
+  // Volatile = not journaled: everything outside /persist plus the derived dirs
+  // the journal excludes. Never DB/filedir, devices or the bare root.
+  const [root] = segments;
+  if (!root || ["dev", "proc"].includes(root)) return false;
+  return root !== "persist" || isEphemeralMoodlePath(`/${segments.join("/")}`);
 }
+
+// Session-only steps that every reload repeats.
+export const RUNTIME_STEPS = new Set(["login", "setLandingPage"]);
 
 export function getReloadStep(step, completed, artifactPath) {
   const data = (index) => ({ vfs: `${artifactPath}-${index}.bin` });
-  if (["login", "setLandingPage"].includes(step.step)) return step;
+  if (RUNTIME_STEPS.has(step.step)) return step;
   if (["installMoodlePlugin", "installTheme"].includes(step.step)) return step;
   if (step.step === "applyPrOverlay")
     return isVolatilePath(step.root || "/www/moodle") ? step : null;

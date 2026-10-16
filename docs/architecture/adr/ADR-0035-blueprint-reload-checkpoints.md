@@ -87,10 +87,19 @@ Also restore declared derived `moodledata/{cache,localcache,temp,muc}` paths usi
 the journal's shared exclusion predicate. Never overwrite durable `/persist` data
 on reload; transformed copy/move operations retain `critical`.
 Preserve the exact downloaded plugin
-ZIP and applied overlay files below `/persist/blueprints/<fingerprint>/`; restore
+ZIP and applied overlay files (volatile roots only) below
+`/persist/blueprints/<runtimeId>/<fingerprint>/`
+(each runtime has its own DB, but the scope shares `/persist`); restore
 files/discovery without repeating install/upgrade scripts or a full cache purge
-(only the unversioned DI container and bytecode are dropped; `purgeCaches:false`
-drops nothing). An overlay with skipped files or a failed upgrade still saves what
+(the unversioned DI container and bytecode are dropped without bumping revisions;
+`purgeCaches:false` drops nothing). A restored plugin also empties MUC with
+`cache_helper::purge_all()`, because boot requests warmed it before the plugin's
+hooks/callbacks/observers existed. Overlays do not yet: that purge broke Firefox
+e2e frame readiness for reasons not established, so overlay-changed strings or
+hooks can stay stale for the first session after a reload. Volatile
+means "not journaled": any path outside `/persist` (except devices) plus the
+derived directories above. On reload a failing `critical` step does not stop
+login/landing, and an executor that never started leaves auto-login enabled. An overlay with skipped files or a failed upgrade still saves what
 it applied, so reload restores the code the DB saw. Flush existing persistence
 before publishing runtime readiness so future live recovery snapshots cannot
 reference unflushed artifacts. A failed flush warns instead of blocking: the
@@ -100,7 +109,10 @@ record elapsed time, hydrated bytes and operation count for profiling.
 After live crash-snapshot DB restoration, discard MUC warmed by bootstrap against
 the older DB before plugin refresh/re-login. Use `cache_helper::purge_all()`, not
 `purge_all_caches()`: derived values must match the recovered DB without bumping
-asset revisions. Failure to clear those caches must not publish a ready runtime.
+asset revisions. A failure to clear them is reported as an error but does not
+abort: restore() has already consumed the crash snapshot, so throwing would leave
+a rejected runtime promise (every request failing, toolbar locked) and discard
+the recovered DB.
 After a non-idempotent request crashes and runtime reset is allowed, return the
 503 without replaying it, then bootstrap the replacement runtime inside the
 existing serial queue. Otherwise the rotation progress locks the toolbar while

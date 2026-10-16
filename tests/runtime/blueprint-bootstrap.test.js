@@ -48,6 +48,10 @@ it("clears recovered DB caches before another PHP request without changing asset
     resetRecoveredMoodleCaches({ run: async () => ({ text: "failed" }) }),
     /could not be cleared/,
   );
+  // A debugdisplay notice before the marker is not a failed purge.
+  await resetRecoveredMoodleCaches({
+    run: async () => ({ text: "Notice: x\nrecovery-caches-cleared" }),
+  });
 });
 
 it("keeps the session usable and warns on flush failure, rejection or unavailable persistence", async () => {

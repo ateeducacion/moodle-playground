@@ -956,15 +956,22 @@ els.reset.addEventListener("click", async () => {
     return;
   }
   clearScopeSession(scopeId);
-  // Re-resolve and save the requested source before the new remote reads it.
-  // A bare URL still resolves the default, never an old imported blueprint.
-  clearBlueprint(scopeId);
-  activeBlueprint = await resolveBlueprint({
-    scopeId,
-    location: window.location,
-    defaultBlueprintUrl: config.defaultBlueprintUrl,
-  });
-  updateBlueprintTextarea();
+  // Save the requested source again before the new remote reads it.
+  const params = new URL(window.location.href).searchParams;
+  if (params.has("blueprint") || params.has("blueprint-url")) {
+    // Reuse what this page load resolved: re-fetching could silently fall back
+    // to the default blueprint on a transient network error.
+    saveBlueprint(scopeId, activeBlueprint);
+  } else {
+    // A bare URL resolves the default, never an old imported blueprint.
+    clearBlueprint(scopeId);
+    activeBlueprint = await resolveBlueprint({
+      scopeId,
+      location: window.location,
+      defaultBlueprintUrl: config.defaultBlueprintUrl,
+    });
+    updateBlueprintTextarea();
+  }
   currentPath = activeBlueprint?.landingPage || config.landingPath || "/";
   backStack.length = 0;
   updateBackButton();

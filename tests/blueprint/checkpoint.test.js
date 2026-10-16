@@ -131,8 +131,14 @@ it("restores declared journal-excluded cache files but never real persisted data
     "/persist/moodledata/filedir/a",
     "/persist/moodledata/cache-backup/a",
     "/persist/moodledata/localcache/../filedir/a",
+    "/dev/null",
+    "/www/../../",
   ]) {
     assert.equal(isVolatilePath(path), false);
+  }
+  // Only /persist is journaled, so other MEMFS roots must be restored too.
+  for (const path of ["/home/web_user/a", "/internal/shared/x", "/opt/a"]) {
+    assert.equal(isVolatilePath(path), true);
   }
 });
 
@@ -160,6 +166,7 @@ it("restores an unfinished plugin's saved ZIP without upgrading or declaring it 
       ],
     },
     {
+      runtimeId: "php83-moodle53",
       checkpoint: {
         fingerprint: "partial",
         resuming: true,
@@ -167,7 +174,11 @@ it("restores an unfinished plugin's saved ZIP without upgrading or declaring it 
       },
       php: {
         readFile: async (path) => {
-          assert.equal(path, "/persist/blueprints/partial/0.zip");
+          // Runtime-scoped: another runtime in the scope must not overwrite it.
+          assert.equal(
+            path,
+            "/persist/blueprints/php83-moodle53/partial/0.zip",
+          );
           return zipSync({ "partial/version.php": strToU8("<?php") });
         },
         _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
@@ -182,8 +193,41 @@ it("restores an unfinished plugin's saved ZIP without upgrading or declaring it 
   assert.ok(
     scripts[0].indexOf("return;") < scripts[0].indexOf("upgrade_noncore(true)"),
   );
+  // MUC warmed by boot requests without this code must be emptied on restore.
+  assert.ok(
+    scripts[0].indexOf("cache_helper::purge_all()") <
+      scripts[0].indexOf("return;"),
+  );
   assert.equal(result.success, false);
   assert.match(result.error, /unfinished/);
+});
+
+it("keeps going to login on reload when a critical restore fails", async () => {
+  const ran = [];
+  const result = await executeBlueprint(
+    {
+      steps: [
+        { step: "installMoodlePlugin", critical: true, url: "x" },
+        { step: "login" },
+      ],
+    },
+    {
+      php: {
+        writeFile: async () => {},
+        run: async () => ({ text: "" }),
+        request: async () => {
+          ran.push("login");
+          return new Response('{"ok":true}');
+        },
+        readFile: async () => {
+          throw new Error("artifact missing");
+        },
+      },
+      checkpoint: { resuming: true, completed: new Set([0]), fingerprint: "f" },
+    },
+  );
+  assert.equal(result.success, false);
+  assert.deepEqual(ran, ["login"]);
 });
 
 it("warns when arbitrary PHP is skipped because volatile effects cannot be restored", async () => {
