@@ -3,6 +3,7 @@ import { BUILD_VERSION as IMPORTED_BUILD_VERSION } from "./src/generated/build-v
 import { buildScopedStaticCacheName, buildStaticCacheName, isStaleAppCacheName } from "./src/shared/cache-names.js";
 import * as rw from "./src/shared/sw-url-rewrite.js";
 import { buildScopedCacheKey, escapeHtml } from "./src/shared/sw-url-rewrite.js";
+import { isCacheableScopedAssetPath, isCacheableScopedAssetResponse } from "./src/shared/sw-asset-cache.js";
 
 const bridges = new Map();
 const pending = new Map();
@@ -19,25 +20,9 @@ const STATIC_CACHE_NAME = buildStaticCacheName(BUILD_VERSION);
 // that would otherwise queue through the serial PHP worker bridge.
 // See docs/architecture/adr/ADR-0001-sw-level-scoped-static-asset-caching.md
 const SCOPED_STATIC_CACHE = buildScopedStaticCacheName(BUILD_VERSION);
-const SCOPED_STATIC_RE = /\.(css|js|mjs|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|map)$/iu;
-// PHP scripts that serve cacheable assets with revision numbers in the URL.
-// The revision acts as a natural cache key — when content changes, the URL changes.
-// Excludes pluginfile.php and draftfile.php (user content, not cacheable).
-// Additional patterns (theme/fonts.php, lib/yui.php etc.) added to increase
-// the number of Moodle-generated assets that bypass the serial PHP worker
-// and use the fast SW-scoped static cache (perf improvement #6).
-const CACHEABLE_PHP_ASSET_RE = /\/(theme\/styles\.php|lib\/javascript\.php|lib\/requirejs\.php|theme\/image\.php|theme\/font\.php|theme\/fonts\.php|lib\/yui\.php)\//u;
 const INTERNAL_PROXY_PATH = "/__playground_proxy__";
 let playgroundConfigPromise;
 let addonProxyUrlOverride = null;
-
-function isScopedStaticAsset(requestPath) {
-  return SCOPED_STATIC_RE.test(requestPath.split("?")[0]);
-}
-
-function isCacheablePhpAsset(requestPath) {
-  return CACHEABLE_PHP_ASSET_RE.test(requestPath);
-}
 
 function isInternalProxyPath(pathname) {
   return pathname.split("?")[0] === INTERNAL_PROXY_PATH;
@@ -527,12 +512,12 @@ self.addEventListener("fetch", (event) => {
       // bridge, significantly improving subsequent page load times.
       if (
         event.request.method === "GET"
-        && (isScopedStaticAsset(requestPath) || isCacheablePhpAsset(pathOnly))
+        && isCacheableScopedAssetPath(requestPath)
       ) {
         const scopedCache = await caches.open(SCOPED_STATIC_CACHE);
         const cacheKey = buildScopedCacheKey(url.origin, scopeId, runtimeId, requestPath);
         const cached = await scopedCache.match(cacheKey);
-        if (cached) {
+        if (cached && isCacheableScopedAssetResponse(requestPath, cached)) {
           return cached;
         }
 
@@ -543,20 +528,16 @@ self.addEventListener("fetch", (event) => {
           scopeId,
         }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
 
-        if (fresh.ok) {
-          const contentType = fresh.headers.get("content-type") || "";
-          // Never cache HTML responses — they need URL rewriting and are dynamic.
-          if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) {
-            scopedCache.put(cacheKey, fresh.clone()).catch(() => {});
-            // Evict oldest entries when cache grows too large
-            scopedCache.keys().then((keys) => {
-              if (keys.length > 300) {
-                for (let i = 0; i < keys.length - 300; i++) {
-                  scopedCache.delete(keys[i]).catch(() => {});
-                }
+        if (isCacheableScopedAssetResponse(requestPath, fresh)) {
+          scopedCache.put(cacheKey, fresh.clone()).catch(() => {});
+          // Evict oldest entries when cache grows too large
+          scopedCache.keys().then((keys) => {
+            if (keys.length > 300) {
+              for (let i = 0; i < keys.length - 300; i++) {
+                scopedCache.delete(keys[i]).catch(() => {});
               }
-            }).catch(() => {});
-          }
+            }
+          }).catch(() => {});
         }
         return fresh;
       }

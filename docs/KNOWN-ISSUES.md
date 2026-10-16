@@ -30,8 +30,38 @@ The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handle
 all encryption needs. The runtime also downgrades the `admin/environment.xml` sodium
 check from `required` to `optional`, so plugin upgrades are not blocked.
 
-**OPcache** also cannot work in the WASM SAPI (PHP/Emscripten limitation). The
-environment check warning for OPcache is expected and harmless.
+**OPcache** is configured but does not start under the current `wasm` SAPI in
+PHP8.3.33. Changing the SAPI can activate file-cache-only mode, but the audit's
+canary then executed stale code after mutation and reset/invalidate returned false.
+Do not activate that workaround without a safe invalidation policy; this work
+does not change OPcache configuration or SAPI.
+
+### JavaScript seeds after upgrades and purges
+
+Moodle now retains its own `jsrev`. New seeds publish `snapshot.jsrev`; old sha1(1)
+seeds or a changed DB revision use the existing per-module fallback rather than
+serving old code under a new revision. Purging localcache can make navigation
+slower. Rebuild assets to get a matching seed; never relabel the old combine.
+See [ADR-0033](architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md).
+
+The existing `is_dir(requirejs)` guard still disables `cachejs` after a purge.
+Moodle then emits client jsrev=-1 and development ESM bypasses the immutable cache,
+even though the database revision is valid. Post-purge latency can remain high;
+this phase prevents stale code but does not claim to optimize that path. Keeping
+production mode without a combine needs a separate controlled compatibility test.
+
+### Persisted blueprint replay
+
+New instances checkpoint successful provisioning in SQLite. Reload skips durable
+mutations and arbitrary PHP/POST, restores declared volatile files and saved
+plugin/overlay artifacts, and recreates login. Legacy instances without checkpoints
+and incomplete provisioning are not automatically replayed. Their unknown volatile
+artifacts may require an explicit rebuild (back up retained data first). Arbitrary
+runtime code/plugin edits in `/www` are still volatile; this is not a general core
+persistence layer. Reload after a manual plugin upgrade is not validated: its
+persisted database version can be newer than the blueprint's saved ZIP. Back up
+the instance before testing that workflow. See
+[ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
 ## 2. PHP CLI / proc_open is not available in the WASM runtime
 

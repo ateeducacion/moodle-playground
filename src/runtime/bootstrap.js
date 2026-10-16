@@ -1963,7 +1963,17 @@ async function loadInstallSnapshot(
  * prefix; on subpath deploys the runtime wwwroot path must be prepended or
  * theme images and fonts would 404.
  */
-export function buildLocalcacheSeedExtractScript(zipPath, wwwrootPath) {
+export function buildLocalcacheSeedExtractScript(
+  zipPath,
+  wwwrootPath,
+  requirejsRevision = null,
+) {
+  if (
+    requirejsRevision !== null &&
+    (!Number.isSafeInteger(requirejsRevision) || requirejsRevision <= 0)
+  ) {
+    throw new Error("Invalid RequireJS seed revision");
+  }
   const zip = escapePhpSingleQuoted(zipPath);
   const prefix = escapePhpSingleQuoted(wwwrootPath || "");
   return `<?php
@@ -1990,6 +2000,16 @@ try {
     $entries = $archive->numFiles;
     $archive->close();
     @unlink($zipPath);
+
+    // See docs/architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md.
+    $revision = ${requirejsRevision ?? "null"};
+    if ($revision !== null && (
+        !is_file($target . '/requirejs/revision') ||
+        trim(file_get_contents($target . '/requirejs/revision')) !== (string)$revision ||
+        !is_file($target . '/requirejs/' . sha1((string)$revision))
+    )) {
+        throw new RuntimeException('RequireJS seed revision mismatch');
+    }
 
     $rewritten = 0;
     $prefix = '${prefix}';
@@ -2081,7 +2101,11 @@ async function loadLocalcacheSeed(
   await php.writeFile(zipPath, bytes);
   const wwwrootPath = new URL(wwwroot).pathname.replace(/\/$/u, "");
   const result = await php.run(
-    buildLocalcacheSeedExtractScript(zipPath, wwwrootPath),
+    buildLocalcacheSeedExtractScript(
+      zipPath,
+      wwwrootPath,
+      manifest?.snapshot?.jsrev ?? null,
+    ),
   );
 
   const text = result.text ?? "";
@@ -2280,11 +2304,11 @@ echo json_encode($result);
 // lang overrides $CFG->lang, so without this the auto-logged-in admin keeps
 // seeing English even after the pack installs. Idempotent: a no-op when the
 // configured locale already matches. See docs/architecture/adr/ADR-0006-*.
-async function runSiteLanguageConfigure(php, locale) {
+export async function runSiteLanguageConfigure(php, locale, resume) {
   const lang = typeof locale === "string" ? locale.trim().toLowerCase() : "";
   // The code is interpolated into the PHP below, so validate strictly first
   // (it is re-checked in PHP too). Nothing to do for English or invalid codes.
-  if (!lang || lang === "en" || !/^[a-z][a-z0-9_]*$/.test(lang)) {
+  if (resume || !lang || lang === "en" || !/^[a-z][a-z0-9_]*$/.test(lang)) {
     return { ok: true, lang: lang || "en", action: "skipped" };
   }
   const code = `<?php
@@ -2715,6 +2739,9 @@ export async function bootstrapMoodle({
   }
 
   let localcacheSeeded = false;
+  const resumeBlueprint = Boolean(
+    installMarkerMatches || installState?.installed,
+  );
 
   if (!installMarkerMatches && !installState?.installed) {
     const tInstall = performance.now();
@@ -2899,6 +2926,7 @@ export async function bootstrapMoodle({
       const localeResult = await runSiteLanguageConfigure(
         php,
         effectiveConfig.locale,
+        resumeBlueprint,
       );
       const localeMs = Math.round(performance.now() - tLocale);
       if (localeResult?.action === "applied") {
@@ -2966,6 +2994,21 @@ export async function bootstrapMoodle({
   if (blueprint?.steps?.length > 0) {
     try {
       const { executeBlueprint } = await import("../blueprint/executor.js");
+      const { createBlueprintCheckpoint } = await import(
+        "../blueprint/checkpoint.js"
+      );
+      const checkpoint = await createBlueprintCheckpoint({
+        blueprint,
+        php,
+        dbFile,
+        resume: resumeBlueprint,
+      });
+      if (checkpoint.legacy) {
+        publish(
+          "Legacy persisted instance has no blueprint checkpoint; data-changing steps will not be replayed. Volatile resources with unknown provenance require an explicit rebuild.",
+          0.94,
+        );
+      }
       const result = await executeBlueprint(blueprint, {
         php,
         publish,
@@ -2975,6 +3018,7 @@ export async function bootstrapMoodle({
         scopeId,
         runtimeId: resolvedRuntimeId,
         onPluginInstalled,
+        checkpoint,
       });
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;
@@ -3008,6 +3052,14 @@ export async function bootstrapMoodle({
     } catch (blueprintError) {
       publish(`Blueprint execution error: ${blueprintError.message}`, 0.95);
     }
+  }
+  // Flush DB checkpoints and saved artifacts before live recovery can snapshot.
+  if (blueprint?.steps?.length && typeof php.flushPersistence === "function") {
+    const flushed = await php.flushPersistence();
+    if (!flushed.ok)
+      throw new Error(
+        "Blueprint persistence checkpoint failed; runtime is not ready.",
+      );
   }
   phases.blueprints.finish();
 

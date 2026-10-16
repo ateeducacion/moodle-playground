@@ -11,6 +11,22 @@ Machine-readable schema:
 A blueprint is a JSON document describing the desired state of an instance at
 boot. Steps run in order.
 
+On a persisted reload, completed provisioning is not repeated. Login and landing
+selection run again; completed explicit filesystem steps restore volatile `/www`
+and `/tmp` files, but never overwrite `/persist` (mixed batches are filtered).
+Plugins/themes and PR overlays restore their saved artifacts without downloading
+moving URLs or rerunning upgrade scripts. Arbitrary PHP and HTTP request steps,
+including POST, are **not** replayed. Their arbitrary effects on volatile files
+cannot be reconstructed automatically; declare those files with filesystem steps.
+
+The completed-step checkpoint lives in SQLite, tied to the exact blueprint hash.
+Partial/failed provisioning is not automatically retried on reload. Legacy retained
+instances without checkpoints emit a warning and do not replay mutations; files
+with unknown provenance require an explicit rebuild. Reset Playground intentionally
+discards retained state and reruns provisioning. Back up valuable data first.
+This is not persistence for arbitrary runtime code edits or plugin-manager changes
+under `/www`. See [ADR-0035](../architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
+
 ```json
 {
   "$schema": "https://ateeducacion.github.io/moodle-playground/assets/blueprints/blueprint-schema.json",

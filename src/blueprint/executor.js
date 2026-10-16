@@ -1,3 +1,4 @@
+import { getReloadStep } from "./checkpoint.js";
 import { substituteConstants } from "./constants.js";
 import { ResourceRegistry } from "./resources.js";
 import { getStepHandler } from "./steps/index.js";
@@ -69,7 +70,7 @@ export async function executeBlueprint(blueprint, context) {
   };
 
   for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
+    let step = steps[i];
     const stepName = step.step;
     const label = sanitizeStepLabel(step);
     const startMs = Math.round(now() - t0);
@@ -78,7 +79,29 @@ export async function executeBlueprint(blueprint, context) {
 
     publish(`Blueprint step ${i + 1}/${steps.length}: ${stepName}`, progress);
 
-    const handler = getStepHandler(stepName);
+    const checkpoint = context.checkpoint;
+    const filesystemArtifactPath = checkpoint
+      ? `/persist/blueprints/${checkpoint.fingerprint}/${i}-files`
+      : null;
+    if (checkpoint?.resuming) {
+      step = getReloadStep(
+        step,
+        checkpoint.completed.has(i),
+        filesystemArtifactPath,
+      );
+      if (!step) {
+        recordTiming(i + 1, stepName, label, startMs, "skipped");
+        if (!checkpoint.completed.has(i) && !checkpoint.legacy) {
+          firstFailure ||= {
+            failedStep: `${i + 1}:${stepName}`,
+            error: "Previously unfinished step was not replayed automatically.",
+          };
+        }
+        continue;
+      }
+    }
+
+    const handler = getStepHandler(step.step);
     if (!handler) {
       recordTiming(i + 1, stepName, label, startMs, "failed");
       const error = `Unknown step type: ${stepName}`;
@@ -93,7 +116,17 @@ export async function executeBlueprint(blueprint, context) {
     }
 
     try {
-      const result = await handler(step, stepContext);
+      const result = await handler(step, {
+        ...stepContext,
+        restoreOnly: Boolean(checkpoint?.resuming),
+        filesystemArtifactPath,
+        pluginArchivePath: checkpoint
+          ? `/persist/blueprints/${checkpoint.fingerprint}/${i}.zip`
+          : null,
+        overlayArchivePath: checkpoint
+          ? `/persist/blueprints/${checkpoint.fingerprint}/${i}-overlay.json`
+          : null,
+      });
       // setLandingPage step can override the landing page
       if (stepName === "setLandingPage" && step.path) {
         landingPage = step.path;
@@ -122,7 +155,10 @@ export async function executeBlueprint(blueprint, context) {
       if (step.critical) {
         return { success: false, landingPage, ...firstFailure, timings };
       }
+      continue;
     }
+    // Checkpoint failures must abort, not be treated as an optional step error.
+    if (checkpoint && !checkpoint.resuming) await checkpoint.save(i);
   }
 
   return {

@@ -55,6 +55,23 @@ function serializeError(error) {
   };
 }
 
+export async function withDiagnosticDeadline(promise, timeoutMs = 5000) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Diagnostic capture timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function captureDiagnostics(page, testInfo, diagnostics) {
   const diagnosticsDir = testInfo.outputPath("diagnostics");
   await mkdir(diagnosticsDir, { recursive: true });
@@ -77,43 +94,47 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
   }
 
   const frames = page.frames();
-  const remoteFrame = frames.find((frame) =>
-    frame.url().includes("/remote.html"),
-  );
-  const moodleFrame = frames.find(
-    (frame) => frame.parentFrame() === remoteFrame,
-  );
+  const remoteFrame =
+    frames.find((frame) => frame.url().includes("/remote.html")) ||
+    frames.find((frame) => frame.name() === "site-frame");
+  const moodleFrame = findMoodleFrame(page);
   let shellState = null;
   try {
-    shellState = await page.evaluate(() => {
-      const addressInput = document.querySelector("#address-input");
-      return {
-        title: document.title,
-        href: window.location.href,
-        addressValue:
-          addressInput instanceof HTMLInputElement ? addressInput.value : null,
-        addressDisabled:
-          addressInput instanceof HTMLInputElement
-            ? addressInput.disabled
-            : null,
-        runtimeLabel: document.querySelector("#runtime-id-value")?.textContent,
-        logPanel: document.querySelector("#log-panel")?.textContent || "",
-        siteFrameSrc:
-          document.querySelector("#site-frame")?.getAttribute("src") || null,
-      };
-    });
+    shellState = await withDiagnosticDeadline(
+      page.evaluate(() => {
+        const addressInput = document.querySelector("#address-input");
+        return {
+          title: document.title,
+          href: window.location.href,
+          addressValue:
+            addressInput instanceof HTMLInputElement
+              ? addressInput.value
+              : null,
+          addressDisabled:
+            addressInput instanceof HTMLInputElement
+              ? addressInput.disabled
+              : null,
+          runtimeLabel:
+            document.querySelector("#runtime-id-value")?.textContent,
+          logPanel: document.querySelector("#log-panel")?.textContent || "",
+          siteFrameSrc:
+            document.querySelector("#site-frame")?.getAttribute("src") || null,
+        };
+      }),
+    );
   } catch {}
 
   try {
     await page.screenshot({
       path: `${diagnosticsDir}/final-page.png`,
       fullPage: true,
+      timeout: 5000,
     });
   } catch {}
   try {
     await writeFile(
       `${diagnosticsDir}/shell.html`,
-      await page.content(),
+      await withDiagnosticDeadline(page.content()),
       "utf8",
     );
   } catch {}
@@ -154,7 +175,7 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
     try {
       await writeFile(
         `${diagnosticsDir}/remote-frame.html`,
-        await remoteFrame.content(),
+        await withDiagnosticDeadline(remoteFrame.content()),
         "utf8",
       );
     } catch {}
@@ -162,9 +183,24 @@ export async function captureDiagnostics(page, testInfo, diagnostics) {
 
   if (moodleFrame) {
     try {
+      const state = await withDiagnosticDeadline(
+        moodleFrame.evaluate(() => ({
+          path: location.pathname,
+          readyState: document.readyState,
+          pendingJs: globalThis.M?.util?.pending_js ?? null,
+          jsrev: globalThis.M?.cfg?.jsrev ?? null,
+        })),
+      );
+      await writeFile(
+        `${diagnosticsDir}/moodle-state.json`,
+        JSON.stringify(state, null, 2),
+        "utf8",
+      );
+    } catch {}
+    try {
       await writeFile(
         `${diagnosticsDir}/moodle-frame.html`,
-        await moodleFrame.content(),
+        await withDiagnosticDeadline(moodleFrame.content()),
         "utf8",
       );
     } catch {}
@@ -184,6 +220,15 @@ export function findMoodleFrame(page) {
     page
       .frames()
       .find((frame) => frame.parentFrame()?.url().includes("/remote.html")) ||
+    // Firefox can report the host as about:blank after reload, even when the
+    // nested app is rendered. Match both known iframe IDs, not a generic URL.
+    page
+      .frames()
+      .find(
+        (frame) =>
+          frame.name() === "remote-frame" &&
+          frame.parentFrame()?.name() === "site-frame",
+      ) ||
     null
   );
 }
@@ -273,9 +318,12 @@ async function waitForMoodleContent(
   await expect
     .poll(
       async () => {
+        const frame =
+          typeof moodleFrame === "function" ? moodleFrame() : moodleFrame;
+        if (!frame) return false;
         for (const selector of selectors) {
           try {
-            if (await moodleFrame.locator(selector).count()) return true;
+            if (await frame.locator(selector).count()) return true;
           } catch {
             /* frame not ready yet */
           }
@@ -299,12 +347,18 @@ export async function waitForPlaygroundReady(page) {
   // Stage 1: Shell is ready (worker sent "ready" message)
   await waitForShellReady(page);
   // Stage 2: Moodle content rendered inside the nested iframe.
-  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
+  await waitForMoodleContent(
+    () => findMoodleFrame(page),
+    MOODLE_CONTENT_SELECTORS,
+  );
 }
 
 export async function waitForRuntimeFrameReady(page) {
   await waitForRuntimeSelectionReady(page);
-  await waitForMoodleContent(getMoodleFrame(page), MOODLE_CONTENT_SELECTORS);
+  await waitForMoodleContent(
+    () => findMoodleFrame(page),
+    MOODLE_CONTENT_SELECTORS,
+  );
 }
 
 export async function waitForScopedHttpReady(

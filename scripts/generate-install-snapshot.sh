@@ -357,7 +357,7 @@ fi
 # not pay for find_all_amd_modules() (unreliable on the Emscripten VFS) +
 # concatenation. Replicates requirejs.php's production "all non-lazy modules"
 # combine and writes it to the file requirejs.php will serve at runtime, where
-# config.php forces $CFG->jsrev = 1 (so $etag = sha1(1)). See ADR 0013.
+# Moodle retains its own revision. See ADR 0033.
 REQUIREJS_WARMUP="$TMPROOT/requirejs-warmup.php"
 cat > "$REQUIREJS_WARMUP" <<'PHPEOF'
 <?php
@@ -398,11 +398,13 @@ foreach ($jsfiles as $modulename => $jsfile) {
     $content .= $js;
 }
 
-// At runtime config.php forces $CFG->jsrev = 1, so module URLs are
-// /lib/requirejs.php/1/<component>/<module> and requirejs.php computes the
-// non-lazy combine etag as sha1($rev) = sha1(1). Seed exactly that file
-// (sha1(1) === sha1('1') === 356a192b7913b04c54574d18c28d46e6395428ab).
-$target = $CFG->localcachedir . '/requirejs/' . sha1(1);
+// Keep the filename and manifest tied to the revision actually in the snapshot.
+// Never relabel an old combine after a purge or plugin update. See ADR 0033.
+$revision = (string)$CFG->jsrev;
+if (!ctype_digit($revision) || (int)$revision <= 0) {
+    throw new RuntimeException('Invalid snapshot JavaScript revision');
+}
+$target = $CFG->localcachedir . '/requirejs/' . sha1($revision);
 js_write_cache_file_content($target, $content);
 clearstatcache();
 if (!file_exists($target)) {
@@ -423,6 +425,9 @@ if (strpos($combined, 'define("core/first"') === false
     exit(1);
 }
 echo 'RequireJS combined bundle written (' . count($jsfiles) . ' modules, ' . $size . ' bytes).' . PHP_EOL;
+if (file_put_contents($CFG->localcachedir . '/requirejs/revision', $revision . PHP_EOL) === false) {
+    throw new RuntimeException('Could not write RequireJS revision metadata');
+}
 PHPEOF
 REQUIREJS_LOG="$TMPROOT/requirejs-warmup.log"
 if ${PHP_BIN:-php} -d max_input_vars=5000 "$REQUIREJS_WARMUP" "$SOURCE_DIR" >"$REQUIREJS_LOG" 2>&1; then
@@ -435,8 +440,8 @@ if [ "$WARMUP_EXIT" -ne 0 ]; then
   echo "Error: RequireJS warmup exited with code $WARMUP_EXIT" >&2
   exit 1
 fi
-if [ ! -f "$MOODLEDATA/localcache/requirejs/356a192b7913b04c54574d18c28d46e6395428ab" ]; then
-  echo "Error: RequireJS combined seed missing at localcache/requirejs/356a192b..." >&2
+if [ ! -s "$MOODLEDATA/localcache/requirejs/revision" ]; then
+  echo "Error: RequireJS revision metadata is missing" >&2
   exit 1
 fi
 

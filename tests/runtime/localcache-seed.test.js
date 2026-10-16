@@ -6,6 +6,37 @@ import {
 } from "../../src/runtime/bootstrap.js";
 
 describe("buildLocalcacheSeedExtractScript", () => {
+  it("checks the advertised revision and its combined file after extraction", () => {
+    const script = buildLocalcacheSeedExtractScript(
+      "/tmp/seed.zip",
+      "",
+      1791030540,
+    );
+    assert.ok(script.includes("$revision = 1791030540;"));
+    assert.ok(script.includes("sha1((string)$revision)"));
+    assert.ok(script.includes("RequireJS seed revision mismatch"));
+  });
+
+  it("rejects invalid advertised revisions instead of interpolating them into PHP", () => {
+    for (const revision of [
+      0,
+      -1,
+      1.5,
+      "1; exit;",
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      assert.throws(
+        () => buildLocalcacheSeedExtractScript("/tmp/seed.zip", "", revision),
+        /revision/iu,
+      );
+    }
+  });
+
+  it("accepts legacy seeds without revision metadata", () => {
+    const script = buildLocalcacheSeedExtractScript("/tmp/seed.zip", "");
+    assert.ok(script.includes("$revision = null;"));
+  });
+
   it("extracts into the runtime localcache via ZipArchive", () => {
     const script = buildLocalcacheSeedExtractScript(
       "/tmp/moodle/moodle-localcache-seed.zip",

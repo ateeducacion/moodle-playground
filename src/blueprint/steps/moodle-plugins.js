@@ -197,30 +197,45 @@ function parseGitHubUrl(url) {
 
 async function installViaZipDownload(zipUrl, targetDir, context) {
   const { php, publish } = context;
-  const downloadUrl = resolvePluginZipDownloadUrl(zipUrl, context);
-  if (publish) {
-    publish(
-      downloadUrl === zipUrl
-        ? `Downloading plugin ZIP from ${zipUrl}`
-        : `Downloading plugin ZIP from ${zipUrl} via addon proxy`,
-      0.93,
-    );
-  }
+  let zipBytes;
+  if (context.restoreOnly) {
+    // Reuse the exact installed artifact; a moving URL must not upgrade the DB on reload.
+    zipBytes = await php.readFile(context.pluginArchivePath);
+  } else {
+    const downloadUrl = resolvePluginZipDownloadUrl(zipUrl, context);
+    if (publish) {
+      publish(
+        downloadUrl === zipUrl
+          ? `Downloading plugin ZIP from ${zipUrl}`
+          : `Downloading plugin ZIP from ${zipUrl} via addon proxy`,
+        0.93,
+      );
+    }
 
-  // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
-  // errors on browser reloads (cache revalidation race with the proxy).
-  let response = await fetch(downloadUrl, { cache: "no-store" });
-  if (!response.ok && (response.status === 502 || response.status === 503)) {
-    if (publish) publish("Plugin download failed, retrying…", 0.93);
-    await new Promise((r) => setTimeout(r, 1000));
-    response = await fetch(downloadUrl, { cache: "no-store" });
+    // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
+    // errors on browser reloads (cache revalidation race with the proxy).
+    let response = await fetch(downloadUrl, { cache: "no-store" });
+    if (!response.ok && (response.status === 502 || response.status === 503)) {
+      if (publish) publish("Plugin download failed, retrying…", 0.93);
+      await new Promise((r) => setTimeout(r, 1000));
+      response = await fetch(downloadUrl, { cache: "no-store" });
+    }
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
+      );
+    }
+    zipBytes = new Uint8Array(await response.arrayBuffer());
+    if (context.pluginArchivePath) {
+      php._php.mkdirTree(
+        context.pluginArchivePath.slice(
+          0,
+          context.pluginArchivePath.lastIndexOf("/"),
+        ),
+      );
+      await php.writeFile(context.pluginArchivePath, zipBytes);
+    }
   }
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
-    );
-  }
-  const zipBytes = new Uint8Array(await response.arrayBuffer());
 
   if (publish) publish(`Extracting plugin to ${targetDir}`, 0.935);
 
@@ -270,7 +285,7 @@ async function runMoodleUpgrade(
   pluginType,
   pluginName,
   targetDir,
-  { php, publish, webRoot },
+  { php, publish, webRoot, restoreOnly },
 ) {
   if (publish) publish("Running Moodle upgrade to register plugin.", 0.945);
 
@@ -304,6 +319,17 @@ require_once($CFG->libdir . '/adminlib.php');
 
 // Reset clears in-memory state; next init() re-reads the updated cache file.
 \\core_component::reset();
+${
+  restoreOnly
+    ? `
+// Restore discovery only: the plugin's install/upgrade already changed this DB.
+\\core_plugin_manager::reset_caches();
+@unlink($CFG->localcachedir . '/di/CompiledContainer.php');
+echo json_encode(['ok' => true]);
+return;
+`
+    : ""
+}
 if (function_exists('purge_all_caches')) {
     purge_all_caches();
 }
@@ -326,14 +352,13 @@ try {
   } catch (err) {
     // php.run() throws on non-zero exit code (e.g. Moodle's
     // default_exception_handler calls exit(1) before our PHP catch runs).
-    // Log the error but don't fail the blueprint step — the plugin files
-    // are already installed and may work even without a full upgrade.
+    // Keep the error visible and do not checkpoint an incomplete registration.
     if (publish)
       publish(
         `Plugin upgrade crashed: ${String(err.message || err).slice(0, 200)}`,
         0.95,
       );
-    return;
+    throw err;
   }
   const text = result?.text || "";
   const errors = result?.errors || "";
@@ -342,6 +367,11 @@ try {
   }
   if (text.includes('"ok":false') && publish) {
     publish(`Plugin upgrade failed: ${text.slice(0, 200)}`, 0.95);
+  }
+  if (!text.includes('"ok":true') || text.includes('"ok":false')) {
+    throw new Error(
+      "Plugin registration did not complete; no successful checkpoint was recorded.",
+    );
   }
 }
 

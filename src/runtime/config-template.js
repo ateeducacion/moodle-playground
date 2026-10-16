@@ -111,20 +111,14 @@ $CFG->showcrondebugging = false;
 // caches are fast and persist for the lifetime of the worker session.
 ${
   requirejsSeeded
-    ? `// RequireJS combined bundle is seeded at build time (manifest
-// snapshot.requirejs), so we re-enable $CFG->cachejs: the browser makes ONE
-// combined JS request per page (/lib/requirejs.php/1/core/first.js) instead of
-// dozens of per-module requests through the serial worker queue. See ADR 0013.
-// - jsrev is FORCED to 1 (not time()): config.php overrides DB config, so
-//   js_reset_all_caches()'s set_config('jsrev', time()) cannot desync the URL
-//   revision from the seeded sha1(1) file across journaled reloads. Bundle JS
-//   is immutable per build, so in-session JS cache-busting being a no-op is fine.
+    ? `// The combine is seeded at build time using Moodle's database revision.
+// Do not override jsrev: ESM, plugins and purges need normal invalidation.
+// See docs/architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md.
 // - The runtime NEVER builds the combine (lib/requirejs.php is patched at build
 //   time; find_all_amd_modules is unreliable on the Emscripten VFS).
 // - 'Purge all caches' wipes localcache including requirejs/, so the is_dir()
 //   probe flips cachejs back to false (dev-mode per-module serving — today's
 //   behavior) for the rest of the session; the next boot re-extracts the seed.
-$CFG->jsrev = 1;
 $CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');`
     : `// cachejs stays false: without the build-time RequireJS seed, enabling it makes
 // the runtime build the combine itself, which fails silently in the WASM

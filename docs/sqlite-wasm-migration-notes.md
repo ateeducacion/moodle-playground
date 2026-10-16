@@ -5,9 +5,22 @@ This document records the repo-local changes made to run Moodle in WebAssembly P
 !!! info "Upstream SQLite support"
     Moodle is tracking native SQLite support in [MDL-88218](https://moodle.atlassian.net/browse/MDL-88218). This project uses an experimental PDO driver patch that restores and maintains SQLite compatibility independently.
 
-> **Runtime update (March 2025)**: The PHP runtime was migrated from `seanmorris/php-wasm` (v0.0.9-alpha-32) to WordPress Playground's `@php-wasm/web` + `@php-wasm/universal` (v3.1.11). This replaced 14 vendored packages and a manual extension-loading pipeline with two npm packages. The compatibility wrapper in `src/runtime/php-compat.js` maps the WP Playground API to the interface expected by the existing codebase. All PHP extensions (including previously-missing `curl`, `gd`, `fileinfo`, `sodium`) are now built into the WASM binary.
+> **Runtime update (March 2025)**: The PHP runtime was migrated from `seanmorris/php-wasm` (v0.0.9-alpha-32) to WordPress Playground's `@php-wasm/web` + `@php-wasm/universal` (v3.1.11). This replaced 14 vendored packages and a manual extension-loading pipeline with two npm packages. The compatibility wrapper in `src/runtime/php-compat.js` maps the WP Playground API to the interface expected by the existing codebase. Extensions such as `curl`, `gd` and `fileinfo` are built in; `sodium` is unavailable and uses the existing OpenSSL fallback.
 
-> **In-memory refactor (March 2026)**: The runtime is now explicitly ephemeral. The SQLite database file lives in Emscripten MEMFS (JavaScript heap) with no durable storage. SQLite pragmas are tuned for in-memory operation (`journal_mode=MEMORY`, `synchronous=OFF`, `temp_store=MEMORY`, `cache_size=-8000`, `locking_mode=EXCLUSIVE`). Moodle caching is fully enabled (file-based caches write to MEMFS). Debug mode defaults to disabled for performance, but the initial level can be seeded at boot and later changed from Moodle administration. All state is lost when the browser tab closes.
+> **Current persistence model (October 2026)**: SQLite remains a MEMFS-backed file,
+> not `:memory:`. Changes under `/persist` are journaled to IndexedDB per scope
+> and restored on reload; closing a tab does not guarantee deletion. Derived
+> cache/localcache/temp/muc directories are excluded and seeds are restored at boot.
+> Existing in-memory SQLite pragmas and MUC remain enabled. Blueprint completion
+> is checkpointed in SQLite; reload restores declared volatile artifacts and login
+> without replaying persisted mutations. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md)
+> for legacy/partial-instance and arbitrary runtime-edit limitations.
+
+JavaScript revision handling now follows Moodle's database value. Build-time
+RequireJS seeds declare their revision in the manifest and are checked on restore;
+purges and plugin changes may use the per-module fallback. Public immutable ESM
+uses the existing scoped SW cache. See [ADR-0033](architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md)
+and [ADR-0034](architecture/adr/ADR-0034-public-immutable-esm-cache.md).
 
 It is intentionally pragmatic: it lists what was changed, why it was changed, where the change lives, and which caveats still exist in the prototype.
 
@@ -24,7 +37,7 @@ Constraints followed during the migration:
 
 ## Resulting runtime model
 
-- Moodle core is extracted from a prebuilt ZIP bundle into writable MEMFS at `/www/moodle`
+- Moodle core is streamed from a prebuilt tar.zst bundle into writable MEMFS at `/www/moodle` (legacy archive fallbacks remain)
 - mutable state lives under `/persist`
 - `moodledata` lives at `/persist/moodledata`
 - the SQLite database file lives at `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`

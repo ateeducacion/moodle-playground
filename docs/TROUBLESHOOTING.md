@@ -33,9 +33,39 @@ php -l patches/shared/lib/classes/encryption.php
 Bundle and runtime:
 
 ```bash
+npm ci
+npm run build:version
 npm run build-worker
 npm run bundle
 ```
+
+Keep the installed PHP-WASM packages and emitted assets aligned with the lockfile;
+rebuild both workers after runtime/SW changes and clear old Service Worker caches.
+Reset Playground clears site data, not worker code.
+
+### Slow JavaScript navigation or a missing RequireJS combine
+
+Moodle owns `jsrev`; generated config.php must not pin it to1. New seeds announce
+`snapshot.jsrev` and contain `requirejs/<sha1(revision)>` plus `requirejs/revision`.
+An advertised mismatch fails during extraction. Legacy seeds and changed revisions
+use the existing per-module fallback; rebuild the snapshot/seed to regain a matching
+combine. Do not rename an old combine to a newer plugin/purge revision.
+Only public immutable production ESM is cached by the SW; authenticated HTML,
+protected files and development ESM still execute PHP. See
+[ADR-0033](architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md) and
+[ADR-0034](architecture/adr/ADR-0034-public-immutable-esm-cache.md).
+
+### Blueprint provisioning on persisted reload
+
+New instances store completed steps in the SQLite checkpoint. Reload restores
+declared volatile files and saved plugins/overlays, recreates login, and skips
+persisted data mutations and arbitrary PHP/HTTP requests. A previously unfinished
+step remains an error rather than being retried automatically. Legacy instances
+without checkpoints log a warning; do not clear valuable data just to silence it.
+Back up before an explicit Reset/rebuild. Runtime code edits outside declared steps
+are not persistent. A manual plugin upgrade can leave the retained DB newer than
+the blueprint's saved ZIP; that reload workflow is not validated. Back up before
+testing it. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
 ## First place to look
 
@@ -125,7 +155,8 @@ Notes:
 
 Likely cause:
 
-- Moodle cache config paths still execute even though cache is intentionally disabled for the prototype
+- Missing cache store/admin defaults or a stale cache configuration; normal
+  web requests keep MUC enabled (`CACHE_DISABLE_ALL=false`).
 
 Files:
 
@@ -134,7 +165,7 @@ Files:
 
 Notes:
 
-- these warnings are suppressed at runtime when `CACHE_DISABLE_ALL` is active
+- do not disable MUC globally to suppress them; verify seeded cache defaults
 - if they become fatal again, inspect `cache/classes/config.php` and `cache/classes/cache.php`
 
 ### `Undefined constant "core\\SODIUM_CRYPTO_SECRETBOX_NONCEBYTES"`

@@ -2,6 +2,7 @@
  * Filesystem step handlers: mkdir, rmdir, writeFile, writeFiles, copyFile, moveFile, unzip.
  */
 import { readZipEntries } from "../../../lib/moodle-loader.js";
+import { isVolatilePath } from "../checkpoint.js";
 import { escapePhp } from "../php/helpers.js";
 import { checkPhpResult } from "./check-result.js";
 
@@ -56,7 +57,21 @@ echo json_encode(['ok' => true]);
 `);
 }
 
-async function handleWriteFile(step, { php, resources }) {
+async function preserveArtifact(context, path, data) {
+  const {
+    php,
+    filesystemArtifactPath,
+    artifactIndex = 0,
+    restoreOnly,
+  } = context;
+  if (!filesystemArtifactPath || restoreOnly || !isVolatilePath(path)) return;
+  const savedPath = `${filesystemArtifactPath}-${artifactIndex}.bin`;
+  php._php.mkdirTree(savedPath.slice(0, savedPath.lastIndexOf("/")));
+  await php.writeFile(savedPath, data);
+}
+
+async function handleWriteFile(step, context) {
+  const { php, resources } = context;
   const path = step.path;
   if (!path) throw new Error("writeFile: 'path' is required.");
 
@@ -78,35 +93,44 @@ async function handleWriteFile(step, { php, resources }) {
   }
 
   await php.writeFile(path, data);
+  await preserveArtifact(context, path, data);
 }
 
-async function handleWriteFiles(step, { php, resources }) {
+async function handleWriteFiles(step, context) {
   if (!Array.isArray(step.files))
     throw new Error("writeFiles: 'files' must be an array.");
 
-  for (const file of step.files) {
+  for (const [index, file] of step.files.entries()) {
     await handleWriteFile(
       { path: file.path, data: file.data },
-      { php, resources },
+      { ...context, artifactIndex: index },
     );
   }
 }
 
-async function handleCopyFile(step, { php }) {
+async function handleCopyFile(step, context) {
+  const { php } = context;
   const { from, to } = step;
   if (!from || !to) throw new Error("copyFile: 'from' and 'to' are required.");
 
   const data = await php.readFile(from);
   await php.writeFile(to, data);
+  await preserveArtifact(context, to, data);
 }
 
-async function handleMoveFile(step, { php }) {
+async function handleMoveFile(step, context) {
+  const { php } = context;
   const { from, to } = step;
   if (!from || !to) throw new Error("moveFile: 'from' and 'to' are required.");
 
-  const data = await php.readFile(from);
+  const data = await php.readFile(
+    context.restoreOnly ? `${context.filesystemArtifactPath}-0.bin` : from,
+  );
   await php.writeFile(to, data);
-  await php.run(`<?php @unlink('${escapePhp(from)}');`);
+  if (!context.restoreOnly || isVolatilePath(from)) {
+    await php.run(`<?php @unlink('${escapePhp(from)}');`);
+  }
+  await preserveArtifact(context, to, data);
 }
 
 async function handleDeleteFile(step, { php }) {
@@ -135,7 +159,8 @@ async function handleDeleteFiles(step, context) {
   }
 }
 
-async function handleUnzip(step, { php, resources }) {
+async function handleUnzip(step, context) {
+  const { php, resources } = context;
   const destination = step.destination || step.path;
   if (!destination)
     throw new Error("unzip: 'destination' (or 'path') is required.");
@@ -163,4 +188,5 @@ async function handleUnzip(step, { php, resources }) {
     }
     rawPhp.writeFile(fullPath, data);
   }
+  await preserveArtifact(context, destination, zipBytes);
 }

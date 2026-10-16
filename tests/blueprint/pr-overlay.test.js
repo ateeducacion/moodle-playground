@@ -366,6 +366,58 @@ describe("purgeMoodleCaches step", () => {
 });
 
 describe("applyPrOverlay step", () => {
+  it("restores the exact saved overlay offline without repeating its DB upgrade", async () => {
+    const php = createMockPhp();
+    const stored = new Map();
+    php.writeFile = async (path, bytes) => stored.set(path, bytes);
+    php.readFile = async (path) => {
+      assert.ok(stored.has(path), `missing saved file: ${path}`);
+      return stored.get(path);
+    };
+    const step = {
+      runUpgrade: "on",
+      files: [
+        {
+          path: "lib/a.php",
+          rawUrl: "https://fixture.invalid/moving",
+          status: "modified",
+        },
+      ],
+    };
+    const context = {
+      php,
+      overlayArchivePath: "/persist/blueprints/fixture/0-overlay.json",
+    };
+    const handler = getStepHandler("applyPrOverlay");
+    await withFetch(
+      async () => okBytesResponse(new Uint8Array([1, 2, 3])),
+      () => handler(step, context),
+    );
+    stored.delete("/www/moodle/lib/a.php");
+    php.runCalls.length = 0;
+    await withFetch(
+      async () => {
+        throw new Error("network must not run");
+      },
+      () => handler(step, { ...context, restoreOnly: true }),
+    );
+    assert.deepEqual(
+      stored.get("/www/moodle/lib/a.php"),
+      new Uint8Array([1, 2, 3]),
+    );
+    assert.ok(!php.runCalls.some((code) => code.includes("upgrade_noncore")));
+    stored.set(
+      context.overlayArchivePath,
+      new TextEncoder().encode(
+        JSON.stringify([{ operation: "delete", path: "/www/../persist/db" }]),
+      ),
+    );
+    await assert.rejects(
+      handler(step, { ...context, restoreOnly: true }),
+      /Invalid saved overlay path/,
+    );
+  });
+
   it("writes added/modified files, deletes removed, and renames", async () => {
     const php = createMockPhp();
     const handler = getStepHandler("applyPrOverlay");
