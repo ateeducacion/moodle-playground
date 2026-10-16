@@ -51,6 +51,7 @@ folder and keep their original lightweight format (see
 | [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Accepted (amended by ADR-0036) | 2026-10-16 |
 | [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md) | Download blueprint plugin and unzip archives again on reload | Accepted | 2026-10-16 |
 | [ADR-0038](ADR-0038-opcache-file-cache-timestamp-validation.md) | Validate OPcache file-cache timestamps and blacklist the eval script path | Accepted | 2026-10-16 |
+| [ADR-0039](ADR-0039-experimental-opcache-via-sapi-name.md) | Start OPcache's file cache on PHP 8.3/8.4 via the `uwsgi` SAPI name, behind an experimental flag | Accepted | 2026-10-16 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers

@@ -15,9 +15,13 @@ test.describe.configure({ timeout: specTimeoutMs });
 // A PHP file compiled once and then rewritten must execute its new code on the
 // next request. The 8.3 row only proves the plumbing; the 8.5 row is the real
 // canary and additionally asserts that the cache is active, so it cannot pass
-// vacuously. OPCACHE_CANARY_MATRIX="5.3:8.5" overrides the rows (used against an
-// isolated copy that allows PHP 8.5 on a stable branch).
-const matrix = (process.env.OPCACHE_CANARY_MATRIX || "5.3:8.3,dev:8.5")
+// vacuously. The `opcache` rows boot with `?opcache=1` (ADR-0039), which
+// switches the SAPI name so the cache is live on PHP 8.3/8.4 as well.
+// OPCACHE_CANARY_MATRIX="5.3:8.5" overrides the rows (used against an isolated
+// copy that allows PHP 8.5 on a stable branch).
+const matrix = (
+  process.env.OPCACHE_CANARY_MATRIX || "5.3:8.3,5.3:8.3:opcache,dev:8.5"
+)
   .split(",")
   .map((row) => row.split(":"));
 
@@ -41,8 +45,10 @@ echo json_encode([
     'sapi' => PHP_SAPI,
 ]);`;
 
-for (const [moodle, php] of matrix) {
-  test(`rewritten PHP files recompile on Moodle ${moodle} / PHP ${php}`, async ({
+for (const [moodle, php, flag] of matrix) {
+  const opcache = flag === "opcache";
+  const live = opcache || php === "8.5";
+  test(`rewritten PHP files recompile on Moodle ${moodle} / PHP ${php}${opcache ? " with ?opcache=1" : ""}`, async ({
     page,
   }) => {
     const branch = MOODLE_BRANCHES.find((entry) => entry.version === moodle);
@@ -74,7 +80,7 @@ for (const [moodle, php] of matrix) {
       ],
     });
     await page.goto(
-      `/?moodle=${moodle}&php=${php}&scope=opcanary-${crypto.randomUUID()}&blueprint=${bp}`,
+      `/?moodle=${moodle}&php=${php}${opcache ? "&opcache=1" : ""}&scope=opcanary-${crypto.randomUUID()}&blueprint=${bp}`,
       { waitUntil: "domcontentloaded" },
     );
     await waitForPlaygroundReady(page);
@@ -99,10 +105,13 @@ for (const [moodle, php] of matrix) {
     const compiled = JSON.parse(first.body);
     expect(compiled.php.startsWith(php)).toBe(true);
     expect(compiled.value).toBe("v1");
-    if (php === "8.5") {
-      expect(compiled.fileCacheOnly, "OPcache file cache live on 8.5").toBe(
-        true,
-      );
+    if (live) {
+      expect(compiled.fileCacheOnly, "OPcache file cache is live").toBe(true);
+    }
+    if (opcache) {
+      expect(compiled.sapi).toBe("uwsgi");
+    } else {
+      expect(compiled.sapi).toBe("wasm");
     }
 
     const second = await call(2);

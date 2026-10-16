@@ -181,6 +181,14 @@ describe("parseQueryParams", () => {
     assert.strictEqual(parsed.phpCorsProxyUrl, "http://127.0.0.1:9999/?url=");
     assert.strictEqual(parsed.debug, "true");
   });
+
+  it("reads the experimental opcache flag and defaults it to null", () => {
+    assert.strictEqual(
+      parseQueryParams("https://example.com/?opcache=1").opcache,
+      "1",
+    );
+    assert.strictEqual(parseQueryParams("https://example.com/").opcache, null);
+  });
 });
 
 describe("resolveVersions", () => {

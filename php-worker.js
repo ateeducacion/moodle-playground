@@ -2,6 +2,7 @@ import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
+import { isOpcacheEnabled } from "./src/runtime/config-template.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
 import {
@@ -33,6 +34,7 @@ let moodleBranch = selection.moodleBranch;
 let phpCorsProxyUrlOverride = workerUrl.searchParams.get("phpCorsProxyUrl") || null;
 let debug = workerUrl.searchParams.get("debug") || null;
 let profile = workerUrl.searchParams.get("profile") || null;
+let opcacheParam = workerUrl.searchParams.get("opcache") || null;
 let bridgeChannel = null;
 let runtimeStatePromise = null;
 // The ready PHP instance, exposed for the static fast path (see
@@ -510,6 +512,7 @@ async function getRuntimeState() {
       webRoot,
       scopeId,
       forceCleanBoot,
+      opcache: isOpcacheEnabled(opcacheParam, config),
     });
 
     // Progress reporter, hoisted above refresh so the bundle-download band
@@ -942,6 +945,7 @@ function installMessageListener() {
       }
       if (params.debug !== undefined) debug = params.debug;
       if (params.profile !== undefined) profile = params.profile;
+      if (params.opcache !== undefined) opcacheParam = params.opcache;
       // Reset any cached runtime state so it boots with the new params.
       // Discard any pending crash snapshot too: it was hydrated from the
       // previous runtime/scope and must never be restored onto this freshly

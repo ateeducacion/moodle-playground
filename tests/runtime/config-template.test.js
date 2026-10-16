@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 import {
   createMoodleConfigPhp,
   createPhpIniEntries,
+  isOpcacheEnabled,
   MOODLE_ROOT,
   MOODLEDATA_ROOT,
   OPCACHE_BLACKLIST,
   OPCACHE_BLACKLIST_PATH,
+  OPCACHE_SAPI_NAME,
   TEMP_ROOT,
 } from "../../src/runtime/config-template.js";
 
@@ -213,6 +215,25 @@ describe("createPhpIniEntries", () => {
       entries["opcache.file_update_protection"],
       undefined,
       "PHP default 2 s kept",
+    );
+  });
+
+  it("enables the experimental OPcache SAPI switch from the URL or config", () => {
+    assert.strictEqual(OPCACHE_SAPI_NAME, "uwsgi");
+    assert.strictEqual(isOpcacheEnabled(null, {}), false, "off by default");
+    assert.strictEqual(isOpcacheEnabled(null, { opcache: true }), true);
+    assert.strictEqual(isOpcacheEnabled("1", {}), true);
+    assert.strictEqual(isOpcacheEnabled("true", {}), true);
+    assert.strictEqual(
+      isOpcacheEnabled("0", { opcache: true }),
+      false,
+      "URL wins",
+    );
+    assert.strictEqual(isOpcacheEnabled("off", { opcache: true }), false);
+    assert.strictEqual(
+      isOpcacheEnabled("", { opcache: true }),
+      true,
+      "empty = unset",
     );
   });
 

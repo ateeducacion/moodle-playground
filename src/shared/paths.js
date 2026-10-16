@@ -32,6 +32,7 @@ export function resolveRemoteUrl(
     phpCorsProxyUrl,
     debug,
     profile,
+    opcache,
   } = {},
 ) {
   const url = new URL("./remote.html", window.location.href);
@@ -55,6 +56,9 @@ export function resolveRemoteUrl(
   }
   if (profile) {
     url.searchParams.set("profile", profile);
+  }
+  if (opcache) {
+    url.searchParams.set("opcache", opcache);
   }
   return url;
 }
