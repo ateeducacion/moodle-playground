@@ -21,9 +21,99 @@ const SAMPLE_PLUGIN_ZIP_BASE64 =
 const SAMPLE_THEME_ZIP_BASE64 =
   "UEsDBBQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAdGhlbWVfbW9vdmUtbWFzdGVyL3ZlcnNpb24ucGhws7EvyCgAAFBLAQIUAxQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAAAAAAAAAAACAAQAAAAB0aGVtZV9tb292ZS1tYXN0ZXIvdmVyc2lvbi5waHBQSwUGAAAAAAEAAQBMAAAAQwAAAAAA";
 
+it("restores a plugin from the saved artifact without a network request or DB upgrade", async () => {
+  let code;
+  const files = [];
+  await getStepHandler("installMoodlePlugin")(
+    {
+      pluginType: "mod",
+      pluginName: "board",
+      url: "https://example.invalid/moving.zip",
+    },
+    {
+      restoreOnly: true,
+      pluginArchivePath: "/persist/blueprints/fixture/0.zip",
+      php: {
+        readFile: async (path) => {
+          assert.equal(path, "/persist/blueprints/fixture/0.zip");
+          return decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64);
+        },
+        _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
+        run: async (script) => {
+          code = script;
+          return { text: '{"ok":true}' };
+        },
+      },
+    },
+  );
+  assert.ok(files.includes("/www/moodle/mod/board/version.php"));
+  assert.match(code, /reset_caches\(\)/);
+  const restoreCode = code.slice(0, code.indexOf("return;"));
+  assert.match(restoreCode, /cache_helper::purge_all\(\)/);
+  assert.match(restoreCode, /localcachedir .*hookcallbacks\.php/);
+  assert.match(restoreCode, /cachedir .*hookcallbacks\.php/);
+  assert.ok(code.indexOf("return;") < code.indexOf("upgrade_noncore(true)"));
+});
+
+it("surfaces a failed plugin upgrade so it cannot receive a successful checkpoint", async () => {
+  await assert.rejects(
+    getStepHandler("installMoodlePlugin")(
+      {
+        pluginType: "mod",
+        pluginName: "board",
+        url: "https://example.invalid/plugin.zip",
+      },
+      {
+        restoreOnly: true,
+        pluginArchivePath: "/persist/fixture.zip",
+        php: {
+          readFile: async () => decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64),
+          _php: { mkdirTree() {}, writeFile() {} },
+          run: async () => ({ text: '{"ok":false,"error":"fixture failure"}' }),
+        },
+      },
+    ),
+    /registration did not complete/,
+  );
+});
+
 function decodeBase64Bytes(base64) {
   return Uint8Array.from(Buffer.from(base64, "base64"));
 }
+
+it("does not resurrect an explicitly uninstalled completed plugin or theme on reload", async () => {
+  for (const [step, pluginType] of [
+    ["installMoodlePlugin", "local"],
+    ["installTheme", "theme"],
+  ]) {
+    let reads = 0;
+    const result = await getStepHandler(step)(
+      {
+        url: "https://example.invalid/moving.zip",
+        pluginType,
+        pluginName: "removed",
+      },
+      {
+        restoreOnly: true,
+        previouslyCompleted: true,
+        dbFile: "/persist/db'fixture",
+        php: {
+          run: async (code) => {
+            assert.match(code, /mdl_config_plugins/);
+            assert.match(code, /db\\'fixture/);
+            return { text: "false" };
+          },
+          readFile: async () => {
+            reads++;
+            throw new Error("Must not restore removed code");
+          },
+        },
+      },
+    );
+    assert.equal(result.skipped, true);
+    assert.equal(reads, 0);
+  }
+});
 
 describe("installMoodlePlugin step handler", () => {
   const handler = getStepHandler("installMoodlePlugin");

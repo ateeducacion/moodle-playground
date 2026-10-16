@@ -455,12 +455,7 @@ function startFrameWatch(scopeId, runtimeId) {
   }, 150);
 }
 
-function navigateFrame(
-  scopeId,
-  runtimeId,
-  path,
-  { reload = false, force = false } = {},
-) {
+function navigateFrame(scopeId, runtimeId, path, { force = false } = {}) {
   const entryUrl = buildEntryUrl(scopeId, runtimeId, path);
   const entryHref = entryUrl.toString();
 
@@ -472,11 +467,6 @@ function navigateFrame(
   }
   setOverlayVisible(true);
   startFrameWatch(scopeId, runtimeId);
-
-  if (reload && frameEl.contentWindow) {
-    frameEl.contentWindow.location.reload();
-    return;
-  }
 
   if (!force && frameEl.src === entryHref) {
     return;
@@ -508,7 +498,9 @@ function bindShellCommands(scopeId, runtimeId) {
     }
 
     if (message?.kind === "refresh-site") {
-      navigateFrame(scopeId, runtimeId, activePath || "/", { reload: true });
+      // A forced GET, never location.reload(): reloading a page rendered from
+      // a POST would resubmit it (ADR-0035 forbids replaying mutations).
+      navigateFrame(scopeId, runtimeId, activePath || "/", { force: true });
       return;
     }
 

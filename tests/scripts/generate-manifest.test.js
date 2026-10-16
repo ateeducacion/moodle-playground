@@ -17,22 +17,26 @@ let localcachePath;
 
 function runGenerator(extraArgs) {
   const manifestPath = join(workDir, `manifest-${extraArgs.length}.json`);
-  execFileSync(process.execPath, [
-    SCRIPT,
-    "--bundle",
-    bundlePath,
-    "--channel",
-    "MOODLE_500_STABLE",
-    "--manifest",
-    manifestPath,
-    "--runtimeVersion",
-    "0.0.0-test",
-    "--release",
-    "5.0-test",
-    "--fileCount",
-    "3",
-    ...extraArgs,
-  ]);
+  execFileSync(
+    process.execPath,
+    [
+      SCRIPT,
+      "--bundle",
+      bundlePath,
+      "--channel",
+      "MOODLE_500_STABLE",
+      "--manifest",
+      manifestPath,
+      "--runtimeVersion",
+      "0.0.0-test",
+      "--release",
+      "5.0-test",
+      "--fileCount",
+      "3",
+      ...extraArgs,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
 
@@ -57,6 +61,38 @@ describe("generate-manifest.mjs snapshot fields", () => {
     assert.strictEqual(manifest.snapshot.fileName, "install.sq3");
     assert.ok(!("drained" in manifest.snapshot));
     assert.ok(!("localcache" in manifest.snapshot));
+    assert.ok(!("jsrev" in manifest.snapshot));
+  });
+
+  it("records the actual RequireJS seed revision without changing schema version", () => {
+    const manifest = runGenerator([
+      "--snapshot",
+      snapshotPath,
+      "--snapshotLocalcache",
+      localcachePath,
+      "--snapshotRequirejs",
+      "1",
+      "--snapshotJsrev",
+      "1791030540",
+    ]);
+    assert.equal(manifest.snapshot.jsrev, 1791030540);
+    assert.equal(manifest.snapshot.requirejs, true);
+    assert.equal(manifest.schemaVersion, 1);
+  });
+
+  it("rejects invalid seed revisions", () => {
+    for (const revision of ["0", "-1", "1.5", "9007199254740992", "12junk"]) {
+      assert.throws(() =>
+        runGenerator([
+          "--snapshot",
+          snapshotPath,
+          "--snapshotRequirejs",
+          "1",
+          "--snapshotJsrev",
+          revision,
+        ]),
+      );
+    }
   });
 
   it("emits drained + localcache metadata when passed", () => {

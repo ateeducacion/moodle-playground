@@ -10,8 +10,11 @@
  *
  * See docs/architecture/adr/ADR-0016-runtime-pr-file-overlay.md.
  */
+
+import { isVolatilePath } from "../checkpoint.js";
 import {
   escapePhp,
+  phpDropUnversionedCaches,
   phpPurgeMoodleCaches,
   phpRunCoreUpgrade,
 } from "../php/helpers.js";
@@ -48,7 +51,10 @@ async function handlePurgeMoodleCaches(_step, { php }) {
 /**
  * Apply a pull request's changed files over the booted Moodle base.
  */
-async function handleApplyPrOverlay(step, { php, publish }) {
+async function handleApplyPrOverlay(
+  step,
+  { php, publish, restoreOnly, overlayArchivePath },
+) {
   const root = step.root || DEFAULT_OVERLAY_ROOT;
   const maxFiles = Number.isFinite(step.maxFiles)
     ? step.maxFiles
@@ -57,6 +63,52 @@ async function handleApplyPrOverlay(step, { php, publish }) {
     ? step.maxFileBytes
     : DEFAULT_MAX_OVERLAY_FILE_BYTES;
   const runUpgrade = normalizeRunUpgrade(step.runUpgrade);
+
+  if (restoreOnly) {
+    const saved = JSON.parse(
+      new TextDecoder().decode(await php.readFile(overlayArchivePath)),
+    );
+    for (const op of saved) {
+      if (
+        !isVolatilePath(op.path) ||
+        (op.operation === "write" &&
+          !op.dataPath.startsWith(`${overlayArchivePath}-`))
+      ) {
+        throw new Error("Invalid saved overlay path.");
+      }
+      if (op.operation === "delete") await deletePath(php, op.path);
+      else if (op.operation === "write")
+        await writePath(php, op.path, await php.readFile(op.dataPath));
+      else throw new Error("Invalid saved overlay operation.");
+    }
+    // Never repeat the upgrade or a full purge: the first boot already bumped
+    // jsrev/themerev, so the revisioned seeds miss on their own.
+    if (step.purgeCaches !== false) {
+      await runPhpGraceful(
+        php,
+        phpDropUnversionedCaches(),
+        "applyPrOverlay restore cache reset",
+        publish,
+      );
+    }
+    return;
+  }
+
+  // A durable root is journaled already and never restored: do not copy it.
+  const archivePath = isVolatilePath(root) ? overlayArchivePath : null;
+  const saved = [];
+  const preserveWrite = async (path, bytes) => {
+    await writePath(php, path, bytes);
+    if (archivePath) {
+      const dataPath = `${archivePath}-${saved.length}.bin`;
+      await writePath(php, dataPath, bytes);
+      saved.push({ operation: "write", path, dataPath });
+    }
+  };
+  const preserveDelete = async (path) => {
+    await deletePath(php, path);
+    saved.push({ operation: "delete", path });
+  };
 
   // 1. Resolve the manifest, in one of three modes: a pre-resolved `files`
   //    list; a `repo` + `pr` pair (GitHub pull request); or a `repo` + `base` +
@@ -101,17 +153,17 @@ async function handleApplyPrOverlay(step, { php, publish }) {
   for (const op of ops) {
     try {
       if (op.status === "removed") {
-        await deletePath(php, joinRoot(root, op.path));
+        await preserveDelete(joinRoot(root, op.path));
         removed++;
       } else if (op.status === "renamed") {
-        await deletePath(php, joinRoot(root, op.previousPath));
+        await preserveDelete(joinRoot(root, op.previousPath));
         const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
-        await writePath(php, joinRoot(root, op.path), bytes);
+        await preserveWrite(joinRoot(root, op.path), bytes);
         written++;
       } else {
         // added | modified
         const bytes = await fetchBytes(op.rawUrl, step.proxy, maxFileBytes);
-        await writePath(php, joinRoot(root, op.path), bytes);
+        await preserveWrite(joinRoot(root, op.path), bytes);
         written++;
       }
     } catch (err) {
@@ -130,6 +182,15 @@ async function handleApplyPrOverlay(step, { php, publish }) {
         skipped ? `, ${skipped} skipped` : ""
       }.`,
       0.94,
+    );
+  }
+  // Save what was actually applied, even if some files were skipped: the DB is
+  // purged/upgraded against these files, so a reload must restore the same set.
+  if (archivePath) {
+    await writePath(
+      php,
+      archivePath,
+      new TextEncoder().encode(JSON.stringify(saved)),
     );
   }
 

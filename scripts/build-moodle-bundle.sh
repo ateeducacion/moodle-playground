@@ -282,6 +282,13 @@ if [ -f "$SNAPSHOT_DIR/install.sq3" ]; then
     # degradation). See ADR 0013.
     if unzip -l "$SNAPSHOT_DIR/localcache.zip" 2>/dev/null | grep -q ' requirejs/'; then
       SNAPSHOT_ARGS="$SNAPSHOT_ARGS --snapshotRequirejs 1"
+      JSREV=$(unzip -p "$SNAPSHOT_DIR/localcache.zip" requirejs/revision 2>/dev/null || true)
+      if [ -n "$JSREV" ]; then
+        case "$JSREV" in
+          *[!0-9]*) echo "Error: invalid RequireJS revision metadata" >&2; exit 1 ;;
+        esac
+        SNAPSHOT_ARGS="$SNAPSHOT_ARGS --snapshotJsrev $JSREV"
+      fi
     fi
   fi
 fi

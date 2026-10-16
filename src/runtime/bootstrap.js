@@ -5,6 +5,7 @@ import {
   createDecodedTarStream,
   extractTarStreamToPhp,
 } from "../../lib/streaming-tar-extract.js";
+import { createBlueprintCheckpoint } from "../blueprint/checkpoint.js";
 import { buildInstallConfig } from "../blueprint/index.js";
 import { escapePhp as escapePhpSingleQuoted } from "../blueprint/php/helpers.js";
 import {
@@ -1875,9 +1876,17 @@ async function prepareMoodleRuntime({
   }
 }
 
-async function loadInstallSnapshot(
+export async function loadInstallSnapshot(
   php,
-  { dbFile, appBaseUrl, publish, moodleBranch, manifest, prefetched },
+  {
+    dbFile,
+    appBaseUrl,
+    publish,
+    moodleBranch,
+    manifest,
+    prefetched,
+    blueprint,
+  },
 ) {
   const branch = moodleBranch || DEFAULT_MOODLE_BRANCH;
   const meta = getBranchMetadata(branch);
@@ -1945,12 +1954,53 @@ async function loadInstallSnapshot(
   }
 
   await php.writeFile(dbFile, bytes);
+  // Store provenance before a marker/seed/language task can survive a crash.
+  const checkpoint = blueprint?.steps?.length
+    ? await createBlueprintCheckpoint({ blueprint, php, dbFile, resume: false })
+    : null;
 
   // Note: $CFG->wwwroot comes from config.php (already written by
   // prepareMoodleRuntime), not from mdl_config. No DB rewriting needed.
 
   publish(`Pre-installed snapshot loaded (${bytes.length} bytes).`, 0.885);
-  return true;
+  return { checkpoint };
+}
+
+export async function flushBlueprintPersistence(php, publish) {
+  if (typeof php.flushPersistence !== "function") return;
+  const start = performance.now();
+  let result;
+  try {
+    result = await php.flushPersistence();
+  } catch (error) {
+    result = { ok: false, reason: error?.message || "flush-failed" };
+  }
+  publish(
+    `Blueprint persistence flush: ${Math.round(performance.now() - start)}ms, ${result.hydratedBytes || 0} bytes, ${result.flushedOps || 0} ops.`,
+    0.95,
+  );
+  if (!result.ok || result.enabled === false) {
+    publish(
+      `Could not save the provisioned state to browser storage (${result.reason || "persistence unavailable"}); this session works, but a reload may not keep it.`,
+      0.95,
+    );
+  }
+  return result;
+}
+
+export async function resetRecoveredMoodleCaches(php) {
+  // Bootstrap warmed MUC against the previous DB; discard it before re-login (ADR-0035).
+  const result = await php.run(`<?php
+define('CLI_SCRIPT', true);
+require('/www/moodle/config.php');
+\\cache_helper::purge_all();
+echo 'recovery-caches-cleared';
+`);
+  // includes(): debugdisplay notices from config.php may precede the marker.
+  if (!result.text.includes("recovery-caches-cleared"))
+    throw new Error(
+      "Moodle caches could not be cleared after database recovery.",
+    );
 }
 
 /**
@@ -1963,7 +2013,17 @@ async function loadInstallSnapshot(
  * prefix; on subpath deploys the runtime wwwroot path must be prepended or
  * theme images and fonts would 404.
  */
-export function buildLocalcacheSeedExtractScript(zipPath, wwwrootPath) {
+export function buildLocalcacheSeedExtractScript(
+  zipPath,
+  wwwrootPath,
+  requirejsRevision = null,
+) {
+  if (
+    requirejsRevision !== null &&
+    (!Number.isSafeInteger(requirejsRevision) || requirejsRevision <= 0)
+  ) {
+    throw new Error("Invalid RequireJS seed revision");
+  }
   const zip = escapePhpSingleQuoted(zipPath);
   const prefix = escapePhpSingleQuoted(wwwrootPath || "");
   return `<?php
@@ -1990,6 +2050,16 @@ try {
     $entries = $archive->numFiles;
     $archive->close();
     @unlink($zipPath);
+
+    // See docs/architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md.
+    $revision = ${requirejsRevision ?? "null"};
+    if ($revision !== null && (
+        !is_file($target . '/requirejs/revision') ||
+        trim(file_get_contents($target . '/requirejs/revision')) !== (string)$revision ||
+        !is_file($target . '/requirejs/' . sha1((string)$revision))
+    )) {
+        throw new RuntimeException('RequireJS seed revision mismatch');
+    }
 
     $rewritten = 0;
     $prefix = '${prefix}';
@@ -2081,7 +2151,11 @@ async function loadLocalcacheSeed(
   await php.writeFile(zipPath, bytes);
   const wwwrootPath = new URL(wwwroot).pathname.replace(/\/$/u, "");
   const result = await php.run(
-    buildLocalcacheSeedExtractScript(zipPath, wwwrootPath),
+    buildLocalcacheSeedExtractScript(
+      zipPath,
+      wwwrootPath,
+      manifest?.snapshot?.jsrev ?? null,
+    ),
   );
 
   const text = result.text ?? "";
@@ -2280,11 +2354,11 @@ echo json_encode($result);
 // lang overrides $CFG->lang, so without this the auto-logged-in admin keeps
 // seeing English even after the pack installs. Idempotent: a no-op when the
 // configured locale already matches. See docs/architecture/adr/ADR-0006-*.
-async function runSiteLanguageConfigure(php, locale) {
+export async function runSiteLanguageConfigure(php, locale, resume) {
   const lang = typeof locale === "string" ? locale.trim().toLowerCase() : "";
   // The code is interpolated into the PHP below, so validate strictly first
   // (it is re-checked in PHP too). Nothing to do for English or invalid codes.
-  if (!lang || lang === "en" || !/^[a-z][a-z0-9_]*$/.test(lang)) {
+  if (resume || !lang || lang === "en" || !/^[a-z][a-z0-9_]*$/.test(lang)) {
     return { ok: true, lang: lang || "en", action: "skipped" };
   }
   const code = `<?php
@@ -2715,6 +2789,10 @@ export async function bootstrapMoodle({
   }
 
   let localcacheSeeded = false;
+  const resumeBlueprint = Boolean(
+    installMarkerMatches || installState?.installed,
+  );
+  let checkpoint = null;
 
   if (!installMarkerMatches && !installState?.installed) {
     const tInstall = performance.now();
@@ -2727,9 +2805,11 @@ export async function bootstrapMoodle({
       moodleBranch: resolvedBranch,
       manifest: archive.manifest,
       prefetched: snapshotPrefetch,
+      blueprint,
     });
 
     if (snapshotLoaded) {
+      checkpoint = snapshotLoaded.checkpoint;
       await writeJsonFile(php, installStatePath, {
         ...manifestState,
         dbName,
@@ -2777,6 +2857,14 @@ export async function bootstrapMoodle({
           `Moodle CLI provisioning failed (incomplete stages: ${provisioningResult.missingStages.join(", ")}; ${detail}). ` +
             `Output: ${provisioningResult.output.slice(-1200)}`,
         );
+      }
+      if (blueprint?.steps?.length) {
+        checkpoint = await createBlueprintCheckpoint({
+          blueprint,
+          php,
+          dbFile,
+          resume: false,
+        });
       }
       await writeJsonFile(php, installStatePath, {
         ...manifestState,
@@ -2899,6 +2987,7 @@ export async function bootstrapMoodle({
       const localeResult = await runSiteLanguageConfigure(
         php,
         effectiveConfig.locale,
+        resumeBlueprint,
       );
       const localeMs = Math.round(performance.now() - tLocale);
       if (localeResult?.action === "applied") {
@@ -2962,10 +3051,29 @@ export async function bootstrapMoodle({
   // Blueprint step execution: run user-defined provisioning steps (categories,
   // courses, users, enrolments, etc.) between config normalization and auto-login.
   let blueprintLandingPage = null;
-  const hasLoginStep = blueprint?.steps?.some((s) => s.step === "login");
+  // True only once the executor ran: if it never starts (e.g. the checkpoint
+  // query throws), its login step never ran either, so auto-login must.
+  let hasLoginStep = false;
   if (blueprint?.steps?.length > 0) {
     try {
       const { executeBlueprint } = await import("../blueprint/executor.js");
+      checkpoint ||= await createBlueprintCheckpoint({
+        blueprint,
+        php,
+        dbFile,
+        resume: resumeBlueprint,
+      });
+      if (checkpoint.legacy) {
+        publish(
+          "Legacy persisted instance has no blueprint checkpoint; data-changing steps will not be replayed. Volatile resources with unknown provenance require an explicit rebuild.",
+          0.94,
+        );
+      } else if (checkpoint.changed) {
+        publish(
+          "The blueprint changed since this instance was provisioned; existing data was kept and only login/landing steps run. Use Reset Playground to apply the new blueprint.",
+          0.94,
+        );
+      }
       const result = await executeBlueprint(blueprint, {
         php,
         publish,
@@ -2975,7 +3083,10 @@ export async function bootstrapMoodle({
         scopeId,
         runtimeId: resolvedRuntimeId,
         onPluginInstalled,
+        checkpoint,
+        dbFile,
       });
+      hasLoginStep = blueprint.steps.some((s) => s.step === "login");
       if (result.landingPage) {
         blueprintLandingPage = result.landingPage;
       }
@@ -3009,6 +3120,10 @@ export async function bootstrapMoodle({
       publish(`Blueprint execution error: ${blueprintError.message}`, 0.95);
     }
   }
+  // Flush DB checkpoints and saved artifacts before live recovery can snapshot.
+  // A failed flush keeps the previous journal intact (it is replaced as a whole),
+  // so a reload stays coherent; only this session's persistence is at risk.
+  if (blueprint?.steps?.length) await flushBlueprintPersistence(php, publish);
   phases.blueprints.finish();
 
   // Auto-login: create a Moodle session for the admin user so the playground

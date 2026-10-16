@@ -366,6 +366,119 @@ describe("purgeMoodleCaches step", () => {
 });
 
 describe("applyPrOverlay step", () => {
+  it("restores the exact saved overlay offline without repeating its DB upgrade", async () => {
+    const php = createMockPhp();
+    const stored = new Map();
+    php.writeFile = async (path, bytes) => stored.set(path, bytes);
+    php.readFile = async (path) => {
+      assert.ok(stored.has(path), `missing saved file: ${path}`);
+      return stored.get(path);
+    };
+    const step = {
+      runUpgrade: "on",
+      files: [
+        {
+          path: "lib/a.php",
+          rawUrl: "https://fixture.invalid/moving",
+          status: "modified",
+        },
+      ],
+    };
+    const context = {
+      php,
+      overlayArchivePath: "/persist/blueprints/fixture/0-overlay.json",
+    };
+    const handler = getStepHandler("applyPrOverlay");
+    await withFetch(
+      async () => okBytesResponse(new Uint8Array([1, 2, 3])),
+      () => handler(step, context),
+    );
+    stored.delete("/www/moodle/lib/a.php");
+    php.runCalls.length = 0;
+    await withFetch(
+      async () => {
+        throw new Error("network must not run");
+      },
+      () => handler(step, { ...context, restoreOnly: true }),
+    );
+    assert.deepEqual(
+      stored.get("/www/moodle/lib/a.php"),
+      new Uint8Array([1, 2, 3]),
+    );
+    assert.ok(!php.runCalls.some((code) => code.includes("upgrade_noncore")));
+    // No full purge on reload: it would bump jsrev/themerev every time.
+    assert.ok(!php.runCalls.some((code) => code.includes("purge_all_caches")));
+    assert.ok(
+      php.runCalls.some((code) => code.includes("\\cache_helper::purge_all()")),
+    );
+    assert.ok(
+      php.runCalls.some((code) =>
+        code.includes("$CFG->localcachedir . '/hookcallbacks.php'"),
+      ),
+    );
+    assert.ok(
+      php.runCalls.some((code) =>
+        code.includes("$CFG->cachedir . '/hookcallbacks.php'"),
+      ),
+    );
+    assert.ok(php.runCalls.some((code) => code.includes("CompiledContainer")));
+    php.runCalls.length = 0;
+    await handler(
+      { ...step, purgeCaches: false },
+      { ...context, restoreOnly: true },
+    );
+    assert.equal(php.runCalls.length, 0);
+    stored.set(
+      context.overlayArchivePath,
+      new TextEncoder().encode(
+        JSON.stringify([{ operation: "delete", path: "/www/../persist/db" }]),
+      ),
+    );
+    await assert.rejects(
+      handler(step, { ...context, restoreOnly: true }),
+      /Invalid saved overlay path/,
+    );
+  });
+
+  it("checkpoints the applied subset and still purges/upgrades when a file is skipped", async () => {
+    const php = createMockPhp();
+    const stored = new Map();
+    php.writeFile = async (path, bytes) => stored.set(path, bytes);
+    const archive = "/persist/blueprints/fixture/0-overlay.json";
+    await withFetch(
+      async (url) =>
+        String(url).includes("missing")
+          ? { ok: false, status: 404 }
+          : okBytesResponse(new Uint8Array([7])),
+      () =>
+        getStepHandler("applyPrOverlay")(
+          {
+            runUpgrade: "on",
+            files: [
+              {
+                path: "lib/a.php",
+                rawUrl: "https://fixture.invalid/a",
+                status: "modified",
+              },
+              {
+                path: "lib/b.php",
+                rawUrl: "https://fixture.invalid/missing",
+                status: "modified",
+              },
+            ],
+          },
+          { php, overlayArchivePath: archive },
+        ),
+    );
+    const saved = JSON.parse(new TextDecoder().decode(stored.get(archive)));
+    assert.deepEqual(
+      saved.map((op) => op.path),
+      ["/www/moodle/lib/a.php"],
+    );
+    assert.ok(php.runCalls.some((code) => code.includes("purge_all_caches")));
+    assert.ok(php.runCalls.some((code) => code.includes("upgrade_noncore")));
+  });
+
   it("writes added/modified files, deletes removed, and renames", async () => {
     const php = createMockPhp();
     const handler = getStepHandler("applyPrOverlay");

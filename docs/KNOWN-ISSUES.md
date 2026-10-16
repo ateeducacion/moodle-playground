@@ -30,8 +30,52 @@ The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handle
 all encryption needs. The runtime also downgrades the `admin/environment.xml` sodium
 check from `required` to `optional`, so plugin upgrades are not blocked.
 
-**OPcache** also cannot work in the WASM SAPI (PHP/Emscripten limitation). The
-environment check warning for OPcache is expected and harmless.
+**OPcache** is configured but does not start under the current `wasm` SAPI in
+PHP8.3.33. Changing the SAPI can activate file-cache-only mode, but the audit's
+canary then executed stale code after mutation and reset/invalidate returned false.
+Do not activate that workaround without a safe invalidation policy; this work
+does not change OPcache configuration or SAPI.
+
+### JavaScript seeds after upgrades and purges
+
+Moodle now retains its own `jsrev`. New seeds publish `snapshot.jsrev`; old sha1(1)
+seeds or a changed DB revision use the existing per-module fallback rather than
+serving old code under a new revision. Purging localcache can make navigation
+slower. Rebuild assets to get a matching seed; never relabel the old combine.
+See [ADR-0033](architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md).
+
+`cachejs` stays enabled after a purge when the seed is advertised. Without a
+matching combine, the patched `requirejs.php` serves AMD modules individually
+under the valid revision, and ESM stays public/immutable. The first page after a
+purge is still slower (per-module AMD, theme CSS compiled in WASM).
+
+### Persisted blueprint replay
+
+New instances checkpoint successful provisioning in SQLite. Reload skips durable
+mutations and arbitrary PHP/POST, restores declared volatile files and saved
+plugin/overlay artifacts, and recreates login. Legacy instances without checkpoints
+and incomplete provisioning are not automatically replayed. Their unknown volatile
+artifacts may require an explicit rebuild (back up retained data first). Arbitrary
+runtime code/plugin edits in `/www` are still volatile; this is not a general core
+persistence layer. Reload after a manual plugin upgrade is not validated: its
+persisted database version can be newer than the blueprint's saved ZIP. Back up
+the instance before testing that workflow. See
+[ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
+
+An unfinished plugin can restore its saved code without rerunning registration;
+the incomplete step remains a warning/error. Completed plugins removed through
+Moodle are not resurrected if their installed-version record is absent. Legacy
+sites without an exact saved artifact still need explicit recovery, not an
+automatic download from a potentially changed URL.
+
+Plugin/overlay restores clear MUC and both on-disk hook registries without
+bumping JS/theme revisions. `applyPrOverlay` with `purgeCaches:false` opts out:
+callbacks or strings warmed before restoration can then remain stale.
+
+Live crash recovery clears MUC after restoring the database and before re-login,
+without changing JS/theme revisions, so bootstrap's old cached configuration is
+not served against the recovered DB. This does not guarantee recovery from every
+real memory-corruption or out-of-memory failure.
 
 ## 2. PHP CLI / proc_open is not available in the WASM runtime
 

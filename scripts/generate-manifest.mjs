@@ -108,6 +108,19 @@ if (args.snapshot) {
     manifest.snapshot.requirejs = true;
   }
 
+  // See docs/architecture/adr/ADR-0033-moodle-owned-javascript-revisions.md.
+  if (args.snapshotJsrev !== undefined) {
+    const revision = Number(args.snapshotJsrev);
+    if (
+      !/^[1-9]\d*$/u.test(args.snapshotJsrev) ||
+      !Number.isSafeInteger(revision) ||
+      !manifest.snapshot.requirejs
+    ) {
+      throw new Error("Invalid RequireJS seed revision");
+    }
+    manifest.snapshot.jsrev = revision;
+  }
+
   if (args.snapshotLocalcache) {
     const seedPath = resolve(args.snapshotLocalcache);
     const seedStats = statSync(seedPath);

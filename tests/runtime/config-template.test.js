@@ -140,19 +140,16 @@ describe("createMoodleConfigPhp", () => {
     assert.ok(!config.includes("is_dir($CFG->localcachedir . '/requirejs')"));
   });
 
-  it("re-enables cachejs and pins jsrev when the RequireJS seed is present", () => {
+  it("enables the RequireJS seed without overriding Moodle's mutable revision", () => {
     const config = createMoodleConfigPhp({
       ...baseParams,
       requirejsSeeded: true,
     });
-    // jsrev forced to 1 so the URL revision matches the seeded sha1(1) file.
-    assert.ok(config.includes("$CFG->jsrev = 1;"));
-    // cachejs flips back to false (self-heal) if localcache/requirejs is purged.
-    assert.ok(
-      config.includes(
-        "$CFG->cachejs = is_dir($CFG->localcachedir . '/requirejs');",
-      ),
-    );
+    assert.ok(!config.includes("$CFG->jsrev ="));
+    // Stays on after a purge: the patched requirejs.php falls back per module
+    // under the positive revision instead of dropping to jsrev=-1.
+    assert.ok(config.includes("$CFG->cachejs = true;"));
+    assert.ok(!config.includes("is_dir($CFG->localcachedir . '/requirejs')"));
     // Must NOT also emit the unconditional disable.
     assert.ok(!config.includes("$CFG->cachejs = false;"));
   });

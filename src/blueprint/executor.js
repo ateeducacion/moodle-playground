@@ -1,3 +1,4 @@
+import { getReloadStep, RUNTIME_STEPS } from "./checkpoint.js";
 import { substituteConstants } from "./constants.js";
 import { ResourceRegistry } from "./resources.js";
 import { getStepHandler } from "./steps/index.js";
@@ -69,7 +70,7 @@ export async function executeBlueprint(blueprint, context) {
   };
 
   for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
+    let step = steps[i];
     const stepName = step.step;
     const label = sanitizeStepLabel(step);
     const startMs = Math.round(now() - t0);
@@ -78,7 +79,43 @@ export async function executeBlueprint(blueprint, context) {
 
     publish(`Blueprint step ${i + 1}/${steps.length}: ${stepName}`, progress);
 
-    const handler = getStepHandler(stepName);
+    const checkpoint = context.checkpoint;
+    // Per runtime: each runtime has its own DB, but the scope shares /persist.
+    const artifactRoot = checkpoint
+      ? `/persist/blueprints/${context.runtimeId || "runtime"}/${checkpoint.fingerprint}/${i}`
+      : null;
+    const filesystemArtifactPath = artifactRoot && `${artifactRoot}-files`;
+    if (checkpoint?.resuming) {
+      const runtimeOnly = checkpoint.legacy || checkpoint.changed;
+      const isRuntimeStep = RUNTIME_STEPS.has(stepName);
+      step =
+        runtimeOnly && !isRuntimeStep
+          ? null
+          : getReloadStep(
+              step,
+              checkpoint.completed.has(i),
+              filesystemArtifactPath,
+            );
+      if (!runtimeOnly && !isRuntimeStep && !checkpoint.completed.has(i)) {
+        firstFailure ||= {
+          failedStep: `${i + 1}:${stepName}`,
+          error:
+            "Previously unfinished step was not replayed automatically; saved code may only be restored.",
+        };
+      }
+      if (["runPhpCode", "runPhpScript"].includes(stepName)) {
+        publish(
+          `Blueprint step ${i + 1}: arbitrary PHP was not replayed; volatile file effects are not restored. Declare files with filesystem steps.`,
+          progress,
+        );
+      }
+      if (!step) {
+        recordTiming(i + 1, stepName, label, startMs, "skipped");
+        continue;
+      }
+    }
+
+    const handler = getStepHandler(step.step);
     if (!handler) {
       recordTiming(i + 1, stepName, label, startMs, "failed");
       const error = `Unknown step type: ${stepName}`;
@@ -93,7 +130,16 @@ export async function executeBlueprint(blueprint, context) {
     }
 
     try {
-      const result = await handler(step, stepContext);
+      const result = await handler(step, {
+        ...stepContext,
+        restoreOnly: Boolean(checkpoint?.resuming),
+        previouslyCompleted: Boolean(
+          checkpoint?.resuming && checkpoint.completed.has(i),
+        ),
+        filesystemArtifactPath,
+        pluginArchivePath: artifactRoot && `${artifactRoot}.zip`,
+        overlayArchivePath: artifactRoot && `${artifactRoot}-overlay.json`,
+      });
       // setLandingPage step can override the landing page
       if (stepName === "setLandingPage" && step.path) {
         landingPage = step.path;
@@ -118,11 +164,15 @@ export async function executeBlueprint(blueprint, context) {
       }
       // Non-fatal by default (ADR-0005): keep provisioning the remaining steps
       // so one transient failure (e.g. a resource download) does not discard
-      // the whole playground. `critical: true` opts a step into aborting.
-      if (step.critical) {
+      // the whole playground. `critical: true` opts a step into aborting —
+      // except on reload, where nothing mutates and login/landing must still run.
+      if (step.critical && !checkpoint?.resuming) {
         return { success: false, landingPage, ...firstFailure, timings };
       }
+      continue;
     }
+    // Checkpoint failures must abort, not be treated as an optional step error.
+    if (checkpoint && !checkpoint.resuming) await checkpoint.save(i);
   }
 
   return {
