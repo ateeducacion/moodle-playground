@@ -65,8 +65,10 @@ without checkpoints log a warning; do not clear valuable data just to silence it
 If the blueprint behind the same URL changed, reload keeps the data, runs only
 login/landing and warns; use Reset Playground to apply the new blueprint.
 Back up before an explicit Reset/rebuild. Runtime code edits outside declared steps
-are not persistent. A manual plugin upgrade can leave the retained DB newer than
-the blueprint's saved ZIP; that reload workflow is not validated. Back up before
+are not persistent. Plugin/theme ZIPs are downloaded again on reload (no copy is
+kept, ADR-0036), so an offline reload cannot restore them and a moving URL can
+bring newer code than the retained DB. A manual plugin upgrade can leave the
+retained DB newer than the downloaded ZIP; that reload workflow is not validated. Back up before
 testing it. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
 Restored plugins/overlays invalidate MUC, both `hookcallbacks.php` registries,

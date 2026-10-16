@@ -23,6 +23,10 @@ ai_assistance:
 
 Accepted (2026-10-16), after the PR #341 reviews and green CI in Chromium and
 Firefox. The maintainer approved the replay policy.
+**Amended by [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md)**
+(2026-10-16): plugin/theme ZIPs and `unzip` archives are no longer copied to
+`/persist/blueprints`; a reload downloads them again. Overlay and other file copies
+below still apply.
 
 ## Context
 

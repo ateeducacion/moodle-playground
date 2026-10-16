@@ -53,13 +53,15 @@ purge is still slower (per-module AMD, theme CSS compiled in WASM).
 
 New instances checkpoint successful provisioning in SQLite. Reload skips durable
 mutations and arbitrary PHP/POST, restores declared volatile files and saved
-plugin/overlay artifacts, and recreates login. Legacy instances without checkpoints
+overlay artifacts, downloads plugin/theme ZIPs again, and recreates login. Legacy instances without checkpoints
 and incomplete provisioning are not automatically replayed. Their unknown volatile
 artifacts may require an explicit rebuild (back up retained data first). Arbitrary
 runtime code/plugin edits in `/www` are still volatile; this is not a general core
 persistence layer. Reload after a manual plugin upgrade is not validated: its
-persisted database version can be newer than the blueprint's saved ZIP. Back up
-the instance before testing that workflow. See
+persisted database version can be newer than the plugin ZIP downloaded again on
+reload. A moving URL (e.g. a branch archive) can also bring code newer than the
+database; Moodle then asks the admin to upgrade. Back up the instance before
+testing that workflow. See
 [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
 An unfinished plugin can restore its saved code without rerunning registration;

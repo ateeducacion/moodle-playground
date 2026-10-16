@@ -6,7 +6,10 @@ import {
   isVolatilePath,
 } from "../../src/blueprint/checkpoint.js";
 import { executeBlueprint } from "../../src/blueprint/executor.js";
-import { registerStep } from "../../src/blueprint/steps/index.js";
+import {
+  getStepHandler,
+  registerStep,
+} from "../../src/blueprint/steps/index.js";
 
 it("checkpoints before provisioning and only marks completed steps after a successful write", async () => {
   const calls = [];
@@ -150,10 +153,16 @@ it("preserves critical on transformed copy and move reload steps", () => {
     assert.equal(getReloadStep(step, true, "/persist/artifact").critical, true);
 });
 
-it("restores an unfinished plugin's saved ZIP without upgrading or declaring it complete", async () => {
+it("restores an unfinished plugin's code by downloading it again, without upgrading or declaring it complete", async () => {
   const { strToU8, zipSync } = await import("fflate");
   const files = [];
   const scripts = [];
+  const fetched = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return new Response(zipSync({ "partial/version.php": strToU8("<?php") }));
+  };
   const result = await executeBlueprint(
     {
       steps: [
@@ -173,14 +182,7 @@ it("restores an unfinished plugin's saved ZIP without upgrading or declaring it 
         completed: new Set(),
       },
       php: {
-        readFile: async (path) => {
-          // Runtime-scoped: another runtime in the scope must not overwrite it.
-          assert.equal(
-            path,
-            "/persist/blueprints/php83-moodle53/partial/0.zip",
-          );
-          return zipSync({ "partial/version.php": strToU8("<?php") });
-        },
+        readFile: async () => assert.fail("must not read a saved ZIP copy"),
         _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
         run: async (code) => {
           scripts.push(code);
@@ -189,7 +191,10 @@ it("restores an unfinished plugin's saved ZIP without upgrading or declaring it 
       },
     },
   );
+  globalThis.fetch = originalFetch;
+  assert.deepEqual(fetched, ["https://example.invalid/moving.zip"]);
   assert.ok(files.includes("/www/moodle/local/partial/version.php"));
+  assert.ok(!files.some((path) => path.startsWith("/persist/")));
   assert.ok(
     scripts[0].indexOf("return;") < scripts[0].indexOf("upgrade_noncore(true)"),
   );
@@ -452,4 +457,25 @@ it("aborts further mutations when checkpoint persistence fails even on a noncrit
     /disk failure/,
   );
   assert.deepEqual(calls, ["mutation"]);
+});
+
+it("re-resolves unzip archives on reload instead of keeping a copy", async () => {
+  const { strToU8, zipSync } = await import("fflate");
+  const step = {
+    step: "unzip",
+    destination: "/www/moodle/public/fixture",
+    data: { url: "https://example.invalid/archive.zip" },
+  };
+  // Same resource as the first boot: nothing points at a saved copy (ADR-0036).
+  assert.equal(getReloadStep(step, true, "/persist/artifact"), step);
+  const written = [];
+  await getStepHandler("unzip")(step, {
+    filesystemArtifactPath: "/persist/blueprints/runtime/f/0-files",
+    resources: { resolve: async () => zipSync({ "a.txt": strToU8("a") }) },
+    php: {
+      writeFile: async () => assert.fail("must not save an archive copy"),
+      _php: { mkdirTree() {}, writeFile: (path) => written.push(path) },
+    },
+  });
+  assert.deepEqual(written, ["/www/moodle/public/fixture/a.txt"]);
 });

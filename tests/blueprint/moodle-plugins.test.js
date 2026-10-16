@@ -21,31 +21,48 @@ const SAMPLE_PLUGIN_ZIP_BASE64 =
 const SAMPLE_THEME_ZIP_BASE64 =
   "UEsDBBQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAdGhlbWVfbW9vdmUtbWFzdGVyL3ZlcnNpb24ucGhws7EvyCgAAFBLAQIUAxQAAAAIAHcBgVyusmujBwAAAAUAAAAeAAAAAAAAAAAAAACAAQAAAAB0aGVtZV9tb292ZS1tYXN0ZXIvdmVyc2lvbi5waHBQSwUGAAAAAAEAAQBMAAAAQwAAAAAA";
 
-it("restores a plugin from the saved artifact without a network request or DB upgrade", async () => {
+// Serve one ZIP for every download and count them; restores the offline stub.
+async function withPluginDownload(fn) {
+  const offline = globalThis.fetch;
+  const fetched = [];
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return new Response(decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64));
+  };
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = offline;
+  }
+  return fetched;
+}
+
+it("downloads a plugin again on reload, keeps no copy and does not upgrade the DB", async () => {
   let code;
   const files = [];
-  await getStepHandler("installMoodlePlugin")(
-    {
-      pluginType: "mod",
-      pluginName: "board",
-      url: "https://example.invalid/moving.zip",
-    },
-    {
-      restoreOnly: true,
-      pluginArchivePath: "/persist/blueprints/fixture/0.zip",
-      php: {
-        readFile: async (path) => {
-          assert.equal(path, "/persist/blueprints/fixture/0.zip");
-          return decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64);
-        },
-        _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
-        run: async (script) => {
-          code = script;
-          return { text: '{"ok":true}' };
+  const fetched = await withPluginDownload(() =>
+    getStepHandler("installMoodlePlugin")(
+      {
+        pluginType: "mod",
+        pluginName: "board",
+        url: "https://example.invalid/moving.zip",
+      },
+      {
+        restoreOnly: true,
+        php: {
+          // No archive copy is read from or written to /persist (ADR-0036).
+          readFile: async () => assert.fail("must not read a saved copy"),
+          writeFile: async () => assert.fail("must not save a copy"),
+          _php: { mkdirTree() {}, writeFile: (path) => files.push(path) },
+          run: async (script) => {
+            code = script;
+            return { text: '{"ok":true}' };
+          },
         },
       },
-    },
+    ),
   );
+  assert.deepEqual(fetched, ["https://example.invalid/moving.zip"]);
   assert.ok(files.includes("/www/moodle/mod/board/version.php"));
   assert.match(code, /reset_caches\(\)/);
   const restoreCode = code.slice(0, code.indexOf("return;"));
@@ -57,21 +74,23 @@ it("restores a plugin from the saved artifact without a network request or DB up
 
 it("surfaces a failed plugin upgrade so it cannot receive a successful checkpoint", async () => {
   await assert.rejects(
-    getStepHandler("installMoodlePlugin")(
-      {
-        pluginType: "mod",
-        pluginName: "board",
-        url: "https://example.invalid/plugin.zip",
-      },
-      {
-        restoreOnly: true,
-        pluginArchivePath: "/persist/fixture.zip",
-        php: {
-          readFile: async () => decodeBase64Bytes(SAMPLE_PLUGIN_ZIP_BASE64),
-          _php: { mkdirTree() {}, writeFile() {} },
-          run: async () => ({ text: '{"ok":false,"error":"fixture failure"}' }),
+    withPluginDownload(() =>
+      getStepHandler("installMoodlePlugin")(
+        {
+          pluginType: "mod",
+          pluginName: "board",
+          url: "https://example.invalid/plugin.zip",
         },
-      },
+        {
+          restoreOnly: true,
+          php: {
+            _php: { mkdirTree() {}, writeFile() {} },
+            run: async () => ({
+              text: '{"ok":false,"error":"fixture failure"}',
+            }),
+          },
+        },
+      ),
     ),
     /registration did not complete/,
   );

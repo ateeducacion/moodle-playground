@@ -222,45 +222,33 @@ function parseGitHubUrl(url) {
 
 async function installViaZipDownload(zipUrl, targetDir, context) {
   const { php, publish } = context;
-  let zipBytes;
-  if (context.restoreOnly) {
-    // Reuse the exact installed artifact; a moving URL must not upgrade the DB on reload.
-    zipBytes = await php.readFile(context.pluginArchivePath);
-  } else {
-    const downloadUrl = resolvePluginZipDownloadUrl(zipUrl, context);
-    if (publish) {
-      publish(
-        downloadUrl === zipUrl
-          ? `Downloading plugin ZIP from ${zipUrl}`
-          : `Downloading plugin ZIP from ${zipUrl} via addon proxy`,
-        0.93,
-      );
-    }
-
-    // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
-    // errors on browser reloads (cache revalidation race with the proxy).
-    let response = await fetch(downloadUrl, { cache: "no-store" });
-    if (!response.ok && (response.status === 502 || response.status === 503)) {
-      if (publish) publish("Plugin download failed, retrying…", 0.93);
-      await new Promise((r) => setTimeout(r, 1000));
-      response = await fetch(downloadUrl, { cache: "no-store" });
-    }
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
-      );
-    }
-    zipBytes = new Uint8Array(await response.arrayBuffer());
-    if (context.pluginArchivePath) {
-      php._php.mkdirTree(
-        context.pluginArchivePath.slice(
-          0,
-          context.pluginArchivePath.lastIndexOf("/"),
-        ),
-      );
-      await php.writeFile(context.pluginArchivePath, zipBytes);
-    }
+  // Downloaded on every boot, reloads included: no copy is kept in /persist
+  // (playgrounds are short-lived). On reload runMoodleUpgrade only restores
+  // discovery. See docs/architecture/adr/ADR-0036-redownload-blueprint-archives-on-reload.md.
+  const downloadUrl = resolvePluginZipDownloadUrl(zipUrl, context);
+  if (publish) {
+    publish(
+      downloadUrl === zipUrl
+        ? `Downloading plugin ZIP from ${zipUrl}`
+        : `Downloading plugin ZIP from ${zipUrl} via addon proxy`,
+      0.93,
+    );
   }
+
+  // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
+  // errors on browser reloads (cache revalidation race with the proxy).
+  let response = await fetch(downloadUrl, { cache: "no-store" });
+  if (!response.ok && (response.status === 502 || response.status === 503)) {
+    if (publish) publish("Plugin download failed, retrying…", 0.93);
+    await new Promise((r) => setTimeout(r, 1000));
+    response = await fetch(downloadUrl, { cache: "no-store" });
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
+    );
+  }
+  const zipBytes = new Uint8Array(await response.arrayBuffer());
 
   if (publish) publish(`Extracting plugin to ${targetDir}`, 0.935);
 

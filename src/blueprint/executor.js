@@ -100,7 +100,7 @@ export async function executeBlueprint(blueprint, context) {
         firstFailure ||= {
           failedStep: `${i + 1}:${stepName}`,
           error:
-            "Previously unfinished step was not replayed automatically; saved code may only be restored.",
+            "Previously unfinished step was not replayed automatically; its code may only be restored.",
         };
       }
       if (["runPhpCode", "runPhpScript"].includes(stepName)) {
@@ -137,7 +137,6 @@ export async function executeBlueprint(blueprint, context) {
           checkpoint?.resuming && checkpoint.completed.has(i),
         ),
         filesystemArtifactPath,
-        pluginArchivePath: artifactRoot && `${artifactRoot}.zip`,
         overlayArchivePath: artifactRoot && `${artifactRoot}-overlay.json`,
       });
       // setLandingPage step can override the landing page

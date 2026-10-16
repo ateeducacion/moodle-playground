@@ -48,12 +48,13 @@ folder and keep their original lightweight format (see
 | [ADR-0032](ADR-0032-moodle-53-lts-default-branch.md) | Moodle 5.3 LTS is the default branch | Accepted | 2026-10-03 |
 | [ADR-0033](ADR-0033-moodle-owned-javascript-revisions.md) | Moodle-owned JavaScript revisions and versioned RequireJS seeds | Accepted | 2026-10-16 |
 | [ADR-0034](ADR-0034-public-immutable-esm-cache.md) | Cache public immutable ESM responses inside the existing scope | Accepted | 2026-10-16 |
-| [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Accepted | 2026-10-16 |
+| [ADR-0035](ADR-0035-blueprint-reload-checkpoints.md) | Checkpoint provisioning and restore volatile blueprint artifacts | Accepted (amended by ADR-0036) | 2026-10-16 |
+| [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md) | Download blueprint plugin and unzip archives again on reload | Accepted | 2026-10-16 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers
 early checkpoints, shell identity, partial artifacts and non-replayed crash recovery.
-All three remain Proposed.
+All three were accepted when PR #341 merged.
 
 The second-review follow-up also clears the separate on-disk hook registries
 on plugin/overlay restore; ADR-0035 records this distinction from MUC.
