@@ -6,7 +6,7 @@
  */
 
 import { readZipEntries } from "../../../lib/moodle-loader.js";
-import { escapePhp } from "../php/helpers.js";
+import { escapePhp, UNVERSIONED_CACHE_CLEAR_BLOCK } from "../php/helpers.js";
 
 const MOODLE_ROOT = "/www/moodle";
 
@@ -349,10 +349,7 @@ ${
     ? `
 // Restore discovery only: the plugin's install/upgrade already changed this DB.
 \\core_plugin_manager::reset_caches();
-@unlink($CFG->localcachedir . '/di/CompiledContainer.php');
-// Boot requests filled MUC (hooks, callbacks, strings) before this code existed;
-// purge_all() empties it without bumping jsrev/themerev.
-\\cache_helper::purge_all();
+${UNVERSIONED_CACHE_CLEAR_BLOCK}
 echo json_encode(['ok' => true]);
 return;
 `

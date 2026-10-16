@@ -69,6 +69,11 @@ are not persistent. A manual plugin upgrade can leave the retained DB newer than
 the blueprint's saved ZIP; that reload workflow is not validated. Back up before
 testing it. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md).
 
+Restored plugins/overlays invalidate MUC, both `hookcallbacks.php` registries,
+DI and bytecode without changing JS/theme revisions. An overlay with
+`purgeCaches:false` skips this: remove that opt-out when restored callbacks or
+strings remain stale. MUC alone does not invalidate Moodle's on-disk hook lists.
+
 `Blueprint persistence flush` reports elapsed milliseconds, hydrated bytes and
 operations. Quota failures or unavailable persistence warn that reload may lose
 this session's changes; they do not block using the live instance. Back up before

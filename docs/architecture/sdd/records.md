@@ -15,3 +15,4 @@ update the table.
 
 SDD-0002 includes the PR #341 review follow-up, targeted browser validation and
 the remaining legacy/manual-plugin recovery limits; its status remains In Review.
+The second review adds hook-registry invalidation and exact POST/Reset regressions.

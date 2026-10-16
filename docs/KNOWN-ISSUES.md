@@ -68,6 +68,10 @@ Moodle are not resurrected if their installed-version record is absent. Legacy
 sites without an exact saved artifact still need explicit recovery, not an
 automatic download from a potentially changed URL.
 
+Plugin/overlay restores clear MUC and both on-disk hook registries without
+bumping JS/theme revisions. `applyPrOverlay` with `purgeCaches:false` opts out:
+callbacks or strings warmed before restoration can then remain stale.
+
 Live crash recovery clears MUC after restoring the database and before re-login,
 without changing JS/theme revisions, so bootstrap's old cached configuration is
 not served against the recovered DB. This does not guarantee recovery from every

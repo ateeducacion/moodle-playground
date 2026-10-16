@@ -167,14 +167,41 @@ echo 'saved';`,
     ],
   });
   let blueprint = makeBlueprint("Original course");
-  const server = await serve((_request, response) =>
-    response.end(JSON.stringify(blueprint)),
-  );
+  let sourceUnavailable = false;
+  let downloads = 0;
+  const server = await serve((_request, response) => {
+    downloads++;
+    response.writeHead(sourceUnavailable ? 503 : 200);
+    response.end(sourceUnavailable ? "unavailable" : JSON.stringify(blueprint));
+  });
   const url = (source) =>
     `./?moodle=5.3&scope=${scope}&blueprint-url=${encodeURIComponent(`${server.url}/${source}`)}`;
+  // Firefox can report about:blank after Reset/reload despite the rendered DOM.
+  const courseState = (expected, previous) =>
+    page.evaluate(
+      ({ expected, previous }) => {
+        const app = document
+          .querySelector("#site-frame")
+          ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+        return {
+          expected: app?.document.body?.innerText.includes(expected),
+          previous: app?.document.body?.innerText.includes(previous),
+          visible: Boolean(
+            app?.document.querySelector(".coursebox")?.getBoundingClientRect()
+              .height,
+          ),
+          readyState: app?.document.readyState,
+          pendingJs: app?.M?.util?.pending_js,
+          loggedIn: Boolean(
+            app?.document.querySelector('a[href*="/login/logout.php"]'),
+          ),
+        };
+      },
+      { expected, previous },
+    );
   try {
     await page.goto(url("same.json"), { waitUntil: "domcontentloaded" });
-    let frame = await ready(page, ".coursebox");
+    const frame = await ready(page, ".coursebox");
     await expect(frame.locator("body")).toContainText("Original course");
     const edited = await frame.evaluate(async () => {
       const prefix = location.pathname.match(
@@ -216,39 +243,44 @@ echo 'saved';`,
       .toBe(true);
     blueprint = makeBlueprint("Changed course");
     await page.reload({ waitUntil: "domcontentloaded" });
-    frame = await ready(page, ".coursebox");
-    await expect(frame.locator("body")).toContainText("User retained");
-    await expect(frame.locator("body")).not.toContainText("Changed course");
-    // Moodle can render logout in both the user menu and page footer.
-    await expect(frame.locator('a[href*="/login/logout.php"]')).not.toHaveCount(
-      0,
-    );
+    await waitForShellReady(page);
+    await expect
+      .poll(() => courseState("User retained", "Changed course"), {
+        timeout: readyTimeoutMs,
+      })
+      .toMatchObject({
+        expected: true,
+        previous: false,
+        visible: true,
+        readyState: "complete",
+        pendingJs: [],
+        loggedIn: true,
+      });
     await expect(page.locator("#address-input")).toHaveValue(
       "/course/index.php",
     );
     await expect(page.locator("#log-panel")).toContainText(
       "The blueprint changed",
     );
+    // Reset must use the resolved blueprint even if its source is now offline.
+    const downloadsBeforeReset = downloads;
+    sourceUnavailable = true;
     await page.locator("#panel-toggle-button").click();
     await page.locator("#reset-button").click();
     await expect
-      .poll(
-        async () => {
-          try {
-            return (
-              await findMoodleFrame(page)
-                ?.locator("body")
-                .innerText({ timeout: 1000 })
-            )?.includes("Changed course");
-          } catch {
-            return false;
-          }
-        },
-        { timeout: readyTimeoutMs },
-      )
-      .toBe(true);
-    frame = await ready(page, ".coursebox");
-    await expect(frame.locator("body")).not.toContainText("User retained");
+      .poll(() => courseState("Changed course", "User retained"), {
+        timeout: readyTimeoutMs,
+      })
+      .toMatchObject({
+        expected: true,
+        previous: false,
+        visible: true,
+        readyState: "complete",
+        pendingJs: [],
+        loggedIn: true,
+      });
+    expect(downloads).toBe(downloadsBeforeReset);
+    sourceUnavailable = false;
     blueprint = makeBlueprint("Different source course");
     expect(
       await page.evaluate(
@@ -258,37 +290,17 @@ echo 'saved';`,
     ).toBe(`url:${server.url}/same.json`);
     await page.goto(url("different.json"), { waitUntil: "domcontentloaded" });
     await waitForShellReady(page);
-    // Firefox may report about:blank for the rendered app; inspect its actual DOM.
     await expect
-      .poll(
-        () =>
-          page.evaluate(() => {
-            const app = document
-              .querySelector("#site-frame")
-              ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
-            return {
-              different: app?.document.body?.innerText.includes(
-                "Different source course",
-              ),
-              previous:
-                app?.document.body?.innerText.includes("Changed course"),
-              visible: Boolean(
-                app?.document
-                  .querySelector(".coursebox")
-                  ?.getBoundingClientRect().height,
-              ),
-              readyState: app?.document.readyState,
-              pendingJs: app?.M?.util?.pending_js,
-            };
-          }),
-        { timeout: readyTimeoutMs },
-      )
+      .poll(() => courseState("Different source course", "Changed course"), {
+        timeout: readyTimeoutMs,
+      })
       .toMatchObject({
-        different: true,
+        expected: true,
         previous: false,
         visible: true,
         readyState: "complete",
         pendingJs: [],
+        loggedIn: true,
       });
   } finally {
     server.close();
@@ -302,27 +314,64 @@ test("partial overlay restores the applied subset without re-fetching or bumping
   const requests = [];
   const server = await serve((request, response) => {
     requests.push(request.url);
-    response.writeHead(request.url === "/good.txt" ? 200 : 404);
-    response.end(request.url === "/good.txt" ? "applied-overlay" : "not found");
+    const resources = {
+      "/good.txt": "applied-overlay",
+      "/moodle.php":
+        "<?php include(__DIR__.'/moodle.review-base.php'); $string['yes']='Overlay answer';",
+      "/hooks.php":
+        "<?php include(__DIR__.'/hooks.review-base.php'); $callbacks[]=['hook'=>\\core\\hook\\after_config::class,'callback'=>'\\core\\review_hook::after_config'];",
+      "/review_hook.php":
+        "<?php namespace core; class review_hook { public static function after_config(\\core\\hook\\after_config $hook): void { $GLOBALS['review_overlay_hook']='hook-applied'; } }",
+    };
+    response.writeHead(Object.hasOwn(resources, request.url) ? 200 : 404);
+    response.end(resources[request.url] ?? "not found");
   });
   const blueprint = {
     landingPage: "/review-state.php",
     steps: [
       { step: "installMoodle", options: { locale: "en" } },
       {
+        step: "copyFile",
+        from: "/www/moodle/public/lang/en/moodle.php",
+        to: "/www/moodle/public/lang/en/moodle.review-base.php",
+      },
+      {
+        step: "copyFile",
+        from: "/www/moodle/public/lib/db/hooks.php",
+        to: "/www/moodle/public/lib/db/hooks.review-base.php",
+      },
+      {
         step: "writeFile",
         path: "/www/moodle/public/review-state.php",
         data: `<?php
+require_once(__DIR__.'/lib/classes/review_hook.php');
 require(__DIR__.'/config.php'); require_login();
 $PAGE->set_context(context_system::instance()); $PAGE->set_url('/review-state.php');
 echo $OUTPUT->header(); echo '<pre id="overlay-state">'.s(json_encode([
 'jsrev'=>$CFG->jsrev,'themerev'=>get_config('core','themerev'),
+'answer'=>get_string('yes','moodle',null,'en'),
+'hook'=>$GLOBALS['review_overlay_hook'] ?? null,
 'value'=>file_get_contents(__DIR__.'/review-overlay.txt')])).'</pre>'; echo $OUTPUT->footer();`,
       },
       {
         step: "applyPrOverlay",
         runUpgrade: "on",
         files: [
+          {
+            path: "public/lib/classes/review_hook.php",
+            status: "added",
+            rawUrl: `${server.url}/review_hook.php`,
+          },
+          {
+            path: "public/lib/db/hooks.php",
+            status: "modified",
+            rawUrl: `${server.url}/hooks.php`,
+          },
+          {
+            path: "public/lang/en/moodle.php",
+            status: "modified",
+            rawUrl: `${server.url}/moodle.php`,
+          },
           {
             path: "public/review-overlay.txt",
             status: "added",
@@ -343,24 +392,118 @@ echo $OUTPUT->header(); echo '<pre id="overlay-state">'.s(json_encode([
       `./?moodle=5.3&blueprint=${encodeURIComponent(Buffer.from(JSON.stringify(blueprint)).toString("base64"))}`,
       { waitUntil: "domcontentloaded" },
     );
-    let frame = await ready(page, "#overlay-state");
+    const frame = await ready(page, "#overlay-state");
     const first = JSON.parse(
       await frame.locator("#overlay-state").textContent(),
     );
     expect(first.value).toBe("applied-overlay");
+    expect(first.answer).toBe("Overlay answer");
+    expect(first.hook).toBe("hook-applied");
     await expect(page.locator("#log-panel")).toContainText(
       "Running Moodle upgrade after overlay",
     );
     await page.reload({ waitUntil: "domcontentloaded" });
-    frame = await ready(page, "#overlay-state");
-    expect(
-      JSON.parse(await frame.locator("#overlay-state").textContent()),
-    ).toEqual(first);
-    expect(requests).toEqual(["/good.txt", "/missing.txt"]);
+    await waitForShellReady(page);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const app = document
+              .querySelector("#site-frame")
+              ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+            const state = app?.document.querySelector("#overlay-state");
+            return {
+              state: state ? JSON.parse(state.textContent) : null,
+              visible: Boolean(state?.getBoundingClientRect().height),
+              readyState: app?.document.readyState,
+              pendingJs: app?.M?.util?.pending_js,
+            };
+          }),
+        { timeout: readyTimeoutMs },
+      )
+      .toEqual({
+        state: first,
+        visible: true,
+        readyState: "complete",
+        pendingJs: [],
+      });
+    expect(requests).toEqual([
+      "/review_hook.php",
+      "/hooks.php",
+      "/moodle.php",
+      "/good.txt",
+      "/missing.txt",
+    ]);
     await expect(page.locator("#log-panel")).not.toContainText(
       "Blueprint failed",
     );
   } finally {
     server.close();
   }
+});
+
+test("toolbar Refresh after a form POST performs GET without repeating the mutation", async ({
+  page,
+}) => {
+  test.setTimeout(specTimeoutMs);
+  const blueprint = {
+    landingPage: "/review-post.php",
+    steps: [
+      { step: "installMoodle", options: { locale: "en" } },
+      {
+        step: "writeFile",
+        path: "/www/moodle/public/review-post.php",
+        data: `<?php
+require(__DIR__.'/config.php'); require_login();
+require_capability('moodle/site:config',context_system::instance());
+$PAGE->set_context(context_system::instance()); $PAGE->set_url('/review-post.php');
+if ($_SERVER['REQUEST_METHOD']==='POST') {
+    require_sesskey();
+    set_config('review_post_count',(int)get_config('core','review_post_count')+1);
+}
+echo $OUTPUT->header();
+echo '<pre id="post-state">'.s(json_encode(['method'=>$_SERVER['REQUEST_METHOD'],
+    'count'=>(int)get_config('core','review_post_count'),'user'=>$USER->username])).'</pre>';
+echo '<form method="post"><input type="hidden" name="sesskey" value="'.sesskey().'">';
+echo '<button id="submit-review">Save once</button></form>';
+echo $OUTPUT->footer();`,
+      },
+      { step: "login" },
+    ],
+  };
+  await page.goto(
+    `./?moodle=5.3&blueprint=${encodeURIComponent(Buffer.from(JSON.stringify(blueprint)).toString("base64"))}`,
+    { waitUntil: "domcontentloaded" },
+  );
+  await ready(page, "#post-state");
+  const readState = () =>
+    page.evaluate(() => {
+      const app = document
+        .querySelector("#site-frame")
+        ?.contentDocument?.querySelector("#remote-frame")?.contentWindow;
+      const text = app?.document.querySelector("#post-state")?.textContent;
+      return text ? JSON.parse(text) : null;
+    });
+  await expect
+    .poll(readState)
+    .toEqual({ method: "GET", count: 0, user: "admin" });
+  await page.evaluate(() =>
+    document
+      .querySelector("#site-frame")
+      .contentDocument.querySelector("#remote-frame")
+      .contentDocument.querySelector("#submit-review")
+      .click(),
+  );
+  await expect.poll(readState, { timeout: readyTimeoutMs }).toEqual({
+    method: "POST",
+    count: 1,
+    user: "admin",
+  });
+  await expect(page.locator("#refresh-button")).toBeEnabled();
+  await page.locator("#refresh-button").click();
+  await expect.poll(readState, { timeout: readyTimeoutMs }).toEqual({
+    method: "GET",
+    count: 1,
+    user: "admin",
+  });
 });

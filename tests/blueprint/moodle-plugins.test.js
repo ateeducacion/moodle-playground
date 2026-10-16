@@ -48,6 +48,10 @@ it("restores a plugin from the saved artifact without a network request or DB up
   );
   assert.ok(files.includes("/www/moodle/mod/board/version.php"));
   assert.match(code, /reset_caches\(\)/);
+  const restoreCode = code.slice(0, code.indexOf("return;"));
+  assert.match(restoreCode, /cache_helper::purge_all\(\)/);
+  assert.match(restoreCode, /localcachedir .*hookcallbacks\.php/);
+  assert.match(restoreCode, /cachedir .*hookcallbacks\.php/);
   assert.ok(code.indexOf("return;") < code.indexOf("upgrade_noncore(true)"));
 });
 

@@ -222,6 +222,36 @@ The synthetic post-commit crash probe also found stale MUC values after live DB
 restore: direct SQLite read1 but `get_config()` false. Clear MUC only after DB
 restore and before re-login; do not bump JS/theme revisions or replay the POST.
 
+## Second-review follow-up (2026-10-16)
+
+Reload tests now register real `after_config` hooks in both a plugin (Moodle 5.3
+and 5.0) and a core overlay. On the unmodified `f1b43cf` worker, Chromium preserves
+the files but loses both hook effects after reload. The overlay test explicitly
+loads its synthetic callback class before config, isolating registry invalidation
+from core class-map discovery. Moodle 5.3's `core\hook\manager` stores registrations
+in both `cachedir/hookcallbacks.php` and `localcachedir/hookcallbacks.php`, outside
+MUC. ADR-0035 requires invalidating both files as well as MUC/DI/bytecode in the
+shared plugin/overlay restore block, without a full purge or revision bump.
+
+The browser run also reproduced Firefox's two stale-frame timeouts: source Reset
+and overlay reload. Screenshots showed the correct course/hook result and DOM
+diagnostics reported complete/no pending JS, while the protocol said about:blank.
+Those polls now inspect the actual same-origin DOM, preserving content, visibility,
+readiness and login assertions. The Reset case has no overlay: it is not evidence
+that overlay MUC purging breaks Moodle. No timeout increase or content bypass.
+Local validation: 895 unit tests pass. The initial targeted browser batch was
+20/22 (those two Firefox polls failed); after the harness fix, both changed cases
+pass in Chromium and Firefox, 4/4 in one sequential no-retry invocation. All 22
+distinct targeted cases have passing results across these batches, not one
+clean 22/22 invocation. Full e2e and untested browser/runtime paths remain CI/design gates.
+
+Coverage also includes toolbar Refresh after a real form POST (GET afterwards,
+mutation count stays one), and Reset while the remote blueprint source returns 503
+(uses the resolved content, no new download). These are correctness regressions,
+not new performance measurements. Automatic continuation of unknown unfinished
+steps, changed/legacy plugin migration and shell-identity redesign remain out of
+this fix; they need an explicit design rather than replaying unknown mutations.
+
 ## References
 
 - [ADR-0033](../adr/ADR-0033-moodle-owned-javascript-revisions.md)

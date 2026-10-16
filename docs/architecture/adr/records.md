@@ -54,3 +54,6 @@ PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers
 early checkpoints, shell identity, partial artifacts and non-replayed crash recovery.
 All three remain Proposed.
+
+The second-review follow-up also clears the separate on-disk hook registries
+on plugin/overlay restore; ADR-0035 records this distinction from MUC.

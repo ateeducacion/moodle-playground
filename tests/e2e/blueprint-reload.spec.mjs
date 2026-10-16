@@ -17,6 +17,10 @@ const files = {
     "<?php defined('MOODLE_INTERNAL') || die(); $plugin->component='local_checkpointrestore'; $plugin->version=2026101600; $plugin->requires=2024100700;",
   "lang/en/local_checkpointrestore.php":
     "<?php $string['pluginname']='Reload regression fixture';",
+  "db/hooks.php":
+    "<?php $callbacks=[['hook'=>\\core\\hook\\after_config::class,'callback'=>'\\local_checkpointrestore\\hook_listener::after_config']];",
+  "classes/hook_listener.php":
+    "<?php namespace local_checkpointrestore; class hook_listener { public static function after_config(\\core\\hook\\after_config $hook): void { $GLOBALS['checkpoint_hook']='restored-hook'; } }",
   "lib.php": `<?php
 function local_checkpointrestore_pluginfile($course,$cm,$context,$filearea,$args,$forcedownload,$options=[]) {
 require_login(); require_capability('moodle/site:config',context_system::instance());
@@ -40,7 +44,8 @@ $state=['courses'=>$DB->count_records('course',['shortname'=>'CHECKPOINT101']),
     'categories'=>$DB->count_records('course_categories',['name'=>'Checkpoint category']),
     'phpRuns'=>get_config('core','checkpoint_runs'),'posts'=>get_config('core','checkpoint_posts'),
     'value'=>get_config('core','checkpoint_value'),'lang'=>get_config('core','lang'),'marker'=>file_get_contents('/persist/checkpoint-marker'),
-    'file'=>$file ? $file->get_content() : null,'user'=>$USER->username];
+    'file'=>$file ? $file->get_content() : null,'user'=>$USER->username,
+    'hook'=>$GLOBALS['checkpoint_hook'] ?? null];
 echo $OUTPUT->header();
 echo '<pre id="reload-state">'.s(json_encode($state)).'</pre>';
 echo '<a id="protected-file" href="'.$CFG->wwwroot.'/pluginfile.php/'.$context->id.'/local_checkpointrestore/private/0/protected.js">Protected fixture</a>';
@@ -172,6 +177,7 @@ for (const [version, root] of [
         marker: "blueprint-initial",
         file: "protected-initial",
         user: "admin",
+        hook: "restored-hook",
       });
       const saved = await frame.evaluate(async () => {
         const response = await fetch(location.href, {

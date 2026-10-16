@@ -260,16 +260,12 @@ echo json_encode(['ok' => true]);
 }
 
 // Reload restore of code the DB already saw (ADR-0035): drop only what is not
-// keyed by jsrev/themerev — the seeded DI container and bytecode. A full purge
+// keyed by jsrev/themerev. A full purge
 // here would bump the revisions and miss every revisioned cache on each reload.
-// ponytail: MUC warmed before the restore can keep overlay-changed strings/hooks
-// for this session; cache_helper::purge_all() here broke Firefox e2e frame
-// readiness (cause not established), so it waits for a browser-verified fix.
 export function phpDropUnversionedCaches() {
   return `${CLI_HEADER}
 ${GRACEFUL_HANDLER}
-@unlink($CFG->localcachedir . '/di/CompiledContainer.php');
-${OPCACHE_CLEAR_BLOCK}
+${UNVERSIONED_CACHE_CLEAR_BLOCK}
 echo json_encode(['ok' => true]);
 `;
 }
@@ -295,6 +291,14 @@ if (is_string($ocdir) && $ocdir !== '' && is_dir($ocdir)) {
         else { @unlink($ocentry->getPathname()); }
     }
 }`;
+
+// Hook registrations live outside MUC; both copies can be warmed before code restore.
+// Shared by plugin and overlay restores (ADR-0035), without revision changes.
+export const UNVERSIONED_CACHE_CLEAR_BLOCK = `\\cache_helper::purge_all();
+@unlink($CFG->localcachedir . '/hookcallbacks.php');
+@unlink($CFG->cachedir . '/hookcallbacks.php');
+@unlink($CFG->localcachedir . '/di/CompiledContainer.php');
+${OPCACHE_CLEAR_BLOCK}`;
 
 // Best-effort Moodle upgrade after a core-file overlay. Mirrors the essential
 // steps of admin/cli/upgrade.php: reset the component cache, load the (overlaid)

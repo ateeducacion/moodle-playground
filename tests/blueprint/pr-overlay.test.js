@@ -408,6 +408,19 @@ describe("applyPrOverlay step", () => {
     assert.ok(!php.runCalls.some((code) => code.includes("upgrade_noncore")));
     // No full purge on reload: it would bump jsrev/themerev every time.
     assert.ok(!php.runCalls.some((code) => code.includes("purge_all_caches")));
+    assert.ok(
+      php.runCalls.some((code) => code.includes("\\cache_helper::purge_all()")),
+    );
+    assert.ok(
+      php.runCalls.some((code) =>
+        code.includes("$CFG->localcachedir . '/hookcallbacks.php'"),
+      ),
+    );
+    assert.ok(
+      php.runCalls.some((code) =>
+        code.includes("$CFG->cachedir . '/hookcallbacks.php'"),
+      ),
+    );
     assert.ok(php.runCalls.some((code) => code.includes("CompiledContainer")));
     php.runCalls.length = 0;
     await handler(

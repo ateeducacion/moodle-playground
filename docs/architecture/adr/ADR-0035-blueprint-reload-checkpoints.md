@@ -61,6 +61,14 @@ Selected. It changes no public blueprint schema and uses the existing journal.
 handlers and `src/runtime/crash-recovery.js` at `06bcd45a`; audit scenario C (5/5
 course-creation errors). Explicit maintainer approval of this policy, 2026-10-16.
 
+Second-review regressions against `f1b43cf`: Chromium's plugin and overlay fixtures
+execute an `after_config` hook on first boot but lose its effect after reload.
+Moodle bundle source `42622298fe06f9626d988d60b2bf589bd8f850e8`,
+`public/lib/classes/hook/manager.php::get_cache()` reads the local/shared
+`hookcallbacks.php` files; `public/cache/classes/helper.php::purge_all()` only
+purges cache stores and ad-hoc MUC caches. Tests are in
+`tests/e2e/blueprint-reload.spec.mjs` and `tests/e2e/blueprint-review.spec.mjs`.
+
 ## Decision
 
 Store version1, SHA-256 of the blueprint and completed zero-based step indices in
@@ -70,7 +78,8 @@ aborts subsequent mutations; ordinary handler failures retain ADR-0005 semantics
 Treat incompatible/mismatched metadata as a changed blueprint (the source key can
 stay the same while its content changes): keep the data, replay nothing but
 login/landing, and warn that Reset applies the new blueprint.
-Reset re-resolves and saves the selected source before recreating the remote;
+Reset saves the already resolved URL/inline blueprint before recreating the remote
+(without another network fetch); parameterless Reset resolves the default again;
 different-source clean boots consume their source key only after SW control and
 remote URL assignment, not before a possible control-related shell reload.
 Moodle can clear the origin's sessionStorage on jsrev/login changes. The shell
@@ -92,11 +101,14 @@ ZIP and applied overlay files (volatile roots only) below
 (each runtime has its own DB, but the scope shares `/persist`); restore
 files/discovery without repeating install/upgrade scripts or a full cache purge
 (the unversioned DI container and bytecode are dropped without bumping revisions;
-`purgeCaches:false` drops nothing). A restored plugin also empties MUC with
-`cache_helper::purge_all()`, because boot requests warmed it before the plugin's
-hooks/callbacks/observers existed. Overlays do not yet: that purge broke Firefox
-e2e frame readiness for reasons not established, so overlay-changed strings or
-hooks can stay stale for the first session after a reload. Volatile
+`purgeCaches:false` drops nothing for overlays). Both plugin and overlay restores
+empty MUC with `cache_helper::purge_all()` and delete **both**
+`cachedir/hookcallbacks.php` and `localcachedir/hookcallbacks.php`. Moodle's
+`core\hook\manager` reads those files independently of MUC; boot requests can
+cache the base hook registry before restored code exists. MUC purging alone
+does not restore those hooks. The shared generated block also drops DI and
+bytecode without changing JS/theme revisions.
+Volatile
 means "not journaled": any path outside `/persist` (except devices) plus the
 derived directories above. On reload a failing `critical` step does not stop
 login/landing, and an executor that never started leaves auto-login enabled. An overlay with skipped files or a failed upgrade still saves what

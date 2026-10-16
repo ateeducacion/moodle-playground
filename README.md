@@ -51,14 +51,14 @@ index.html          Shell UI (toolbar, address bar, log panel)
        ├─ sw.js     Intercepts requests → routes to PHP worker
        └─ php-worker.js
             └─ @php-wasm/web (WebAssembly, PHP 8.3)
-                 ├─ Moodle core in writable MEMFS  (extracted from ZIP bundle)
-                 └─ In-memory state                (SQLite + moodledata in MEMFS)
+                 ├─ Moodle core in writable MEMFS  (streamed from tar.zst)
+                 └─ SQLite + moodledata in MEMFS    (/persist journaled to IndexedDB)
 ```
 
 1. The shell boots a scoped runtime host inside an iframe.
 2. The Service Worker intercepts all requests under `/playground/<scope>/<runtime>/…`.
-3. The PHP worker extracts the Moodle ZIP bundle into writable MEMFS and loads a pre-built install snapshot.
-4. Moodle runs against an in-memory SQLite database — fully ephemeral, no persistence.
+3. The PHP worker streams the Moodle tar.zst bundle into writable MEMFS and restores persisted state or loads a pre-built install snapshot.
+4. Moodle runs against a MEMFS-backed SQLite file; changes under `/persist` are journaled to IndexedDB, excluding derived caches.
 5. If the PHP runtime crashes (WASM OOM / file descriptor exhaustion), the worker snapshots the DB and user files, boots a fresh runtime, and restores state automatically.
 
 **Default credentials:** username `admin`, password `password`.

@@ -16,6 +16,10 @@ This document records the repo-local changes made to run Moodle in WebAssembly P
 > without replaying persisted mutations. See [ADR-0035](architecture/adr/ADR-0035-blueprint-reload-checkpoints.md)
 > for legacy/partial-instance and arbitrary runtime-edit limitations.
 
+Restoring declared plugin/overlay code invalidates MUC, both cached
+`hookcallbacks.php` registries, DI and bytecode without bumping JS/theme revisions.
+MUC alone does not invalidate the hook manager's on-disk registrations.
+
 JavaScript revision handling now follows Moodle's database value. Build-time
 RequireJS seeds declare their revision in the manifest and are checked on restore;
 purges and plugin changes may use the per-module fallback. Public immutable ESM
