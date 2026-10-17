@@ -30,11 +30,17 @@ The OpenSSL fallback patch in `patches/shared/lib/classes/encryption.php` handle
 all encryption needs. The runtime also downgrades the `admin/environment.xml` sodium
 check from `required` to `optional`, so plugin upgrades are not blocked.
 
-**OPcache** is configured but does not start under the current `wasm` SAPI in
-PHP8.3.33. Changing the SAPI can activate file-cache-only mode, but the audit's
-canary then executed stale code after mutation and reset/invalidate returned false.
-Do not activate that workaround without a safe invalidation policy; this work
-does not change OPcache configuration or SAPI.
+**OPcache** is configured in file-cache-only mode but does not start under the
+`wasm` SAPI on PHP 8.3/8.4 (php-src rejects the SAPI name before reading the
+configuration). **PHP 8.5 removed that whitelist**, so with Moodle `main` + PHP 8.5
+the file cache is live. `opcache_reset()`/`opcache_invalidate()` are no-ops in this
+mode; the runtime therefore validates timestamps (`opcache.validate_timestamps=1`,
+whole-second mtimes, default 2 s `file_update_protection`) and blacklists
+`/internal/eval.php`, the path every `php.run({ code })` reuses
+([ADR-0038](architecture/adr/ADR-0038-opcache-file-cache-timestamp-validation.md)).
+A rewrite that preserves the original mtime is the remaining blind spot; blueprint
+plugin/overlay restores additionally delete the on-disk cache. Enabling the cache on
+PHP 8.3/8.4 via a whitelisted SAPI name is tracked separately (#344).
 
 ### JavaScript seeds after upgrades and purges
 

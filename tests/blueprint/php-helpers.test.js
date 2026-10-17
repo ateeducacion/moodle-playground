@@ -604,8 +604,9 @@ describe("PHP helpers: phpPurgeMoodleCaches", () => {
     assert.ok(script.includes("purge_all_caches()"));
     assert.ok(script.includes("core_component::reset()"));
     assert.ok(script.includes("theme_reset_all_caches()"));
-    // OPcache must be reset (and its file cache cleared) so overwritten files
-    // do not keep serving stale bytecode under validate_timestamps=0.
+    // opcache_reset() is a no-op in file-cache-only mode, so the on-disk file
+    // cache must be cleared too; timestamps are validated since ADR-0038 but
+    // the purge also covers rewrites that preserve mtimes.
     assert.ok(script.includes("opcache_reset()"));
     assert.ok(script.includes("opcache.file_cache"));
     assert.ok(script.includes("set_config('allversionshash', '')"));

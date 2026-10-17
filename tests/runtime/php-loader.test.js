@@ -2,6 +2,35 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { __testing } from "../../src/runtime/php-loader.js";
 
+describe("php-loader OPcache blacklist", () => {
+  it("writes /internal/eval.php into the blacklist file before PHP starts", () => {
+    const dirs = [];
+    const files = new Map();
+    __testing.writeOpcacheBlacklist(
+      { writeFile: (path, data) => files.set(path, data) },
+      { mkdirTree: (path) => dirs.push(path) },
+    );
+    assert.deepStrictEqual(dirs, ["/internal/shared"]);
+    assert.deepStrictEqual(
+      [...files],
+      [["/internal/shared/opcache-blacklist.txt", "/internal/eval.php\n"]],
+    );
+  });
+
+  it("tolerates an existing /internal/shared directory", () => {
+    const files = new Map();
+    __testing.writeOpcacheBlacklist(
+      { writeFile: (path, data) => files.set(path, data) },
+      {
+        mkdirTree: () => {
+          throw new Error("EEXIST");
+        },
+      },
+    );
+    assert.strictEqual(files.size, 1);
+  });
+});
+
 describe("php-loader tcpOverFetch helpers", () => {
   it("prefers explicit corsProxyUrl over phpCorsProxyUrl", () => {
     const value = __testing.resolveCorsProxyUrl({

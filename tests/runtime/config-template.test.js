@@ -5,6 +5,8 @@ import {
   createPhpIniEntries,
   MOODLE_ROOT,
   MOODLEDATA_ROOT,
+  OPCACHE_BLACKLIST,
+  OPCACHE_BLACKLIST_PATH,
   TEMP_ROOT,
 } from "../../src/runtime/config-template.js";
 
@@ -195,10 +197,32 @@ describe("createPhpIniEntries", () => {
     assert.strictEqual(entries.realpath_cache_ttl, "86400");
   });
 
-  it("keeps OPcache in file-cache-only mode with timestamps disabled", () => {
+  it("keeps OPcache in file-cache-only mode with timestamp validation on", () => {
+    // PHP 8.5 runs this file cache under the `wasm` SAPI; reset/invalidate are
+    // no-ops there, so the mtime check is the only guard against stale bytecode.
     const entries = createPhpIniEntries();
     assert.strictEqual(entries["opcache.enable"], "1");
     assert.strictEqual(entries["opcache.file_cache_only"], "1");
-    assert.strictEqual(entries["opcache.validate_timestamps"], "0");
+    assert.strictEqual(entries["opcache.validate_timestamps"], "1");
+    assert.strictEqual(entries["opcache.revalidate_freq"], "0");
+    assert.strictEqual(
+      entries["opcache.blacklist_filename"],
+      OPCACHE_BLACKLIST_PATH,
+    );
+    assert.strictEqual(
+      entries["opcache.file_update_protection"],
+      undefined,
+      "PHP default 2 s kept",
+    );
+  });
+
+  it("blacklists the shared php.run({ code }) script path", () => {
+    assert.strictEqual(
+      OPCACHE_BLACKLIST_PATH,
+      "/internal/shared/opcache-blacklist.txt",
+    );
+    assert.deepStrictEqual(OPCACHE_BLACKLIST.trimEnd().split("\n"), [
+      "/internal/eval.php",
+    ]);
   });
 });
