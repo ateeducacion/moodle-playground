@@ -121,6 +121,7 @@ let remoteFrameBooted = false;
 let uiLocked = true;
 const remoteReloadToken = 0;
 let pendingCleanBoot = false;
+let pendingPersistenceFlush = null;
 let latestPhpInfoHtml = "";
 // biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
 let phpInfoCapturePromise = null;
@@ -623,6 +624,11 @@ function bindShellChannel() {
         setPhpInfoContent(message.html || "");
         appendLog(message.detail || "Captured PHP runtime diagnostics.");
         break;
+      case "persistence-flushed":
+        appendLog(message.detail || "Persistence journal flushed.");
+        pendingPersistenceFlush?.();
+        pendingPersistenceFlush = null;
+        break;
       case "trace":
         appendLog(message.detail || "[trace]");
         break;
@@ -760,7 +766,7 @@ async function updateMoodleReleaseInfo(moodleBranch) {
   }
 }
 
-function applyConfigAndReset() {
+async function applyConfigAndReset() {
   const newBranch = els.infoMoodleVersion?.value;
   const newPhp = els.infoPhpVersion?.value;
   const newOpcache = els.infoOpcache
@@ -791,7 +797,41 @@ function applyConfigAndReset() {
   } else {
     url.searchParams.delete("opcache");
   }
+  if (!versionChanged) {
+    // The data survives this reload, so the debounced journal must land first.
+    await flushRemotePersistence();
+  }
   window.location.href = url.toString();
+}
+
+// Ask the worker (via the runtime host) to flush the /persist journal and wait
+// for its "persistence-flushed" reply. The flush rewrites the journal store
+// (SQLite DB included), which takes seconds on slow machines; the cap only
+// keeps a wedged runtime from blocking the panel forever.
+function flushRemotePersistence(timeoutMs = 60_000) {
+  if (!remoteFrameBooted) {
+    return Promise.resolve();
+  }
+  appendLog("Flushing the persistence journal before reloading.");
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPersistenceFlush = null;
+      appendLog(
+        "Persistence flush did not finish in time; reloading anyway.",
+        true,
+      );
+      resolve();
+    }, timeoutMs);
+    pendingPersistenceFlush = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    if (!postToRemote({ kind: "flush-persistence" })) {
+      clearTimeout(timer);
+      pendingPersistenceFlush = null;
+      resolve();
+    }
+  });
 }
 
 async function main() {

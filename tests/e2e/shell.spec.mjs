@@ -310,6 +310,17 @@ test("enables experimental OPcache from the info panel and reloads with the cach
   await page.locator("#panel-toggle-button").click();
   await expectOpcodeCaching(/Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Disabled/);
 
+  // The shell log is rebuilt on reload, so record the flush reply in
+  // sessionStorage (same tab, survives the navigation) as it is logged.
+  await page.evaluate(() => {
+    const panel = document.querySelector("#log-panel");
+    new MutationObserver(() => {
+      if (panel.textContent.includes("Persistence journal flushed")) {
+        sessionStorage.setItem("e2e:persistence-flushed", "1");
+      }
+    }).observe(panel, { childList: true, subtree: true });
+  });
+
   await page.locator("#info-tab").click();
   await page.locator("#info-opcache").check();
   await expect(page.locator("#config-apply")).toHaveText("Apply & Reload");
@@ -318,6 +329,12 @@ test("enables experimental OPcache from the info panel and reloads with the cach
   // Same scope and runtime, no clean boot; the URL carries the flag.
   await page.waitForURL(/[?&]opcache=1/);
   await waitForShellReady(page);
+  expect(
+    await page.evaluate(() =>
+      sessionStorage.getItem("e2e:persistence-flushed"),
+    ),
+    "the journal was flushed before the reload",
+  ).toBe("1");
   await expect(frame).toHaveAttribute("src", new RegExp(`scope=${scope}`));
   await expect(frame).toHaveAttribute("src", /opcache=1/);
   await expect(frame).not.toHaveAttribute("src", /clean=1/);

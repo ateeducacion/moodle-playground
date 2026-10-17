@@ -920,11 +920,30 @@ function installBridgeListener() {
   });
 }
 
+// The shell asks for this before the OPcache-only reload (ADR-0040): the
+// journal flush is debounced, and a page reload kills the worker mid
+// IndexedDB transaction, losing the last writes the user expects to keep.
+async function flushPersistenceForShell() {
+  let detail = "Persistence journal flushed.";
+  try {
+    const result = await readyPhp?.flushPersistence();
+    if (result && !result.ok) {
+      detail = `Persistence flush failed: ${result.reason || "unknown"}`;
+    }
+  } catch (error) {
+    detail = `Persistence flush failed: ${formatErrorDetail(error)}`;
+  }
+  postShell({ kind: "persistence-flushed", detail });
+}
+
 function installMessageListener() {
   self.addEventListener("message", (event) => {
     if (event.data?.kind !== "configure-blueprint") {
       if (event.data?.kind === "capture-phpinfo") {
         void publishPhpInfo(activeRuntimeConfig, "manual");
+      }
+      if (event.data?.kind === "flush-persistence") {
+        void flushPersistenceForShell();
       }
       return;
     }
