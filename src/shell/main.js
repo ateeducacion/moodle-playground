@@ -101,6 +101,7 @@ let currentAddonProxyUrl = null;
 let currentPhpCorsProxyUrl = null;
 let currentDebugParam = null;
 let currentProfileParam = null;
+let currentOpcacheParam = null;
 let currentPath = "/";
 // In-shell navigation history for the toolbar Back button. The iframe's own
 // session history is not usable here (navigations happen across nested frames
@@ -297,6 +298,7 @@ async function updateFrame() {
     phpCorsProxyUrl: currentPhpCorsProxyUrl,
     debug: currentDebugParam,
     profile: currentProfileParam,
+    opcache: currentOpcacheParam,
   });
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
@@ -782,6 +784,7 @@ async function main() {
   });
   currentDebugParam = urlParams.debug;
   currentProfileParam = urlParams.profile;
+  currentOpcacheParam = urlParams.opcache;
   currentAddonProxyUrl = urlParams.addonProxyUrl;
   currentPhpCorsProxyUrl = urlParams.phpCorsProxyUrl;
   applyRuntimeSelection(selection);

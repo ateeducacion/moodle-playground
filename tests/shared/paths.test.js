@@ -45,6 +45,7 @@ describe("resolveRemoteUrl", () => {
         phpCorsProxyUrl: "http://127.0.0.1:9999/?url=",
         debug: "true",
         profile: "runtime",
+        opcache: "1",
       });
 
       assert.strictEqual(url.pathname, "/moodle-playground/remote.html");
@@ -66,6 +67,7 @@ describe("resolveRemoteUrl", () => {
       );
       assert.strictEqual(url.searchParams.get("debug"), "true");
       assert.strictEqual(url.searchParams.get("profile"), "runtime");
+      assert.strictEqual(url.searchParams.get("opcache"), "1");
     } finally {
       globalThis.window = originalWindow;
     }

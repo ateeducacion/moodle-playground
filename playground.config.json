@@ -12,6 +12,7 @@
   "timezone": "UTC",
   "autologin": false,
   "resetOnVersionMismatch": true,
+  "opcache": false,
   "defaults": {
     "phpVersion": "8.3",
     "moodleBranch": "MOODLE_503_STABLE"

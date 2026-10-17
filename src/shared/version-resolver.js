@@ -391,6 +391,7 @@ export function parseQueryParams(urlOrSearchParams) {
     phpCorsProxyUrl: params.get("phpCorsProxyUrl") || null,
     debug: params.get("debug") || null,
     profile: params.get("profile") || null,
+    opcache: params.get("opcache") || null,
   };
 }
 

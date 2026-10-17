@@ -527,6 +527,7 @@ async function bootstrapRemote() {
   const phpCorsProxyUrl = url.searchParams.get("phpCorsProxyUrl") || null;
   const debug = url.searchParams.get("debug") || null;
   const profile = url.searchParams.get("profile") || null;
+  const opcache = url.searchParams.get("opcache") || null;
   activePath = requestedPath;
   const config = await loadPlaygroundConfig();
   let blueprint = loadBlueprint(scopeId);
@@ -622,6 +623,9 @@ async function bootstrapRemote() {
     if (profile) {
       workerUrl.searchParams.set("profile", profile);
     }
+    if (opcache) {
+      workerUrl.searchParams.set("opcache", opcache);
+    }
     traceRuntimeSelection(
       scopeId,
       debug,
@@ -698,6 +702,7 @@ async function bootstrapRemote() {
       phpCorsProxyUrl,
       debug,
       profile,
+      opcache,
       forceCleanBoot: cleanBoot,
     },
   });

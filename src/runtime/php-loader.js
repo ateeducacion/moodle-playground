@@ -16,6 +16,7 @@ import {
   MOODLE_ROOT,
   OPCACHE_BLACKLIST,
   OPCACHE_BLACKLIST_PATH,
+  OPCACHE_SAPI_NAME,
 } from "./config-template.js";
 import { wrapPhpInstance } from "./php-compat.js";
 
@@ -110,6 +111,7 @@ export function createPhpRuntime(
     phpCorsProxyUrl,
     scopeId,
     forceCleanBoot,
+    opcache = false,
   } = {},
 ) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
@@ -141,6 +143,11 @@ export function createPhpRuntime(
         },
       });
       const php = new PHP(runtimeId);
+      if (opcache) {
+        // Must precede the first request: PHP reads the SAPI name once at
+        // startup. php-wasm re-applies it on runtime hot-swap. See ADR-0039.
+        await php.setSapiName(OPCACHE_SAPI_NAME);
+      }
       const FS = php[__private__dont__use].FS;
       persistenceController = null;
 
