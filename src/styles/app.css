@@ -908,6 +908,24 @@ button.danger:hover {
   cursor: not-allowed;
 }
 
+.config-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.config-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.config-toggle em {
+  font-style: normal;
+  font-weight: 400;
+}
+
 .value-row {
   display: flex;
   align-items: baseline;

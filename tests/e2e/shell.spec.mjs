@@ -259,6 +259,81 @@ test("info panel hosts the version config with a dirty-state apply", async ({
     await expect(page.locator("#config-apply")).toBeHidden();
     await expect(page.locator("#config-warning")).toBeHidden();
   }
+
+  // The OPcache toggle alone is not destructive: it swaps the warning for the
+  // reload note and relabels the button. Reverting clears it like the selects.
+  const opcache = page.locator("#info-opcache");
+  await expect(opcache).not.toBeChecked();
+  await opcache.check();
+  await expect(page.locator("#config-apply")).toHaveText("Apply & Reload");
+  await expect(page.locator("#config-apply")).not.toHaveClass(/danger/);
+  await expect(page.locator("#config-reload-note")).toBeVisible();
+  await expect(page.locator("#config-warning")).toBeHidden();
+  if (other) {
+    // A version change on top of it brings the destructive flow back.
+    await page.locator("#info-moodle-version").selectOption(other);
+    await expect(page.locator("#config-apply")).toHaveText("Apply & Reset");
+    await expect(page.locator("#config-warning")).toBeVisible();
+    await expect(page.locator("#config-reload-note")).toBeHidden();
+    await page.locator("#info-moodle-version").selectOption(current);
+  }
+  await opcache.uncheck();
+  await expect(page.locator("#config-apply")).toBeHidden();
+  await expect(page.locator("#config-reload-note")).toBeHidden();
+});
+
+test("enables experimental OPcache from the info panel and reloads with the cache running", async ({
+  page,
+  playground,
+  browserName,
+}) => {
+  test.fixme(
+    browserName === "firefox",
+    "Temporarily disabled due to Firefox CI runtime readiness flakiness.",
+  );
+  await playground.open();
+  const frame = page.locator("#site-frame");
+  const scope = (await frame.getAttribute("src")).match(/scope=([^&]+)/)[1];
+
+  // phpinfo prints the SAPI's pretty name regardless of php_sapi_name(), so the
+  // proof that the uwsgi name took effect is OPcache's own status row (ADR-0040).
+  const expectOpcodeCaching = async (pattern) => {
+    await page.locator("#phpinfo-tab").click();
+    await page.locator("#refresh-phpinfo-button").click();
+    await expect(page.locator("#phpinfo-frame")).toHaveAttribute(
+      "srcdoc",
+      pattern,
+      { timeout: 30_000 },
+    );
+  };
+
+  await page.locator("#panel-toggle-button").click();
+  await expectOpcodeCaching(/Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Disabled/);
+
+  await page.locator("#info-tab").click();
+  await page.locator("#info-opcache").check();
+  await expect(page.locator("#config-apply")).toHaveText("Apply & Reload");
+  await page.locator("#config-apply").click();
+
+  // Same scope and runtime, no clean boot; the URL carries the flag.
+  await page.waitForURL(/[?&]opcache=1/);
+  await waitForShellReady(page);
+  await expect(frame).toHaveAttribute("src", new RegExp(`scope=${scope}`));
+  await expect(frame).toHaveAttribute("src", /opcache=1/);
+  await expect(frame).not.toHaveAttribute("src", /clean=1/);
+
+  if (
+    await page
+      .locator("#side-panel")
+      .evaluate((el) => el.classList.contains("is-collapsed"))
+  ) {
+    await page.locator("#panel-toggle-button").click();
+  }
+  await expect(page.locator("#info-opcache")).toBeChecked();
+  await expect(page.locator("#config-apply")).toBeHidden();
+  await expectOpcodeCaching(
+    /Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Up and Running/,
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -173,6 +173,18 @@
                     <select id="info-php-version"></select>
                   </div>
                 </div>
+                <label class="config-toggle">
+                  <input type="checkbox" id="info-opcache">
+                  <span>OPcache file cache <em>(experimental, uses more memory)</em></span>
+                </label>
+                <div id="config-reload-note" class="warn-banner is-hidden" role="status">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+                    <circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.4"/>
+                    <path d="M8 7.3v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <circle cx="8" cy="5" r="0.6" fill="currentColor"/>
+                  </svg>
+                  <span>Applying restarts PHP to switch OPcache. Your data is kept.</span>
+                </div>
                 <div id="config-warning" class="warn-banner is-hidden" role="alert">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
                     <path d="M8 1.6 1 14h14L8 1.6Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>

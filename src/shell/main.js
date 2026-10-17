@@ -8,6 +8,10 @@ import {
 } from "../blueprint/index.js";
 import { BUILD_VERSION } from "../generated/build-version.js";
 import {
+  isOpcacheEnabled,
+  opcacheUrlParam,
+} from "../runtime/config-template.js";
+import {
   fetchManifest,
   parseReleaseVersion,
   resolveManifestUrl,
@@ -71,8 +75,10 @@ const els = {
   reset: document.querySelector("#reset-button"),
   infoMoodleVersion: document.querySelector("#info-moodle-version"),
   infoPhpVersion: document.querySelector("#info-php-version"),
+  infoOpcache: document.querySelector("#info-opcache"),
   configStatus: document.querySelector("#config-status"),
   configWarning: document.querySelector("#config-warning"),
+  configReloadNote: document.querySelector("#config-reload-note"),
   configApply: document.querySelector("#config-apply"),
   runtimeIdChip: document.querySelector("#runtime-id-chip"),
   runtimeIdValue: document.querySelector("#runtime-id-value"),
@@ -653,6 +659,13 @@ function populateConfigSelects() {
   // Populate PHP version dropdown based on selected Moodle branch
   updatePhpVersionDropdown(currentMoodleBranch);
   els.infoPhpVersion.value = currentPhpVersion;
+  if (els.infoOpcache) {
+    els.infoOpcache.checked = currentOpcacheEnabled();
+  }
+}
+
+function currentOpcacheEnabled() {
+  return isOpcacheEnabled(currentOpcacheParam, config);
 }
 
 function updatePhpVersionDropdown(branch) {
@@ -683,14 +696,21 @@ function updatePhpVersionDropdown(branch) {
 // Reflect the applied runtime in the Info panel: when the selected versions
 // differ from what is actually running the config is "dirty". Changing a version
 // is destructive (it resets the site), so the Apply button stays inert and the
-// warning stays hidden until the selection actually differs.
+// warning stays hidden until the selection actually differs. The OPcache toggle
+// alone only reloads the same runtime and keeps the data, so it shows the
+// reload note instead of the warning (ADR-0040).
 function refreshDirtyState() {
   if (!els.infoMoodleVersion || !els.infoPhpVersion) {
     return;
   }
-  const dirty =
+  const versionDirty =
     els.infoMoodleVersion.value !== currentMoodleBranch ||
     els.infoPhpVersion.value !== currentPhpVersion;
+  const opcacheDirty =
+    Boolean(els.infoOpcache) &&
+    els.infoOpcache.checked !== currentOpcacheEnabled();
+  const dirty = versionDirty || opcacheDirty;
+  const reloadOnly = opcacheDirty && !versionDirty;
 
   if (els.configStatus) {
     els.configStatus.className = dirty ? "dirty-note" : "status-pill";
@@ -701,8 +721,15 @@ function refreshDirtyState() {
   // Changing a version is destructive; the Apply button and warning only appear
   // once the selection differs from what is running. To revert, reselect the
   // original version — the dirty state clears itself.
-  els.configWarning?.classList.toggle("is-hidden", !dirty);
-  els.configApply?.classList.toggle("is-hidden", !dirty);
+  els.configWarning?.classList.toggle("is-hidden", !versionDirty);
+  els.configReloadNote?.classList.toggle("is-hidden", !reloadOnly);
+  if (els.configApply) {
+    els.configApply.classList.toggle("is-hidden", !dirty);
+    els.configApply.classList.toggle("danger", !reloadOnly);
+    els.configApply.textContent = reloadOnly
+      ? "Apply & Reload"
+      : "Apply & Reset";
+  }
 }
 
 function updateConfigState() {
@@ -736,17 +763,34 @@ async function updateMoodleReleaseInfo(moodleBranch) {
 function applyConfigAndReset() {
   const newBranch = els.infoMoodleVersion?.value;
   const newPhp = els.infoPhpVersion?.value;
+  const newOpcache = els.infoOpcache
+    ? els.infoOpcache.checked
+    : currentOpcacheEnabled();
+  const versionChanged =
+    newBranch !== currentMoodleBranch || newPhp !== currentPhpVersion;
+  const opcacheChanged = newOpcache !== currentOpcacheEnabled();
 
-  if (newBranch === currentMoodleBranch && newPhp === currentPhpVersion) {
+  if (!versionChanged && !opcacheChanged) {
     return;
   }
 
-  // Update URL params and reload — a fresh runtime + scope for the new versions.
+  // Update URL params and reload. New versions mean a fresh runtime (and DB
+  // path), so a clean install; an OPcache-only change keeps runtime and scope,
+  // so the journaled data survives the reload. The worker reads ?opcache= once
+  // at startup. See docs/architecture/adr/ADR-0040-opcache-panel-toggle.md.
   const url = new URL(window.location.href);
-  url.searchParams.set("php", newPhp);
-  const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === newBranch);
-  url.searchParams.set("moodle", branchInfo ? branchInfo.version : newBranch);
-  url.searchParams.delete("moodleBranch");
+  if (versionChanged) {
+    url.searchParams.set("php", newPhp);
+    const branchInfo = MOODLE_BRANCHES.find((b) => b.branch === newBranch);
+    url.searchParams.set("moodle", branchInfo ? branchInfo.version : newBranch);
+    url.searchParams.delete("moodleBranch");
+  }
+  const opcacheParam = opcacheUrlParam(newOpcache, config);
+  if (opcacheParam) {
+    url.searchParams.set("opcache", opcacheParam);
+  } else {
+    url.searchParams.delete("opcache");
+  }
   window.location.href = url.toString();
 }
 
@@ -844,6 +888,9 @@ async function main() {
   }
   if (els.infoPhpVersion) {
     els.infoPhpVersion.addEventListener("change", refreshDirtyState);
+  }
+  if (els.infoOpcache) {
+    els.infoOpcache.addEventListener("change", refreshDirtyState);
   }
   if (els.configApply) {
     els.configApply.addEventListener("click", applyConfigAndReset);

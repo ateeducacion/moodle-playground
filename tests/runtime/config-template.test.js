@@ -9,6 +9,7 @@ import {
   OPCACHE_BLACKLIST,
   OPCACHE_BLACKLIST_PATH,
   OPCACHE_SAPI_NAME,
+  opcacheUrlParam,
   TEMP_ROOT,
 } from "../../src/runtime/config-template.js";
 
@@ -235,6 +236,20 @@ describe("createPhpIniEntries", () => {
       true,
       "empty = unset",
     );
+  });
+
+  it("round-trips the panel toggle through the URL parameter", () => {
+    for (const config of [{}, { opcache: false }, { opcache: true }]) {
+      for (const enabled of [true, false]) {
+        const param = opcacheUrlParam(enabled, config);
+        assert.strictEqual(isOpcacheEnabled(param, config), enabled);
+        assert.strictEqual(
+          param === null,
+          enabled === (config.opcache === true),
+          "no parameter at the config default",
+        );
+      }
+    }
   });
 
   it("blacklists the shared php.run({ code }) script path", () => {

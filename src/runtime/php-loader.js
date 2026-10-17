@@ -299,7 +299,10 @@ export function createPhpRuntime(
 /**
  * Create a lightweight PHP runtime for provisioning tasks (phpinfo capture).
  */
-export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
+export function createProvisioningRuntime(
+  _runtime,
+  { phpVersion, opcache = false } = {},
+) {
   const resolvedPhpVersion = phpVersion || DEFAULT_PHP_VERSION;
   const resolvedCorsProxyUrl = resolveCorsProxyUrl(_runtime || {});
   let wrapped = null;
@@ -320,6 +323,11 @@ export function createProvisioningRuntime(_runtime, { phpVersion } = {}) {
         },
       });
       const php = new PHP(runtimeId);
+      if (opcache) {
+        // Mirror the serving runtime so the PHP tab's phpinfo shows the
+        // OPcache state the user actually gets (ADR-0039, ADR-0040).
+        await php.setSapiName(OPCACHE_SAPI_NAME);
+      }
       const FS2 = php[__private__dont__use].FS;
 
       // Write glob polyfill + chdir fix into WP Playground's preload dir
