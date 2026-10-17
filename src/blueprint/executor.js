@@ -132,6 +132,7 @@ export async function executeBlueprint(blueprint, context) {
     try {
       const result = await handler(step, {
         ...stepContext,
+        stepIndex: i,
         restoreOnly: Boolean(checkpoint?.resuming),
         previouslyCompleted: Boolean(
           checkpoint?.resuming && checkpoint.completed.has(i),

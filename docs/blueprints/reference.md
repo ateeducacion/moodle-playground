@@ -15,7 +15,11 @@ On a persisted reload, completed provisioning is not repeated. Login and landing
 selection run again; completed explicit filesystem steps restore volatile `/www`
 and `/tmp` files, but never overwrite `/persist` (mixed batches are filtered).
 Plugins/themes and `unzip` archives are downloaded again (no copy is kept), and PR
-overlays restore their saved files; none of them reruns upgrade scripts. Arbitrary PHP and HTTP request steps,
+overlays restore their saved files; none of them reruns upgrade scripts. A plugin
+archive that changed since it was installed is extracted only when its `version.php`
+is newer; the log then asks for the Moodle upgrade
+([ADR-0037](../architecture/adr/ADR-0037-blueprint-archive-hash-verification-on-reload.md)).
+Arbitrary PHP and HTTP request steps,
 including POST, are **not** replayed. Their arbitrary effects on volatile files
 cannot be reconstructed automatically; declare those files with filesystem steps.
 

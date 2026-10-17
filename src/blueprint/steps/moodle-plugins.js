@@ -5,7 +5,7 @@
  * and runs the Moodle upgrade to register the plugin.
  */
 
-import { readZipEntries } from "../../../lib/moodle-loader.js";
+import { readZipEntries, sha256 } from "../../../lib/moodle-loader.js";
 import { escapePhp, UNVERSIONED_CACHE_CLEAR_BLOCK } from "../php/helpers.js";
 
 const MOODLE_ROOT = "/www/moodle";
@@ -16,6 +16,9 @@ const MOODLE_ROOT = "/www/moodle";
 // derived component string into generated PHP.
 const VALID_PLUGIN_NAME = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_ADDON_PROXY_URL = "https://github-proxy.exelearning.dev/";
+// Backoff between download attempts; transient proxy/CDN errors and dropped
+// connections on reload usually clear within seconds.
+const RETRY_DELAYS_MS = [1000, 2000];
 
 // Map Moodle plugin types to their directory under MOODLE_ROOT
 const PLUGIN_TYPE_DIRS = {
@@ -89,12 +92,7 @@ async function handleInstallMoodlePlugin(step, context) {
     );
   }
 
-  const targetDir = resolvePluginDir(pluginType, pluginName, context.webRoot);
-  if (await wasUninstalled(`${pluginType}_${pluginName}`, context))
-    return { skipped: true };
-  await installPluginFiles(step.url, targetDir, context);
-  await runMoodleUpgrade(pluginType, pluginName, targetDir, context);
-  context.onPluginInstalled?.(targetDir);
+  return installPlugin(pluginType, pluginName, step.url, context);
 }
 
 async function handleInstallTheme(step, context) {
@@ -110,33 +108,47 @@ async function handleInstallTheme(step, context) {
     );
   }
 
-  const targetDir = resolvePluginDir("theme", pluginName, context.webRoot);
-  if (await wasUninstalled(`theme_${pluginName}`, context))
+  return installPlugin("theme", pluginName, step.url, context);
+}
+
+async function installPlugin(pluginType, pluginName, url, context) {
+  const targetDir = resolvePluginDir(pluginType, pluginName, context.webRoot);
+  const component = `${pluginType}_${pluginName}`;
+  const installedVersion = await lookupInstalledVersion(component, context);
+  if (installedVersion === null) {
+    context.publish?.(`Not restoring uninstalled plugin ${component}.`, 0.935);
     return { skipped: true };
-  await installPluginFiles(step.url, targetDir, context);
-  await runMoodleUpgrade("theme", pluginName, targetDir, context);
+  }
+  const archive = await installViaZipDownload(url, targetDir, {
+    ...context,
+    component,
+    installedVersion,
+  });
+  if (archive.skipped) return { skipped: true };
+  await runMoodleUpgrade(pluginType, pluginName, targetDir, context, archive);
   context.onPluginInstalled?.(targetDir);
 }
 
-async function wasUninstalled(
+// Reload only. Moodle's installed-plugin registry is in the retained DB, not
+// volatile MUC. undefined = not applicable, null = uninstalled, otherwise the
+// persisted `version` value.
+async function lookupInstalledVersion(
   component,
-  { php, restoreOnly, previouslyCompleted, dbFile, publish },
+  { php, restoreOnly, previouslyCompleted, dbFile },
 ) {
-  if (!restoreOnly || !previouslyCompleted || !dbFile) return false;
-  // Moodle's installed-plugin registry is in the retained DB, not volatile MUC.
+  if (!restoreOnly || !previouslyCompleted || !dbFile) return undefined;
   const result = await php.run(`<?php
 $pdo = new PDO('sqlite:${escapePhp(dbFile)}');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$query = $pdo->prepare("SELECT 1 FROM mdl_config_plugins WHERE plugin = :plugin AND name = 'version'");
+$query = $pdo->prepare("SELECT value FROM mdl_config_plugins WHERE plugin = :plugin AND name = 'version'");
 $query->execute([':plugin' => '${escapePhp(component)}']);
-echo json_encode($query->fetchColumn() !== false);
+echo json_encode($query->fetchColumn());
 `);
-  const installed = JSON.parse(result.text);
-  if (installed !== true && installed !== false)
+  const version = JSON.parse(result.text);
+  if (version === false) return null;
+  if (typeof version !== "string")
     throw new Error("Invalid installed-plugin registry response");
-  if (!installed)
-    publish?.(`Not restoring uninstalled plugin ${component}.`, 0.935);
-  return !installed;
+  return version;
 }
 
 function resolvePluginDir(pluginType, pluginName, webRoot) {
@@ -159,20 +171,6 @@ function resolvePluginDir(pluginType, pluginName, webRoot) {
   }
   const base = webRoot || MOODLE_ROOT;
   return `${base}/${typeDir}/${pluginName}`;
-}
-
-/**
- * Install plugin files to the target directory.
- * GitHub archive ZIPs are fetched through a configurable proxy to avoid
- * browser CORS issues and to support refs that contain `/`.
- */
-async function installPluginFiles(url, targetDir, context) {
-  const githubInfo = parseGitHubUrl(url);
-  if (githubInfo) {
-    await installViaZipDownload(url, targetDir, context);
-  } else {
-    await installViaZipDownload(url, targetDir, context);
-  }
 }
 
 /**
@@ -235,28 +233,23 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
     );
   }
 
-  // Retry once on 502/503 — Cloudflare CDN or GitHub may return transient
-  // errors on browser reloads (cache revalidation race with the proxy).
-  let response = await fetch(downloadUrl, { cache: "no-store" });
-  if (!response.ok && (response.status === 502 || response.status === 503)) {
-    if (publish) publish("Plugin download failed, retrying…", 0.93);
-    await new Promise((r) => setTimeout(r, 1000));
-    response = await fetch(downloadUrl, { cache: "no-store" });
-  }
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download plugin ZIP from ${downloadUrl}: ${response.status}`,
-    );
-  }
-  const zipBytes = new Uint8Array(await response.arrayBuffer());
-
-  if (publish) publish(`Extracting plugin to ${targetDir}`, 0.935);
-
+  const zipBytes = await downloadZip(downloadUrl, publish);
   const rawEntries = await readZipEntries(zipBytes);
 
   // GitHub ZIPs have a top-level directory. Find and strip common prefix.
   const paths = rawEntries.map((e) => e.path);
   const commonPrefix = findCommonPrefix(paths);
+
+  const drift = await checkArchiveDrift(
+    zipUrl,
+    zipBytes,
+    rawEntries,
+    commonPrefix,
+    context,
+  );
+  if (drift.skipped) return drift;
+
+  if (publish) publish(`Extracting plugin to ${targetDir}`, 0.935);
 
   const rawPhp = php._php;
   rawPhp.mkdirTree(targetDir);
@@ -289,6 +282,110 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
   }
 
   if (publish) publish(`Extracted ${fileCount} files to ${targetDir}`, 0.94);
+  return drift;
+}
+
+// Retries transient gateway responses and thrown fetch errors (offline, dropped
+// connection, error pages without CORS headers) before giving up with a
+// message that names the archive, so the shell log says what to check.
+async function downloadZip(downloadUrl, publish) {
+  for (let attempt = 0; ; attempt++) {
+    let failure;
+    let retryable = true;
+    try {
+      const response = await fetch(downloadUrl, { cache: "no-store" });
+      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      failure = `HTTP ${response.status}`;
+      // Cloudflare CDN or GitHub may answer 502/503 on browser reloads (cache
+      // revalidation race with the proxy); other statuses will not change.
+      retryable = response.status === 502 || response.status === 503;
+    } catch (error) {
+      failure = error?.message || String(error);
+    }
+    if (!retryable || attempt >= RETRY_DELAYS_MS.length) {
+      throw new Error(
+        `Failed to download plugin ZIP from ${downloadUrl}: ${failure}. ` +
+          "Check the network and the addon proxy, then reload when online.",
+      );
+    }
+    const delayMs = RETRY_DELAYS_MS[attempt];
+    if (publish)
+      publish(
+        `Plugin download failed (${failure}), retrying in ${delayMs / 1000} s…`,
+        0.93,
+      );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+// The checkpoint remembers the SHA-256 of the archive each step extracted, so a
+// reload can tell whether the URL still serves that code before running it
+// against the persisted database. Never upgrades on its own.
+// See docs/architecture/adr/ADR-0037-blueprint-archive-hash-verification-on-reload.md.
+async function checkArchiveDrift(
+  zipUrl,
+  zipBytes,
+  rawEntries,
+  commonPrefix,
+  {
+    publish,
+    checkpoint,
+    stepIndex,
+    restoreOnly,
+    previouslyCompleted,
+    component,
+    installedVersion,
+  },
+) {
+  if (!checkpoint?.archives || !Number.isInteger(stepIndex)) return {};
+  const hash = await sha256(zipBytes);
+  const stored = checkpoint.archives.get(stepIndex);
+  if (!restoreOnly || !previouslyCompleted) {
+    // First install (or an unfinished step restored on reload): the executor
+    // persists the hash only when it marks the step completed.
+    checkpoint.archives.set(stepIndex, hash);
+    return {};
+  }
+  if (stored === hash) return {};
+  if (!stored) {
+    // Checkpoint written before archive hashes existed: adopt this archive.
+    checkpoint.archives.set(stepIndex, hash);
+    await checkpoint.save();
+    return {};
+  }
+  const archiveVersion = readPluginVersion(rawEntries, commonPrefix);
+  const newer =
+    archiveVersion !== null &&
+    installedVersion !== undefined &&
+    Number(archiveVersion) > Number(installedVersion);
+  if (!newer) {
+    publish?.(
+      `Plugin ${component}: the archive at ${zipUrl} changed since it was installed ` +
+        `(archive version ${archiveVersion ?? "unknown"}, installed ${installedVersion ?? "unknown"}). ` +
+        "Not extracting it; Reset Playground to install the current archive.",
+      0.935,
+    );
+    return { skipped: true };
+  }
+  publish?.(
+    `Plugin ${component}: the archive at ${zipUrl} is newer than the installed version ` +
+      `(${archiveVersion} > ${installedVersion}). Installing its code; run the Moodle upgrade ` +
+      "from Site administration or Reset Playground.",
+    0.935,
+  );
+  checkpoint.archives.set(stepIndex, hash);
+  await checkpoint.save();
+  return { clearVersionHash: true };
+}
+
+function readPluginVersion(rawEntries, commonPrefix) {
+  const entry = rawEntries.find((e) => e.path === `${commonPrefix}version.php`);
+  const match =
+    entry &&
+    new TextDecoder()
+      .decode(entry.data)
+      .match(/\$plugin->version\s*=\s*['"]?(\d+(?:\.\d+)?)/u);
+  return match ? match[1] : null;
 }
 
 /**
@@ -299,6 +396,7 @@ async function runMoodleUpgrade(
   pluginName,
   targetDir,
   { php, publish, webRoot, restoreOnly },
+  { clearVersionHash = false } = {},
 ) {
   if (publish) publish("Running Moodle upgrade to register plugin.", 0.945);
 
@@ -338,7 +436,14 @@ ${
 // Restore discovery only: the plugin's install/upgrade already changed this DB.
 \\core_plugin_manager::reset_caches();
 ${UNVERSIONED_CACHE_CLEAR_BLOCK}
-echo json_encode(['ok' => true]);
+${
+  clearVersionHash
+    ? `// Newer plugin code than the persisted install (ADR-0037): make Moodle's
+// upgrade check notice it on the next admin page.
+set_config('allversionshash', '');
+`
+    : ""
+}echo json_encode(['ok' => true]);
 return;
 `
     : ""
@@ -474,6 +579,8 @@ export const __testables = {
   detectPluginTypeAndName,
   findCommonPrefix,
   parseGitHubUrl,
+  readPluginVersion,
+  retryDelaysMs: RETRY_DELAYS_MS,
   resolveAddonProxyUrl,
   resolvePluginZipDownloadUrl,
   shouldProxyZipUrl,
