@@ -289,6 +289,19 @@ export function initMonitoring(options = {}) {
   return activeClient;
 }
 
+/**
+ * Extra data for a runtime "error" message from the remote frame: its source
+ * (the frame may classify its own failures) and, for a failed request, the
+ * page path, so an exit 255 with empty stdout/stderr still says where it broke.
+ */
+export function runtimeErrorExtra(message) {
+  const extra = { source: message?.source || "runtime" };
+  if (message?.path) {
+    extra.path = message.path;
+  }
+  return extra;
+}
+
 export function captureException(error, extra) {
   activeClient?.captureException(error, extra);
 }

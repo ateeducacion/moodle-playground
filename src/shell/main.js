@@ -21,6 +21,7 @@ import {
   captureException,
   captureMessage,
   initMonitoring,
+  runtimeErrorExtra,
 } from "../shared/monitoring.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
@@ -606,9 +607,11 @@ function bindShellChannel() {
         // The remote frame can classify its own failures (an unsupported
         // Service Worker is an environment limitation, not a runtime error),
         // so honor the level and source it sends.
-        captureMessage(message.detail, message.level || "error", {
-          source: message.source || "runtime",
-        });
+        captureMessage(
+          message.detail,
+          message.level || "error",
+          runtimeErrorExtra(message),
+        );
         if (!latestPhpInfoHtml) {
           setActivePanel("phpinfo");
           capturePhpInfoViaWorker("bootstrap-error");

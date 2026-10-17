@@ -1,7 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
-import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager } from "./src/runtime/crash-recovery.js";
+import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
 import { isOpcacheEnabled } from "./src/runtime/config-template.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
@@ -781,8 +781,7 @@ function installBridgeListener() {
         // in WASM cannot reach external hosts. Notify the shell with a
         // user-friendly warning instead of crashing the runtime.
         if (isEmscriptenNetworkError(error)) {
-          const requestUrl = data.request?.url || "";
-          const pagePath = new URL(requestUrl, "http://localhost").pathname || "/";
+          const pagePath = requestPathname(data.request);
           postShell({
             kind: "wasm-network-error",
             detail: `Page "${pagePath}" failed — a network call could not complete in this browser's WebAssembly runtime.`,
@@ -796,7 +795,7 @@ function installBridgeListener() {
           // Non-fatal error: return 500 without runtime rotation.
           const detail = formatErrorDetail(error);
           await respondError(data.id, detail, 500);
-          postShell({ kind: "error", detail });
+          postShell({ kind: "error", detail, path: requestPathname(data.request) });
           return;
         }
 

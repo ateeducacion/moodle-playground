@@ -5,6 +5,7 @@ import {
   formatErrorDetail,
   isFatalWasmError,
   isSafeToReplay,
+  requestPathname,
 } from "../../src/runtime/crash-recovery.js";
 
 describe("isFatalWasmError", () => {
@@ -582,5 +583,23 @@ describe("createSnapshotManager", () => {
     await sm.hydrate(mockPhp, "/persist/test.sq3.php");
     assert.strictEqual(sm.hasPendingRestore, true);
     assert.ok(messages.some((m) => m.detail?.includes("saved DB")));
+  });
+});
+
+// Sentry 147391586: "PHP.run() failed with exit code 255" with empty stdout
+// and stderr gave no clue which page failed; the path now travels with it.
+describe("requestPathname", () => {
+  it("returns only the path, without query or fragment", () => {
+    assert.strictEqual(
+      requestPathname({
+        url: "http://localhost/local/x/index.php?id=3&sesskey=s#a",
+      }),
+      "/local/x/index.php",
+    );
+  });
+
+  it("falls back to / for a missing or unparsable URL", () => {
+    assert.strictEqual(requestPathname(undefined), "/");
+    assert.strictEqual(requestPathname({ url: "http://[" }), "/");
   });
 });
