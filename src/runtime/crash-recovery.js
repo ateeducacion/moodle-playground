@@ -97,6 +97,18 @@ export function isSafeToReplay(serializedRequest) {
  * @param {unknown} error - The error to format.
  * @returns {string} Formatted error detail.
  */
+/**
+ * Path of a worker request, without query string or fragment (they can carry
+ * session keys). Used to tell the shell which page failed.
+ */
+export function requestPathname(request) {
+  try {
+    return new URL(request?.url || "", "http://localhost").pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
 export function formatErrorDetail(error) {
   if (!error) {
     return "Unknown error";

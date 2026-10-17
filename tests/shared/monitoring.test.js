@@ -7,6 +7,7 @@ import {
   initMonitoring,
   parseDsn,
   parseStackFrames,
+  runtimeErrorExtra,
 } from "../../src/shared/monitoring.js";
 
 const TEST_DSN = "https://abc123@o111.ingest.de.sentry.io/222";
@@ -206,5 +207,23 @@ describe("initMonitoring", () => {
     const client = initMonitoring({ scope });
     assert.strictEqual(client.enabled, false);
     assert.strictEqual(handlers.size, 0);
+  });
+});
+
+describe("runtimeErrorExtra", () => {
+  it("defaults the source and forwards the failing request path", () => {
+    assert.deepStrictEqual(
+      runtimeErrorExtra({ detail: "x", path: "/admin/" }),
+      {
+        source: "runtime",
+        path: "/admin/",
+      },
+    );
+  });
+
+  it("keeps an explicit source and omits a missing path", () => {
+    assert.deepStrictEqual(runtimeErrorExtra({ source: "service-worker" }), {
+      source: "service-worker",
+    });
   });
 });
