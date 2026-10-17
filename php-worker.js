@@ -353,7 +353,10 @@ async function capturePhpInfoHtml(runtimeConfig, reason = "manual") {
   }
 
   phpInfoCapturePromise = (async () => {
-    const php = createProvisioningRuntime(runtimeConfig, { phpVersion });
+    const php = createProvisioningRuntime(runtimeConfig, {
+      phpVersion,
+      opcache: runtimeConfig.opcache === true,
+    });
 
     try {
       await php.refresh();
@@ -498,6 +501,7 @@ async function getRuntimeState() {
     activeRuntimeConfig = {
       ...runtime,
       corsProxyUrl: phpCorsProxyUrlOverride || config.phpCorsProxyUrl || null,
+      opcache: isOpcacheEnabled(opcacheParam, config),
     };
     const branchMeta = moodleBranch ? getBranchMetadata(moodleBranch) : null;
     const webRoot = branchMeta?.webRoot || "/www/moodle";
@@ -512,7 +516,7 @@ async function getRuntimeState() {
       webRoot,
       scopeId,
       forceCleanBoot,
-      opcache: isOpcacheEnabled(opcacheParam, config),
+      opcache: activeRuntimeConfig.opcache,
     });
 
     // Progress reporter, hoisted above refresh so the bundle-download band
