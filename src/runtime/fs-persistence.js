@@ -210,7 +210,7 @@ export async function flushPendingOps({
   }
 }
 
-function createJournalFlusher(rawPhp, persistDb, pendingOps) {
+export function createJournalFlusher(rawPhp, persistDb, pendingOps) {
   let flushTimer = null;
   let flushQueue = Promise.resolve();
 
@@ -244,6 +244,10 @@ function createJournalFlusher(rawPhp, persistDb, pendingOps) {
       clearTimeout(flushTimer);
       flushTimer = null;
     }
+    // A debounced flush may already be mid-transaction with the ops it drained
+    // from pendingOps; returning before it commits would let a caller tear the
+    // worker down (runtime restart) and abort that IndexedDB transaction.
+    await flushQueue;
 
     const shouldFlush = pathPrefix
       ? (op) => operationTouchesPathPrefix(op, pathPrefix)

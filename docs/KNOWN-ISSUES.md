@@ -47,7 +47,10 @@ cache can be started with the experimental `?opcache=1` parameter (or
 it is off by default while it soaks. The info panel's "OPcache file cache"
 checkbox sets the same parameter and reloads the same runtime and scope, so the
 journaled data is kept ("Apply & Reload", not a reset;
-[ADR-0040](architecture/adr/ADR-0040-opcache-panel-toggle.md)). phpinfo keeps
+[ADR-0040](architecture/adr/ADR-0040-opcache-panel-toggle.md)). Before that
+reload the shell asks the worker to flush the debounced `/persist` journal and
+waits for the reply (up to 60 s), so the last writes are not lost. A manual
+browser reload or Reset does not flush first. phpinfo keeps
 showing the SAPI's pretty name (`PHP WASM SAPI (JSPI)`) either way; the row that
 proves the cache is live is `Opcode Caching: Up and Running`.
 

@@ -28,7 +28,9 @@ file outside installed skill directories. Read the section needed for the task.
 - Core streams into `/www/moodle`. SQLite remains the MEMFS file
   `/persist/moodledata/moodle_<scope>_<runtime>.sq3.php`.
 - `src/runtime/fs-persistence.js` journals `/persist` to
-  `moodle-fs-journal:<scope>`. OPcache is not journaled.
+  `moodle-fs-journal:<scope>`. OPcache is not journaled. Flushes are debounced
+  (1.5 s); `flushNow()` first awaits any flush already in flight, so a caller
+  that then tears the worker down cannot abort its IndexedDB transaction.
 - Exclude `moodledata/{cache,localcache,temp,muc}`. Replaying a compiled DI cache
   can reference absent files. Preserve normalize-before-hydrate behavior.
 - Keep MUC enabled and cache/admin defaults seeded to avoid settings redirects.
