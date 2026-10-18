@@ -1,4 +1,3 @@
-import { ProgressTracker } from "@php-wasm/progress";
 import { setPhpIniEntries } from "@php-wasm/universal";
 import { fetchAssetWithCache } from "../../lib/moodle-loader.js";
 import {
@@ -2429,25 +2428,6 @@ async function requestRuntimeScript(
 }
 
 /**
- * Creates a ProgressTracker with weighted bootstrap phases.
- *
- * The tracker is used as structured phase markers only — manual publish()
- * calls drive the actual progress UI to avoid double-publishing conflicts.
- */
-function createBootstrapTracker() {
-  const tracker = new ProgressTracker({ caption: "Bootstrapping Moodle" });
-
-  return {
-    download: tracker.stage(0.4, "Downloading Moodle bundle"),
-    extract: tracker.stage(0.15, "Extracting Moodle bundle"),
-    config: tracker.stage(0.02, "Writing runtime configuration"),
-    install: tracker.stage(0.25, "Installing Moodle"),
-    blueprints: tracker.stage(0.1, "Executing blueprint steps"),
-    finalize: tracker.stage(0.08, "Finalizing"),
-  };
-}
-
-/**
  * Resolve the manifest and download the core bundle (cache-first). Extracted
  * so the caller (php-worker getRuntimeState) can kick this off CONCURRENTLY
  * with php.refresh() (WASM compilation) instead of strictly after it — the
@@ -2585,7 +2565,6 @@ export async function bootstrapMoodle({
         ? blueprint.phpConstants
         : {},
   };
-  const phases = createBootstrapTracker();
 
   if (shouldTraceRuntimeSelection({ debug, profile })) {
     publish(
@@ -2607,14 +2586,11 @@ export async function bootstrapMoodle({
       appBaseUrl,
       publish,
     }));
-  phases.download.finish();
   const archiveMs = Math.round(performance.now() - tArchive);
   publish(
     `Bundle resolved in ${archiveMs}ms (waited ${archiveMs}ms after refresh).`,
     0.45,
   );
-
-  phases.extract.finish();
 
   const manifestState = buildManifestState(
     archive.manifest,
@@ -2703,7 +2679,6 @@ export async function bootstrapMoodle({
   });
   const prepareMs = Math.round(performance.now() - tPrepare);
   publish(`Runtime preparation completed in ${prepareMs}ms.`, 0.86);
-  phases.config.finish();
 
   // Update php.ini entries if blueprint specifies non-default timezone or debug display
   const iniOverrides = {};
@@ -2919,7 +2894,6 @@ export async function bootstrapMoodle({
       });
     }
   }
-  phases.install.finish();
 
   const tNorm = performance.now();
   publish("Normalizing persisted Moodle configuration defaults.", 0.915);
@@ -3124,7 +3098,6 @@ export async function bootstrapMoodle({
   // A failed flush keeps the previous journal intact (it is replaced as a whole),
   // so a reload stays coherent; only this session's persistence is at risk.
   if (blueprint?.steps?.length) await flushBlueprintPersistence(php, publish);
-  phases.blueprints.finish();
 
   // Auto-login: create a Moodle session for the admin user so the playground
   // opens directly to the dashboard, just like WordPress Playground does.
@@ -3175,8 +3148,6 @@ export async function bootstrapMoodle({
       /* non-fatal */
     }
   }
-
-  phases.finalize.finish();
 
   return {
     manifest: archive.manifest,

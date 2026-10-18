@@ -234,7 +234,10 @@ async function installViaZipDownload(zipUrl, targetDir, context) {
   }
 
   const zipBytes = await downloadZip(downloadUrl, publish);
-  const rawEntries = await readZipEntries(zipBytes);
+  const rawEntries = await readZipEntries(
+    zipBytes,
+    `installMoodlePlugin ${zipUrl}`,
+  );
 
   // GitHub ZIPs have a top-level directory. Find and strip common prefix.
   const paths = rawEntries.map((e) => e.path);

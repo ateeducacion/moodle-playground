@@ -323,6 +323,13 @@ Manual browser checks:
 - no fatal on missing `HTTP_USER_AGENT`
 - no fatal on missing `sodium`
 
+## Shared scope ownership
+
+A scope has one active owner, enforced before PHP startup or journal cleanup
+with an exclusive Web Lock (ADR-0041). Reusing `?scope=` in another tab requires
+closing the owner and explicitly reloading; this does not change journal names,
+DB paths, or existing unflushed-write limits.
+
 ## Why this file exists
 
 This repo accumulated several small but necessary prototype fixes while moving Moodle from PGlite to SQLite-on-wasm. They are easy to lose track of when only looking at the final code. This file is the maintained checklist of those changes and should be updated when any of the bootstrap patches, Moodle core patches, or runtime assumptions change.

@@ -93,6 +93,7 @@ const els = {
 };
 
 const scopeId = getOrCreateScopeId();
+let instanceId;
 const blueprintEditor = initBlueprintEditor({
   mount: els.blueprintEditorMount,
   textarea: els.blueprintTextarea,
@@ -308,6 +309,10 @@ async function updateFrame() {
     profile: currentProfileParam,
     opcache: currentOpcacheParam,
   });
+  instanceId = crypto.randomUUID();
+  url.searchParams.set("instance", instanceId);
+  channel?.close();
+  bindShellChannel();
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
   }
@@ -546,7 +551,7 @@ async function importPayload(file) {
 }
 
 function bindShellChannel() {
-  channel = new BroadcastChannel(createShellChannel(scopeId));
+  channel = new BroadcastChannel(createShellChannel(scopeId, instanceId));
   channel.addEventListener("message", (event) => {
     const message = event.data;
 
@@ -967,7 +972,6 @@ async function main() {
     });
   }
 
-  bindShellChannel();
   bindServiceWorkerMessages();
   setPhpInfoContent("");
   phpInfoCapturePromise = null;

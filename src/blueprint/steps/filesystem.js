@@ -169,7 +169,10 @@ async function handleUnzip(step, context) {
     throw new Error("unzip: 'data' is required.");
   }
   const zipBytes = await resources.resolve(step.data);
-  const entries = await readZipEntries(zipBytes);
+  const entries = await readZipEntries(
+    zipBytes,
+    `unzip ${typeof step.data === "string" ? step.data : "archive"} to ${destination}`,
+  );
 
   const rawPhp = php._php;
   // Containment prefix used to verify every resolved path stays within

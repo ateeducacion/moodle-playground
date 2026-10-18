@@ -502,3 +502,11 @@ browser-side fallback for outbound PHP HTTP(S) traffic through `@php-wasm/web` T
 This is separate from `addonProxyUrl`, which is used for browser-side ZIP/plugin downloads and
 for the explicit same-origin Service Worker proxy endpoint. If outbound requests still fail,
 verify the configured PHP CORS proxy supports general HTTP(S) proxying, not just ZIP downloads.
+
+### Scope already open in another tab
+
+Each scope permits one active owner, including when PHP versions differ. Close
+the owning tab and reload the rejected tab, or open a new scope. A rejected tab
+does not reset the journal. Web Locks must be available and permitted; there is
+no concurrent-owner fallback. Reload and Reset release the old worker before
+reacquiring ownership. See [ADR-0041](architecture/adr/ADR-0041-exclusive-scope-ownership.md).

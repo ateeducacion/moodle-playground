@@ -246,6 +246,13 @@ Main files involved:
 - `scripts/build-moodle-bundle.sh`
 - `docs/architecture/adr/ADR-0014-production-require-of-tests-files-patch.md`
 
+## Shared scopes
+
+Only one active tab may own a scope. A second tab using the same `?scope=`
+is rejected before PHP starts or storage is reset. Close the owner and reload
+the rejected tab, or use a different scope. Web Locks are required; unsupported
+or denied access fails closed. See [ADR-0041](architecture/adr/ADR-0041-exclusive-scope-ownership.md).
+
 ## Current top priority
 
 If continuing work from here, the next priority should be:
