@@ -58,6 +58,22 @@ describe("php-loader tcpOverFetch helpers", () => {
     assert.ok(!("curl.cainfo" in entries));
   });
 
+  it("raises memory_limit only while the file cache is live", () => {
+    assert.strictEqual(__testing.buildPhpIniEntries().memory_limit, "256M");
+    assert.strictEqual(
+      __testing.buildPhpIniEntries({ opcache: true }).memory_limit,
+      "512M",
+    );
+    assert.strictEqual(
+      __testing.buildPhpIniEntries({ phpVersion: "8.4" }).memory_limit,
+      "256M",
+    );
+    assert.strictEqual(
+      __testing.buildPhpIniEntries({ phpVersion: "8.5" }).memory_limit,
+      "512M",
+    );
+  });
+
   it("adds CA ini entries when tcpOverFetch is enabled", () => {
     const entries = __testing.buildPhpIniEntries({
       tcpOverFetchEnabled: true,

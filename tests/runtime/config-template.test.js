@@ -204,6 +204,7 @@ describe("createPhpIniEntries", () => {
     // PHP 8.5 runs this file cache under the `wasm` SAPI; reset/invalidate are
     // no-ops there, so the mtime check is the only guard against stale bytecode.
     const entries = createPhpIniEntries();
+    assert.strictEqual(entries.error_log, "/internal/shared/php-errors.log");
     assert.strictEqual(entries["opcache.enable"], "1");
     assert.strictEqual(entries["opcache.file_cache_only"], "1");
     assert.strictEqual(entries["opcache.validate_timestamps"], "1");

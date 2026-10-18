@@ -2,7 +2,7 @@ import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
-import { isOpcacheEnabled } from "./src/runtime/config-template.js";
+import { isOpcacheEnabled, PHP_ERROR_LOG_PATH } from "./src/runtime/config-template.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
 import {
@@ -708,6 +708,25 @@ async function respondError(id, message, status) {
   });
 }
 
+// PHP.run() interpolates only the stderr stream. An engine fatal can exit 255
+// with that stream empty while error_log still received the line.
+async function detailWithPhpErrorLog(error) {
+  const detail = formatErrorDetail(error);
+  let text = "";
+  try {
+    const state = await runtimeStatePromise;
+    const bytes = await state?.php?.readFile?.(PHP_ERROR_LOG_PATH);
+    text =
+      typeof bytes === "string"
+        ? bytes.trim()
+        : new TextDecoder().decode(bytes || new Uint8Array()).trim();
+  } catch {
+    text = "";
+  }
+  if (!text) return detail;
+  return `${detail}\n\n=== PHP error_log ===\n${text.slice(-2000)}`;
+}
+
 function installBridgeListener() {
   bridgeChannel.addEventListener("message", (event) => {
     const data = event.data;
@@ -794,7 +813,7 @@ function installBridgeListener() {
 
         if (!isFatalWasmError(error)) {
           // Non-fatal error: return 500 without runtime rotation.
-          const detail = formatErrorDetail(error);
+          const detail = await detailWithPhpErrorLog(error);
           await respondError(data.id, detail, 500);
           postShell({ kind: "error", detail, path: requestPathname(data.request) });
           return;
