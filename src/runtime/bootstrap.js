@@ -2438,7 +2438,7 @@ async function requestRuntimeScript(
  *
  * Returns the same archive object as the inline path; the progress mapping
  * mirrors the original (manifest -> 0.16, cache-bust -> 0.24, download ratio
- * -> 0.2..0.44) but uses a local pct accumulator instead of a static on
+ * -> 0.18..0.56) but uses a local pct accumulator instead of a static on
  * bootstrapMoodle.
  */
 export async function startArchiveResolution({
@@ -2454,7 +2454,7 @@ export async function startArchiveResolution({
   let lastDownloadPct;
   return resolveBootstrapArchive(
     { manifestUrl },
-    ({ ratio, cached, phase, detail }) => {
+    ({ ratio, cached, phase, detail, loaded, total }) => {
       if (phase === "manifest") {
         publish(detail, 0.16);
         return;
@@ -2463,16 +2463,22 @@ export async function startArchiveResolution({
         publish(detail, 0.24);
         return;
       }
+      // The core download is the long pole on a slow link. Keep it below
+      // "Writing Moodle bundle into MEMFS" (0.58) so the bar can keep moving.
       const progress = cached
-        ? 0.44
-        : 0.2 + (typeof ratio === "number" ? ratio * 0.22 : 0.22);
-      // Only publish at ~10% intervals to avoid log spam
-      const pct = Math.floor((typeof ratio === "number" ? ratio : 0) * 10);
+        ? 0.56
+        : 0.18 + (typeof ratio === "number" ? ratio * 0.38 : 0.38);
+      // ~5% of the bundle, so the status line moves during a multi-minute fetch.
+      const pct = Math.floor((typeof ratio === "number" ? ratio : 0) * 20);
       if (cached || pct !== lastDownloadPct) {
         lastDownloadPct = pct;
+        const size =
+          total > 0
+            ? `, ${(loaded / (1024 * 1024)).toFixed(1)}/${(total / (1024 * 1024)).toFixed(1)} MB`
+            : "";
         const label =
           typeof ratio === "number"
-            ? `Downloading Moodle bundle (${Math.round(ratio * 100)}%).`
+            ? `Downloading Moodle bundle (${Math.round(ratio * 100)}%${size}).`
             : detail || "Downloading Moodle bundle.";
         publish(label, progress);
       }
