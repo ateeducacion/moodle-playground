@@ -257,11 +257,67 @@ function isPhpExecutionFailure(error) {
   return false;
 }
 
+// File-cache root. Kept after a discard so the next request can write it again.
+const OPCACHE_CACHE_DIR = "/internal/shared/opcache";
+
+/**
+ * Delete bytecode left by CLI `php.run({ code })`.
+ *
+ * The file cache keys only on the path. A snippet that defines `CLI_SCRIPT`
+ * before including Moodle compiles those includes with that constant folded
+ * in, and the next web request would execute the CLI branch. `opcache_reset()`
+ * does not touch this directory. The root itself stays; PHP recreates children.
+ * See docs/architecture/adr/ADR-0043-discard-opcache-file-cache-after-cli.md.
+ */
+export function discardOpcacheFileCache(FS) {
+  if (!FS || typeof FS.readdir !== "function") {
+    return;
+  }
+  let names;
+  try {
+    names = FS.readdir(OPCACHE_CACHE_DIR);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name === "." || name === "..") continue;
+    removeMemfsTree(FS, `${OPCACHE_CACHE_DIR}/${name}`);
+  }
+}
+
+function removeMemfsTree(FS, path) {
+  let stat;
+  try {
+    stat = FS.stat(path);
+  } catch {
+    return;
+  }
+  if (FS.isDir(stat.mode)) {
+    for (const name of FS.readdir(path)) {
+      if (name === "." || name === "..") continue;
+      removeMemfsTree(FS, `${path}/${name}`);
+    }
+    try {
+      FS.rmdir(path);
+    } catch {
+      /* a file may already be gone */
+    }
+    return;
+  }
+  try {
+    FS.unlink(path);
+  } catch {
+    /* already removed */
+  }
+}
+
 export const __testing = {
   encodeHeaderValue,
   isPhpExecutionFailure,
   phpResponseToResponse,
   shouldPassThroughFailedPhpResponse,
+  discardOpcacheFileCache,
+  OPCACHE_CACHE_DIR,
 };
 
 /**
@@ -285,6 +341,9 @@ export function wrapPhpInstance(
   // Without this prefix, redirect URLs lose the subpath on GitHub Pages deployments.
   const urlBasePath = parsedAbsoluteUrl.pathname.replace(/\/+$/u, "");
   const cookies = new Map();
+  // CLI snippets compile includes into the file cache. Drop that bytecode on
+  // the next web request, once, so boot can still share it across CLI steps.
+  let cliOpcacheDirty = false;
 
   return {
     /**
@@ -293,6 +352,11 @@ export function wrapPhpInstance(
      * Returns a native Response object.
      */
     async request(requestOrUrl) {
+      if (cliOpcacheDirty) {
+        const module = await emscriptenModule;
+        discardOpcacheFileCache(module?.FS);
+        cliOpcacheDirty = false;
+      }
       const req = await normalizeRequest(requestOrUrl);
       const urlPath = req.url || "/";
       const qIdx = urlPath.indexOf("?");
@@ -578,7 +642,11 @@ export function wrapPhpInstance(
      * Run inline PHP code. Returns a PHPResponse with .text and .errors.
      */
     async run(code) {
-      return php.run({ code });
+      try {
+        return await php.run({ code });
+      } finally {
+        cliOpcacheDirty = true;
+      }
     },
 
     /**

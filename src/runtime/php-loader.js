@@ -60,8 +60,29 @@ async function getTcpOverFetchOptions(corsProxyUrl) {
   };
 }
 
-function buildPhpIniEntries({ tcpOverFetchEnabled = false } = {}) {
+// PHP 8.5 starts the file cache without the experimental flag (ADR-0039).
+// Older versions start it only after setSapiName("uwsgi").
+function fileCacheIsLive({ opcache = false, phpVersion = "" } = {}) {
+  if (opcache) return true;
+  const match = /^(\d+)\.(\d+)/.exec(String(phpVersion));
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 8 || (major === 8 && minor >= 5);
+}
+
+function buildPhpIniEntries({
+  tcpOverFetchEnabled = false,
+  opcache = false,
+  phpVersion = "",
+} = {}) {
   const entries = createPhpIniEntries();
+  // The file cache's bookkeeping sits on top of PHP's heap. admin/index.php
+  // fits in 256M with the cache inert and exits 255 once the cache is live.
+  // See docs/architecture/adr/ADR-0044-opcache-file-cache-memory-limit.md.
+  if (fileCacheIsLive({ opcache, phpVersion })) {
+    entries.memory_limit = "512M";
+  }
   if (!tcpOverFetchEnabled) {
     return entries;
   }
@@ -215,7 +236,11 @@ export function createPhpRuntime(
       // Apply Moodle php.ini settings to /internal/shared/php.ini
       await setPhpIniEntries(
         php,
-        buildPhpIniEntries({ tcpOverFetchEnabled: true }),
+        buildPhpIniEntries({
+          tcpOverFetchEnabled: true,
+          opcache,
+          phpVersion: resolvedPhpVersion,
+        }),
       );
 
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());
@@ -348,7 +373,11 @@ export function createProvisioningRuntime(
       // Apply Moodle php.ini settings so phpinfo reflects correct values
       await setPhpIniEntries(
         php,
-        buildPhpIniEntries({ tcpOverFetchEnabled: true }),
+        buildPhpIniEntries({
+          tcpOverFetchEnabled: true,
+          opcache,
+          phpVersion: resolvedPhpVersion,
+        }),
       );
 
       php.writeFile(CHDIR_FIX_PRELOAD_PATH, createChdirFixPhp());

@@ -305,6 +305,10 @@ if (!function_exists('playground_glob_polyfill_installed')) {
  * setPhpIniEntries() from @php-wasm/universal.  WP Playground hardcodes
  * /internal/shared/php.ini — writing a separate file has no effect.
  */
+// Engine fatals that never reach the stderr stream captured by PHP.run().
+// The worker appends this file to shell errors. Not journaled (/persist only).
+export const PHP_ERROR_LOG_PATH = "/internal/shared/php-errors.log";
+
 export function createPhpIniEntries({
   timezone = "UTC",
   debugdisplay = 0,
@@ -317,6 +321,10 @@ export function createPhpIniEntries({
     error_reporting: "32759", // E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT
     html_errors: "0",
     log_errors: "1",
+    // PHP.run() only surfaces the stderr stream. Engine fatals have arrived
+    // with an empty stream (exit 255), so also append them to a MEMFS file
+    // the worker can read back. Not under /persist: it is not site data.
+    error_log: PHP_ERROR_LOG_PATH,
     // max_execution_time stays at 0 (WP Playground default) — no timeout in WASM
     max_input_vars: "5000",
     // memory_limit: 256M + modest opcache is a good balance for Moodle Playground.
@@ -325,6 +333,8 @@ export function createPhpIniEntries({
     // heap usage vs the previous 512M. opcache values reduced similarly.
     // Heavy operations (course restore, large plugin installs) call
     // raise_memory_limit(MEMORY_EXTRA) which temporarily increases it further.
+    // buildPhpIniEntries raises this to 512M while the file cache is live
+    // (ADR-0044). The base stays 256M when the cache is inert.
     memory_limit: "256M",
     post_max_size: "64M",
     upload_max_filesize: "64M",
@@ -352,7 +362,8 @@ export function createPhpIniEntries({
     // opcache_invalidate() are no-ops, so the mtime check (whole seconds, with
     // the default 2 s file_update_protection) is the only invalidation.
     // /internal/eval.php is blacklisted because every php.run({ code }) reuses
-    // that one path. See docs/architecture/adr/ADR-0038-opcache-file-cache-timestamp-validation.md.
+    // that one path. Includes compiled under CLI_SCRIPT are discarded from the
+    // file cache before the next web request (ADR-0043). See ADR-0038.
     // NOTE: with file_cache_only=1 OPcache allocates NO shared memory
     // segment, so max_accelerated_files / memory_consumption /
     // interned_strings_buffer are inert in this mode. They are kept (with

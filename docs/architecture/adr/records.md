@@ -56,6 +56,8 @@ folder and keep their original lightweight format (see
 | [ADR-0040](ADR-0040-opcache-panel-toggle.md) | Expose the experimental OPcache flag as an info-panel toggle that reloads without resetting | Accepted | 2026-10-17 |
 | [ADR-0041](ADR-0041-exclusive-scope-ownership.md) | Exclusive ownership of a playground scope | Proposed | 2026-10-18 |
 | [ADR-0042](ADR-0042-stream-static-cache-bodies.md) | Stream service-worker static responses while caching them | Proposed | 2026-10-18 |
+| [ADR-0043](ADR-0043-discard-opcache-file-cache-after-cli.md) | Discard the OPcache file cache after CLI runs, before the next web request | Proposed | 2026-10-18 |
+| [ADR-0044](ADR-0044-opcache-file-cache-memory-limit.md) | Raise PHP memory_limit to 512M while the OPcache file cache is live | Proposed | 2026-10-18 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers

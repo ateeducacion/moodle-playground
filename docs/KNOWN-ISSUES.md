@@ -38,6 +38,15 @@ mode; the runtime therefore validates timestamps (`opcache.validate_timestamps=1
 whole-second mtimes, default 2 s `file_update_protection`) and blacklists
 `/internal/eval.php`, the path every `php.run({ code })` reuses
 ([ADR-0038](architecture/adr/ADR-0038-opcache-file-cache-timestamp-validation.md)).
+Includes compiled while `CLI_SCRIPT` is defined are not covered by that
+blacklist. The next web request deletes the on-disk cache first and recompiles
+them
+([ADR-0043](architecture/adr/ADR-0043-discard-opcache-file-cache-after-cli.md)).
+While the file cache is live, `memory_limit` is 512M. At the 256M base a large
+site reloaded with the cache on exits 255 from `admin/index.php`, with empty
+stdout and stderr
+([ADR-0044](architecture/adr/ADR-0044-opcache-file-cache-memory-limit.md)).
+The base stays 256M when the cache is inert.
 A rewrite that preserves the original mtime is the remaining blind spot; blueprint
 plugin/overlay restores additionally delete the on-disk cache. On PHP 8.3/8.4 the
 cache can be started with the experimental `?opcache=1` parameter (or
