@@ -4,6 +4,7 @@ import { buildScopedStaticCacheName, buildStaticCacheName, isStaleAppCacheName }
 import * as rw from "./src/shared/sw-url-rewrite.js";
 import { buildScopedCacheKey, escapeHtml } from "./src/shared/sw-url-rewrite.js";
 import { isCacheableScopedAssetPath, isCacheableScopedAssetResponse } from "./src/shared/sw-asset-cache.js";
+import { settleStaticFetch } from "./src/shared/sw-static-response.js";
 
 const bridges = new Map();
 const pending = new Map();
@@ -105,19 +106,7 @@ async function openStaticCache() {
   return caches.open(STATIC_CACHE_NAME);
 }
 
-async function cacheStaticResponse(cache, cacheKey, response) {
-  if (!response.ok) {
-    return;
-  }
-
-  try {
-    await cache.put(cacheKey, response.clone());
-  } catch {
-    // CacheStorage is an optimization. Runtime routing must continue without it.
-  }
-}
-
-async function cacheFirstStaticFetch(request) {
+async function cacheFirstStaticFetch(request, waitUntil) {
   const cache = await openStaticCache();
   const cacheKey = buildStaticCacheKey(request);
   const cached = await cache.match(cacheKey);
@@ -126,22 +115,21 @@ async function cacheFirstStaticFetch(request) {
   }
 
   const response = await fetch(buildFreshRequest(request));
-  await cacheStaticResponse(cache, cacheKey, response);
-  return response;
+  // Do not await the cache write. See ADR-0042.
+  return settleStaticFetch(response, cache, cacheKey, waitUntil);
 }
 
-async function networkFirstStaticFetch(request) {
+async function networkFirstStaticFetch(request, waitUntil) {
   const cache = await openStaticCache();
   const cacheKey = buildStaticCacheKey(request);
   const cached = await cache.match(cacheKey);
 
   try {
     const response = await fetch(buildFreshRequest(request));
-    await cacheStaticResponse(cache, cacheKey, response);
     if (!response.ok && cached) {
       return cached;
     }
-    return response;
+    return settleStaticFetch(response, cache, cacheKey, waitUntil);
   } catch (error) {
     if (cached) {
       return cached;
@@ -465,11 +453,12 @@ self.addEventListener("fetch", (event) => {
       const scopedRequest = await resolveScopedRequest(event, url);
       if (!scopedRequest) {
         if (shouldHandleStaticRequest(event.request, url)) {
+          const waitUntil = (promise) => event.waitUntil(promise);
           if (isSensitiveStaticPath(url.pathname)) {
-            return networkFirstStaticFetch(event.request);
+            return networkFirstStaticFetch(event.request, waitUntil);
           }
 
-          return cacheFirstStaticFetch(event.request);
+          return cacheFirstStaticFetch(event.request, waitUntil);
         }
 
         return fetch(event.request);

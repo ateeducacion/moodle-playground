@@ -116,6 +116,35 @@ describe("fetchBundleWithCache (zip-parts)", () => {
     assert.equal(sha256Hex(again), sha256Hex(zip));
   });
 
+  it("reports 0% before a part body is available", async () => {
+    const zip = makeBundle(64 * 1024);
+    const { manifest, parts } = makeChunkedManifest(zip, 64 * 1024);
+    for (const part of parts) mocks.responses.set(part.url, part.bytes);
+
+    let release = () => {};
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const fetchImpl = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      await gate;
+      return fetchImpl(url, init);
+    };
+
+    const events = [];
+    const pending = fetchBundleWithCache(manifest, (event) => {
+      events.push({ ratio: event.ratio, loaded: event.loaded });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(
+      events.some((event) => event.ratio === 0 && event.loaded === 0),
+      "download progress must be published before the body arrives",
+    );
+    release();
+    const result = await pending;
+    assert.equal(result.byteLength, zip.byteLength);
+  });
+
   it("rejects a corrupted part (per-part sha256 mismatch)", async () => {
     const zip = makeBundle(200 * 1024);
     const { manifest, parts } = makeChunkedManifest(zip, 48 * 1024);
