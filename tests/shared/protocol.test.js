@@ -18,6 +18,17 @@ describe("createShellChannel", () => {
     const channel = createShellChannel("custom-scope");
     assert.ok(channel.endsWith(":custom-scope"));
   });
+
+  it("isolates shell messages between owners and remote reloads", () => {
+    assert.notEqual(
+      createShellChannel("shared", "old"),
+      createShellChannel("shared", "new"),
+    );
+    assert.notEqual(
+      createShellChannel("first", "owner"),
+      createShellChannel("second", "owner"),
+    );
+  });
 });
 
 describe("createPhpBridgeChannel", () => {

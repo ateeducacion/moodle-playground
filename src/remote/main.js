@@ -2,6 +2,7 @@ import { loadBlueprint } from "../blueprint/index.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
 import { createShellChannel } from "../shared/protocol.js";
+import { acquireScopeOwnership } from "../shared/scope-ownership.js";
 import {
   isServiceWorkerUnsupportedError,
   registerVersionedServiceWorker,
@@ -22,6 +23,24 @@ const frameEl = document.querySelector("#remote-frame");
 const SW_RESET_KEY_PREFIX = "moodle-playground:sw-reset";
 const CONTROL_RELOAD_KEY_PREFIX = "moodle-playground:remote-sw-controlled";
 let phpWorker;
+const instanceId =
+  new URL(window.location.href).searchParams.get("instance") ||
+  crypto.randomUUID();
+let releaseScope;
+let disposed = false;
+let bootstrapTask;
+window.addEventListener("pagehide", () => {
+  disposed = true;
+  phpWorker?.terminate();
+  // Drain any preparation already in flight before another tab can reset data.
+  bootstrapTask.then(
+    () => releaseScope?.(),
+    () => releaseScope?.(),
+  );
+});
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) window.location.reload();
+});
 let activePath = "/";
 let frameWatchTimer = 0;
 let lastAnnouncedFrameHref = "";
@@ -98,7 +117,7 @@ function emit(scopeId, message) {
     setRemoteProgress(message.detail);
   }
 
-  const channel = new BroadcastChannel(createShellChannel(scopeId));
+  const channel = new BroadcastChannel(createShellChannel(scopeId, instanceId));
   channel.postMessage(message);
   channel.close();
 }
@@ -521,6 +540,11 @@ function bindShellCommands(scopeId, runtimeId) {
 async function bootstrapRemote() {
   const url = new URL(window.location.href);
   const scopeId = url.searchParams.get("scope");
+  releaseScope = await acquireScopeOwnership(scopeId);
+  if (disposed) {
+    releaseScope();
+    return;
+  }
   const requestedRuntimeId = url.searchParams.get("runtime");
   const requestedPath = url.searchParams.get("path") || "/";
   const cleanBoot = url.searchParams.get("clean") === "1";
@@ -605,12 +629,14 @@ async function bootstrapRemote() {
   configureRuntimeServiceWorker({ addonProxyUrl });
   setRemoteProgress("Service Worker ready and controlling this tab.");
 
+  if (disposed) return;
   if (!phpWorker) {
     const workerUrl = new URL(
       "../../dist/php-worker.bundle.js",
       import.meta.url,
     );
     workerUrl.searchParams.set("scope", scopeId);
+    workerUrl.searchParams.set("instance", instanceId);
     workerUrl.searchParams.set("runtime", selection.runtimeId);
     if (selection.phpVersion) {
       workerUrl.searchParams.set("phpVersion", selection.phpVersion);
@@ -663,7 +689,9 @@ async function bootstrapRemote() {
   let frameNavigated = false;
   // Listen to the shell channel so we can pick up bootstrap progress
   // messages from the worker and display them on the loading overlay.
-  const shellChannel = new BroadcastChannel(createShellChannel(scopeId));
+  const shellChannel = new BroadcastChannel(
+    createShellChannel(scopeId, instanceId),
+  );
   shellChannel.addEventListener("message", (event) => {
     const msg = event.data;
     if (msg?.kind === "progress") {
@@ -700,6 +728,7 @@ async function bootstrapRemote() {
     blueprint,
     runtimeParams: {
       scopeId,
+      instanceId,
       runtimeId: selection.runtimeId,
       phpVersion: selection.phpVersion,
       moodleBranch: selection.moodleBranch,
@@ -742,13 +771,18 @@ async function bootstrapRemote() {
   setRemoteProgress("Loading Moodle…", 0.98);
 }
 
-bootstrapRemote().catch((error) => {
+bootstrapTask = bootstrapRemote();
+bootstrapTask.catch((error) => {
   const url = new URL(window.location.href);
   const scopeId = url.searchParams.get("scope");
+  const message = String(error?.message || error);
   setOverlayVisible(true);
-  setRemoteProgress(String(error?.message || error));
+  setRemoteProgress(message);
   emit(scopeId, {
     kind: "error",
-    detail: String(error?.stack || error?.message || error),
+    // Firefox stacks omit the message, including the ownership-conflict advice.
+    detail: error?.stack?.includes(message)
+      ? error.stack
+      : `${message}\n${error?.stack || ""}`.trim(),
   });
 });

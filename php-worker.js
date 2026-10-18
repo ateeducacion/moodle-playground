@@ -22,6 +22,7 @@ const appRootUrl = typeof __APP_ROOT__ !== "undefined" ? __APP_ROOT__ : new URL(
 // by URL path (stripping query params), so self.location.href may reflect
 // stale params from a previously cached response.
 let scopeId = workerUrl.searchParams.get("scope");
+let instanceId = workerUrl.searchParams.get("instance");
 let forceCleanBoot = workerUrl.searchParams.get("clean") === "1";
 let selection = resolveRuntimeSelection({
   runtimeId: workerUrl.searchParams.get("runtime"),
@@ -79,7 +80,7 @@ let reactiveRestartCount = 0;
 let snapshot = null;
 
 function postShell(message) {
-  const channel = new BroadcastChannel(createShellChannel(scopeId));
+  const channel = new BroadcastChannel(createShellChannel(scopeId, instanceId));
   channel.postMessage(message);
   channel.close();
 }
@@ -952,6 +953,7 @@ function installMessageListener() {
     const params = event.data.runtimeParams;
     if (params) {
       if (params.scopeId !== undefined) scopeId = params.scopeId;
+      if (params.instanceId !== undefined) instanceId = params.instanceId;
       if (params.forceCleanBoot !== undefined)
         forceCleanBoot = params.forceCleanBoot;
       selection = resolveRuntimeSelection({
@@ -974,14 +976,13 @@ function installMessageListener() {
       // (re)configured — potentially foreign — runtime.
       runtimeStatePromise = null;
       snapshot.clear();
-      // Recreate bridge channel if scopeId changed
-      if (params.scopeId !== undefined && bridgeChannel) {
-        bridgeChannel.close();
-        bridgeChannel = new BroadcastChannel(createPhpBridgeChannel(scopeId));
-        installBridgeListener();
-      }
     }
 
+    // Cached worker URLs may name a different scope. Do not accept HTTP until
+    // remote.js supplies the authoritative configuration under its scope lock.
+    bridgeChannel?.close();
+    bridgeChannel = new BroadcastChannel(createPhpBridgeChannel(scopeId));
+    installBridgeListener();
     activeBlueprint = event.data.blueprint || null;
 
     self.postMessage({
@@ -999,8 +1000,6 @@ function installMessageListener() {
 }
 
 try {
-  bridgeChannel = new BroadcastChannel(createPhpBridgeChannel(scopeId));
-  installBridgeListener();
   installMessageListener();
   // Do not signal readiness here — wait for configure-blueprint message
   // which carries authoritative runtime params from remote.js.
