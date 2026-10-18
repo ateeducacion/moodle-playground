@@ -269,7 +269,9 @@
                 </button>
               </span>
             </div>
-            <iframe id="phpinfo-frame" class="panel-frame" title="PHP Info diagnostics" sandbox=""></iframe>
+            <!-- allow-scripts only. phpinfo() ships its own toggles. The frame
+                 stays a unique origin: shell-channel HTML must not reach the parent. -->
+            <iframe id="phpinfo-frame" class="panel-frame" title="PHP Info diagnostics" sandbox="allow-scripts"></iframe>
           </section>
 
           <section id="blueprint-panel" class="side-panel__content side-panel__content--stack is-hidden" role="tabpanel" aria-labelledby="blueprint-tab" data-panel-view="blueprint">
