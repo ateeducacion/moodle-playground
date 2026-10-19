@@ -1,5 +1,5 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
-import { createPhpBridgeChannel, createShellChannel, formatErrorDetail } from "./src/shared/protocol.js";
+import { createPhpBridgeChannel, createShellChannel, formatErrorDetail, formatErrorHtml } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
 import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
 import { isOpcacheEnabled, PHP_ERROR_LOG_PATH } from "./src/runtime/config-template.js";
@@ -376,7 +376,7 @@ echo $html;
     } catch (error) {
       return {
         detail: `Failed to capture PHP runtime diagnostics (${reason}).`,
-        html: `<!doctype html><meta charset="utf-8"><pre>${formatErrorDetail(error)}</pre>`,
+        html: formatErrorHtml(error),
         errorOutput: "",
       };
     } finally {

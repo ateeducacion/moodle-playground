@@ -42,3 +42,14 @@ export function formatErrorDetail(error) {
     return String(error);
   }
 }
+
+/**
+ * Wrap an error in a minimal HTML page, escaping it so the text never
+ * becomes markup.
+ */
+export function formatErrorHtml(error) {
+  const text = formatErrorDetail(error)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;");
+  return `<!doctype html><meta charset="utf-8"><pre>${text}</pre>`;
+}
