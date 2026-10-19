@@ -58,6 +58,7 @@ folder and keep their original lightweight format (see
 | [ADR-0042](ADR-0042-stream-static-cache-bodies.md) | Stream service-worker static responses while caching them | Proposed | 2026-10-18 |
 | [ADR-0043](ADR-0043-discard-opcache-file-cache-after-cli.md) | Discard the OPcache file cache after CLI runs, before the next web request | Proposed | 2026-10-18 |
 | [ADR-0044](ADR-0044-opcache-file-cache-memory-limit.md) | Raise PHP memory_limit to 512M while the OPcache file cache is live | Proposed | 2026-10-18 |
+| [ADR-0045](ADR-0045-sw-skip-cross-origin-requests.md) | Leave cross-origin requests to the browser instead of passing them through the Service Worker | Proposed | 2026-10-19 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers
