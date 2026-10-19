@@ -52,13 +52,14 @@ folder and keep their original lightweight format (see
 | [ADR-0036](ADR-0036-redownload-blueprint-archives-on-reload.md) | Download blueprint plugin and unzip archives again on reload | Accepted (extended by ADR-0037) | 2026-10-16 |
 | [ADR-0037](ADR-0037-blueprint-archive-hash-verification-on-reload.md) | Verify re-downloaded blueprint archives against a checkpointed hash on reload | Accepted | 2026-10-16 |
 | [ADR-0038](ADR-0038-opcache-file-cache-timestamp-validation.md) | Validate OPcache file-cache timestamps and blacklist the eval script path | Accepted | 2026-10-16 |
-| [ADR-0039](ADR-0039-experimental-opcache-via-sapi-name.md) | Start OPcache's file cache on PHP 8.3/8.4 via the `uwsgi` SAPI name, behind an experimental flag | Accepted | 2026-10-16 |
+| [ADR-0039](ADR-0039-experimental-opcache-via-sapi-name.md) | Start OPcache's file cache on PHP 8.3/8.4 via the `uwsgi` SAPI name, behind an experimental flag | Accepted (amended by ADR-0046) | 2026-10-16 |
 | [ADR-0040](ADR-0040-opcache-panel-toggle.md) | Expose the experimental OPcache flag as an info-panel toggle that reloads without resetting | Accepted | 2026-10-17 |
 | [ADR-0041](ADR-0041-exclusive-scope-ownership.md) | Exclusive ownership of a playground scope | Proposed | 2026-10-18 |
 | [ADR-0042](ADR-0042-stream-static-cache-bodies.md) | Stream service-worker static responses while caching them | Proposed | 2026-10-18 |
 | [ADR-0043](ADR-0043-discard-opcache-file-cache-after-cli.md) | Discard the OPcache file cache after CLI runs, before the next web request | Proposed | 2026-10-18 |
 | [ADR-0044](ADR-0044-opcache-file-cache-memory-limit.md) | Raise PHP memory_limit to 512M while the OPcache file cache is live | Proposed | 2026-10-18 |
 | [ADR-0045](ADR-0045-sw-skip-cross-origin-requests.md) | Leave cross-origin requests to the browser instead of passing them through the Service Worker | Proposed | 2026-10-19 |
+| [ADR-0046](ADR-0046-opcache-on-by-default.md) | Turn the OPcache file cache on by default | Proposed | 2026-10-19 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers

@@ -263,8 +263,8 @@ test("info panel hosts the version config with a dirty-state apply", async ({
   // The OPcache toggle alone is not destructive: it swaps the warning for the
   // reload note and relabels the button. Reverting clears it like the selects.
   const opcache = page.locator("#info-opcache");
-  await expect(opcache).not.toBeChecked();
-  await opcache.check();
+  await expect(opcache).toBeChecked();
+  await opcache.uncheck();
   await expect(page.locator("#config-apply")).toHaveText("Apply & Reload");
   await expect(page.locator("#config-apply")).not.toHaveClass(/danger/);
   await expect(page.locator("#config-reload-note")).toBeVisible();
@@ -277,12 +277,12 @@ test("info panel hosts the version config with a dirty-state apply", async ({
     await expect(page.locator("#config-reload-note")).toBeHidden();
     await page.locator("#info-moodle-version").selectOption(current);
   }
-  await opcache.uncheck();
+  await opcache.check();
   await expect(page.locator("#config-apply")).toBeHidden();
   await expect(page.locator("#config-reload-note")).toBeHidden();
 });
 
-test("enables experimental OPcache from the info panel and reloads with the cache running", async ({
+test("turns OPcache off from the info panel and reloads without the cache", async ({
   page,
   playground,
   browserName,
@@ -308,7 +308,9 @@ test("enables experimental OPcache from the info panel and reloads with the cach
   };
 
   await page.locator("#panel-toggle-button").click();
-  await expectOpcodeCaching(/Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Disabled/);
+  await expectOpcodeCaching(
+    /Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Up and Running/,
+  );
 
   // The shell log is rebuilt on reload, so record the flush reply in
   // sessionStorage (same tab, survives the navigation) as it is logged.
@@ -322,12 +324,12 @@ test("enables experimental OPcache from the info panel and reloads with the cach
   });
 
   await page.locator("#info-tab").click();
-  await page.locator("#info-opcache").check();
+  await page.locator("#info-opcache").uncheck();
   await expect(page.locator("#config-apply")).toHaveText("Apply & Reload");
   await page.locator("#config-apply").click();
 
   // Same scope and runtime, no clean boot; the URL carries the flag.
-  await page.waitForURL(/[?&]opcache=1/);
+  await page.waitForURL(/[?&]opcache=0/);
   await waitForShellReady(page);
   expect(
     await page.evaluate(() =>
@@ -336,7 +338,7 @@ test("enables experimental OPcache from the info panel and reloads with the cach
     "the journal was flushed before the reload",
   ).toBe("1");
   await expect(frame).toHaveAttribute("src", new RegExp(`scope=${scope}`));
-  await expect(frame).toHaveAttribute("src", /opcache=1/);
+  await expect(frame).toHaveAttribute("src", /opcache=0/);
   await expect(frame).not.toHaveAttribute("src", /clean=1/);
 
   if (
@@ -346,11 +348,9 @@ test("enables experimental OPcache from the info panel and reloads with the cach
   ) {
     await page.locator("#panel-toggle-button").click();
   }
-  await expect(page.locator("#info-opcache")).toBeChecked();
+  await expect(page.locator("#info-opcache")).not.toBeChecked();
   await expect(page.locator("#config-apply")).toBeHidden();
-  await expectOpcodeCaching(
-    /Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Up and Running/,
-  );
+  await expectOpcodeCaching(/Opcode Caching\s*<\/td>\s*<td[^>]*>\s*Disabled/);
 });
 
 // ---------------------------------------------------------------------------

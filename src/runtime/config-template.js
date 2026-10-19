@@ -391,7 +391,7 @@ export function createPhpIniEntries({
 export const OPCACHE_BLACKLIST_PATH = "/internal/shared/opcache-blacklist.txt";
 export const OPCACHE_BLACKLIST = "/internal/eval.php\n";
 
-// Experimental OPcache activation (ADR-0039). php-src <= 8.4 only starts OPcache
+// OPcache activation (ADR-0039, on by default since ADR-0046). php-src <= 8.4 only starts OPcache
 // for whitelisted SAPI names; `uwsgi` is on that list and, unlike `cgi-fcgi` or
 // `fpm-fcgi`, no Moodle or bundled third-party code branches on it (audit of
 // Moodle main b7260e59: only `cgi*` substring checks and one `fpm-fcgi` check).
@@ -400,8 +400,9 @@ export const OPCACHE_SAPI_NAME = "uwsgi";
 
 /**
  * Decide whether to switch the SAPI name so OPcache's file cache starts.
- * `?opcache=1|0` overrides `playground.config.json`'s `opcache` key (default
- * off). PHP 8.5 runs the cache regardless; the flag only matters for <= 8.4.
+ * `?opcache=1|0` overrides `playground.config.json`'s `opcache` key (shipped as
+ * true, ADR-0046; off when the key is missing). PHP 8.5 runs the cache
+ * regardless; the flag only matters for <= 8.4.
  */
 export function isOpcacheEnabled(param, config = {}) {
   if (param !== null && param !== undefined && param !== "") {
