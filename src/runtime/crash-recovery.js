@@ -109,26 +109,6 @@ export function requestPathname(request) {
   }
 }
 
-export function formatErrorDetail(error) {
-  if (!error) {
-    return "Unknown error";
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (error instanceof Error) {
-    return String(error.stack || error.message || error);
-  }
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return String(error);
-  }
-}
-
 /**
  * Create a state snapshot manager for crash recovery.
  *

@@ -1,4 +1,4 @@
-import { createPhpBridgeChannel, createWorkerRequestId } from "./src/shared/protocol.js";
+import { createPhpBridgeChannel, createWorkerRequestId, formatErrorDetail } from "./src/shared/protocol.js";
 import { BUILD_VERSION as IMPORTED_BUILD_VERSION } from "./src/generated/build-version.js";
 import { buildScopedStaticCacheName, buildStaticCacheName, isStaleAppCacheName } from "./src/shared/cache-names.js";
 import * as rw from "./src/shared/sw-url-rewrite.js";
@@ -516,7 +516,7 @@ self.addEventListener("fetch", (event) => {
           request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
           runtimeId,
           scopeId,
-        }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
+        }).catch((error) => buildErrorResponse(formatErrorDetail(error)));
 
         if (isCacheableScopedAssetResponse(requestPath, fresh)) {
           scopedCache.put(cacheKey, fresh.clone()).catch(() => {});
@@ -536,7 +536,7 @@ self.addEventListener("fetch", (event) => {
         request: buildPhpRequest(event.request, forwardedUrl, earlyBody),
         runtimeId,
         scopeId,
-      }).catch((error) => buildErrorResponse(String(error?.stack || error?.message || error)));
+      }).catch((error) => buildErrorResponse(formatErrorDetail(error)));
 
       if (response.status >= 300 && response.status < 400) {
         await broadcastToClients({
@@ -556,7 +556,7 @@ self.addEventListener("fetch", (event) => {
         runtimeId,
       });
     } catch (err) {
-      return buildErrorResponse(String(err?.stack || err?.message || err));
+      return buildErrorResponse(formatErrorDetail(err));
     }
   })());
 });

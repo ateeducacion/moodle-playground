@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createSnapshotManager,
-  formatErrorDetail,
   isFatalWasmError,
   isSafeToReplay,
   requestPathname,
 } from "../../src/runtime/crash-recovery.js";
+import { formatErrorDetail } from "../../src/shared/protocol.js";
 
 describe("isFatalWasmError", () => {
   it("returns false for null/undefined", () => {
@@ -113,39 +113,6 @@ describe("isSafeToReplay", () => {
     assert.strictEqual(isSafeToReplay({}), true);
     assert.strictEqual(isSafeToReplay(null), true);
     assert.strictEqual(isSafeToReplay(undefined), true);
-  });
-});
-
-describe("formatErrorDetail", () => {
-  it("returns 'Unknown error' for falsy values", () => {
-    assert.strictEqual(formatErrorDetail(null), "Unknown error");
-    assert.strictEqual(formatErrorDetail(undefined), "Unknown error");
-    assert.strictEqual(formatErrorDetail(""), "Unknown error");
-    assert.strictEqual(formatErrorDetail(0), "Unknown error");
-  });
-
-  it("returns strings as-is", () => {
-    assert.strictEqual(formatErrorDetail("some error"), "some error");
-  });
-
-  it("formats Error objects with stack trace", () => {
-    const error = new Error("test error");
-    const result = formatErrorDetail(error);
-    assert.ok(result.includes("test error"));
-    assert.ok(result.includes("Error"));
-  });
-
-  it("formats plain objects as JSON", () => {
-    const result = formatErrorDetail({ code: 42, message: "oops" });
-    assert.ok(result.includes("42"));
-    assert.ok(result.includes("oops"));
-  });
-
-  it("handles objects that fail JSON.stringify", () => {
-    const circular = {};
-    circular.self = circular;
-    const result = formatErrorDetail(circular);
-    assert.ok(typeof result === "string");
   });
 });
 

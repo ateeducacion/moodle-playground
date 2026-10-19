@@ -24,7 +24,11 @@ import {
   runtimeErrorExtra,
 } from "../shared/monitoring.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
-import { createShellChannel, SNAPSHOT_VERSION } from "../shared/protocol.js";
+import {
+  createShellChannel,
+  formatErrorDetail,
+  SNAPSHOT_VERSION,
+} from "../shared/protocol.js";
 import {
   isServiceWorkerUnsupportedError,
   registerVersionedServiceWorker,
@@ -1042,7 +1046,7 @@ els.importInput.addEventListener("change", async () => {
   try {
     await importPayload(file);
   } catch (error) {
-    appendLog(String(error?.stack || error?.message || error), true);
+    appendLog(formatErrorDetail(error), true);
   } finally {
     els.importInput.value = "";
   }
@@ -1083,6 +1087,6 @@ els.reset.addEventListener("click", async () => {
 
 main().catch((error) => {
   setUiLocked(false);
-  appendLog(String(error?.stack || error?.message || error), true);
+  appendLog(formatErrorDetail(error), true);
   captureException(error, { source: "shell-main" });
 });
