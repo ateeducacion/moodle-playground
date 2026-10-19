@@ -1,7 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
-import { createPhpBridgeChannel, createShellChannel } from "./src/shared/protocol.js";
+import { createPhpBridgeChannel, createShellChannel, formatErrorDetail } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
-import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, formatErrorDetail, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
+import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
 import { isOpcacheEnabled, PHP_ERROR_LOG_PATH } from "./src/runtime/config-template.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
