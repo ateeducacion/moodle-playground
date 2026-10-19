@@ -411,6 +411,9 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (!rw.shouldInterceptRequest(new URL(event.request.url), self.location.origin)) {
+    return;
+  }
   // Buffer the request body synchronously, before any await. Firefox neuters
   // event.request.body once this handler yields to the event loop, so reading
   // it later (e.g. after `await resolveScopedRequest()`) can return an empty
@@ -424,30 +427,28 @@ self.addEventListener("fetch", (event) => {
     try {
       const url = new URL(event.request.url);
       if (url.origin !== self.location.origin) {
-        // Block moodle.org iframe loads (plugin directory) — the remote
-        // server sets X-Frame-Options: sameorigin which causes console
-        // errors. Return a friendly notice instead.
-        if (url.hostname === "moodle.org" || url.hostname === "www.moodle.org") {
-          return new Response(
-            `<!doctype html><meta charset="utf-8"><style>
-              body{font:14px/1.5 system-ui,sans-serif;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8f9fa;color:#333;text-align:center;padding:16px}
-              .box{max-width:420px}
-              h3{margin:0 0 8px}
-              p{margin:0 0 12px;color:#555}
-              code{background:#e9ecef;padding:2px 6px;border-radius:4px;font-size:13px}
-            </style>
-            <div class="box">
-              <h3>Moodle Plugin Directory unavailable</h3>
-              <p>The external plugin directory at moodle.org cannot be loaded inside the playground iframe.</p>
-              <p>To install plugins, use the <code>installMoodlePlugin</code> blueprint step with a direct GitHub ZIP URL.</p>
-            </div>`,
-            {
-              status: 200,
-              headers: { "content-type": "text/html; charset=utf-8" },
-            },
-          );
-        }
-        return fetch(event.request);
+        // Only moodle.org reaches here (see shouldInterceptRequest). Block its
+        // iframe loads (plugin directory) — the remote server sets
+        // X-Frame-Options: sameorigin which causes console errors. Return a
+        // friendly notice instead.
+        return new Response(
+          `<!doctype html><meta charset="utf-8"><style>
+            body{font:14px/1.5 system-ui,sans-serif;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8f9fa;color:#333;text-align:center;padding:16px}
+            .box{max-width:420px}
+            h3{margin:0 0 8px}
+            p{margin:0 0 12px;color:#555}
+            code{background:#e9ecef;padding:2px 6px;border-radius:4px;font-size:13px}
+          </style>
+          <div class="box">
+            <h3>Moodle Plugin Directory unavailable</h3>
+            <p>The external plugin directory at moodle.org cannot be loaded inside the playground iframe.</p>
+            <p>To install plugins, use the <code>installMoodlePlugin</code> blueprint step with a direct GitHub ZIP URL.</p>
+          </div>`,
+          {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        );
       }
 
       const scopedRequest = await resolveScopedRequest(event, url);

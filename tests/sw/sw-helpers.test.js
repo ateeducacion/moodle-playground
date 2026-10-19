@@ -12,6 +12,7 @@ import {
   markExternalAnchorsBlank,
   rewriteHtmlAttributeUrl,
   rewriteHtmlDocument,
+  shouldInterceptRequest,
 } from "../../src/shared/sw-url-rewrite.js";
 
 // Reference (unoptimized) attribute pass: decode -> rewrite -> escapeHtml for
@@ -479,5 +480,52 @@ describe("markExternalAnchorsBlank", () => {
   it("does not match unrelated tags like <area> or <abbr>", () => {
     const html = '<area href="https://moodle.org/"><abbr>a</abbr>';
     assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+  });
+});
+
+describe("shouldInterceptRequest", () => {
+  const origin = "https://ateeducacion.github.io";
+
+  it("intercepts same-origin requests", () => {
+    assert.strictEqual(
+      shouldInterceptRequest(
+        new URL(`${origin}/moodle-playground/playground/s/r/my/`),
+        origin,
+      ),
+      true,
+    );
+  });
+
+  // Firefox never settles a respondWith(fetch(event.request)) pass-through when
+  // the response is a cross-origin redirect (raw.githubusercontent.com answers
+  // `//owner/...` with a relative 307), which hung blueprint downloads (#363).
+  it("leaves other cross-origin requests to the browser", () => {
+    assert.strictEqual(
+      shouldInterceptRequest(
+        new URL(
+          "https://raw.githubusercontent.com//HenarLG/Playground_pruebas/refs/heads/main/local_accessibility.zip",
+        ),
+        origin,
+      ),
+      false,
+    );
+    assert.strictEqual(
+      shouldInterceptRequest(
+        new URL("https://github-proxy.exelearning.dev/?url=x"),
+        origin,
+      ),
+      false,
+    );
+  });
+
+  it("still intercepts moodle.org so it can serve the iframe notice", () => {
+    assert.strictEqual(
+      shouldInterceptRequest(new URL("https://moodle.org/plugins/"), origin),
+      true,
+    );
+    assert.strictEqual(
+      shouldInterceptRequest(new URL("https://www.moodle.org/"), origin),
+      true,
+    );
   });
 });

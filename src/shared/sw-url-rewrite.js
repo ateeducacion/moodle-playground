@@ -54,6 +54,16 @@ export function withAppBasePath(pathname, basePath = "/") {
   );
 }
 
+const IFRAME_BLOCKED_HOSTS = new Set(["moodle.org", "www.moodle.org"]);
+
+// Cross-origin requests go straight to the network: Firefox never settles a
+// respondWith(fetch(event.request)) pass-through whose response is a
+// cross-origin redirect (#363). moodle.org stays intercepted for its notice.
+// See docs/architecture/adr/ADR-0045-sw-skip-cross-origin-requests.md
+export function shouldInterceptRequest(url, swOrigin) {
+  return url.origin === swOrigin || IFRAME_BLOCKED_HOSTS.has(url.hostname);
+}
+
 export function isStaticHostPath(pathname, appBasePath = "/") {
   const strippedPathname = stripAppBasePath(pathname, appBasePath);
   return STATIC_PREFIXES.some(
