@@ -4,6 +4,7 @@ import {
   createPhpBridgeChannel,
   createShellChannel,
   formatErrorDetail,
+  formatErrorHtml,
   PHP_BRIDGE_CHANNEL_PREFIX,
   SHELL_CHANNEL_PREFIX,
   SNAPSHOT_VERSION,
@@ -90,5 +91,16 @@ describe("formatErrorDetail", () => {
     circular.self = circular;
     const result = formatErrorDetail(circular);
     assert.ok(typeof result === "string");
+  });
+});
+
+describe("formatErrorHtml", () => {
+  it("escapes the error text", () => {
+    const error = new Error('<img src=x onerror="alert(1)"> & more');
+    error.stack = "";
+    assert.strictEqual(
+      formatErrorHtml(error),
+      '<!doctype html><meta charset="utf-8"><pre>Error: &lt;img src=x onerror="alert(1)"> &amp; more</pre>',
+    );
   });
 });
