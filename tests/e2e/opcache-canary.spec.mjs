@@ -16,7 +16,8 @@ test.describe.configure({ timeout: specTimeoutMs });
 // next request. The 8.3 row only proves the plumbing; the 8.5 row is the real
 // canary and additionally asserts that the cache is active, so it cannot pass
 // vacuously. The `opcache` rows boot with `?opcache=1` (ADR-0039), which
-// switches the SAPI name so the cache is live on PHP 8.3/8.4 as well.
+// switches the SAPI name so the cache is live on PHP 8.3/8.4 as well; the
+// other rows pass `?opcache=0` because OPcache is on by default (ADR-0046).
 // OPCACHE_CANARY_MATRIX="5.3:8.5" overrides the rows (used against an isolated
 // copy that allows PHP 8.5 on a stable branch).
 const matrix = (
@@ -80,7 +81,7 @@ for (const [moodle, php, flag] of matrix) {
       ],
     });
     await page.goto(
-      `/?moodle=${moodle}&php=${php}${opcache ? "&opcache=1" : ""}&scope=opcanary-${crypto.randomUUID()}&blueprint=${bp}`,
+      `/?moodle=${moodle}&php=${php}&opcache=${opcache ? 1 : 0}&scope=opcanary-${crypto.randomUUID()}&blueprint=${bp}`,
       { waitUntil: "domcontentloaded" },
     );
     await waitForPlaygroundReady(page);

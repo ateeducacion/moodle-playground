@@ -49,11 +49,11 @@ stdout and stderr
 The base stays 256M when the cache is inert.
 A rewrite that preserves the original mtime is the remaining blind spot; blueprint
 plugin/overlay restores additionally delete the on-disk cache. On PHP 8.3/8.4 the
-cache can be started with the experimental `?opcache=1` parameter (or
-`"opcache": true` in `playground.config.json`), which reports the whitelisted
-`uwsgi` SAPI name to PHP
-([ADR-0039](architecture/adr/ADR-0039-experimental-opcache-via-sapi-name.md));
-it is off by default while it soaks. The info panel's "OPcache file cache"
+cache starts because the runtime reports the whitelisted `uwsgi` SAPI name to PHP
+([ADR-0039](architecture/adr/ADR-0039-experimental-opcache-via-sapi-name.md)).
+This is on by default (`"opcache": true` in `playground.config.json`,
+[ADR-0046](architecture/adr/ADR-0046-opcache-on-by-default.md)); `?opcache=0`
+turns it off. The info panel's "OPcache file cache"
 checkbox sets the same parameter and reloads the same runtime and scope, so the
 journaled data is kept ("Apply & Reload", not a reset;
 [ADR-0040](architecture/adr/ADR-0040-opcache-panel-toggle.md)). Before that
