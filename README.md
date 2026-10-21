@@ -1,5 +1,7 @@
 # Moodle Playground
 
+[![Coverage](https://codecov.io/gh/ateeducacion/moodle-playground/graph/badge.svg)](https://codecov.io/gh/ateeducacion/moodle-playground)
+
 <p align="center">
   <img src=".github/screenshot.png" alt="Moodle Playground" width="600">
 </p>
