@@ -280,6 +280,14 @@ export async function clearJournal(scopeId) {
   await clearDb(`${PERSIST_DB_PREFIX}:${scopeId}`);
 }
 
+// SQLite names its temp files after the DB (`moodle_<scope>_<runtime>.sq3.php`
+// → `.sq3.php-journal`, `-wal`, `-shm`). They live within one transaction, so
+// journaling them only adds IndexedDB writes and can restore a stale hot journal.
+export function isJournaledPersistPath(path = "") {
+  if (/-(journal|wal|shm)$/u.test(path)) return false;
+  return !isEphemeralPath(path);
+}
+
 /**
  * Replay the journal, tolerating ops that can't be applied to a fresh FS so a
  * single bad op never bricks the reload (e.g. an unlink of a file whose create
@@ -312,21 +320,18 @@ export async function initFsPersistence(rawPhp, scopeId) {
   const pendingPersistOps = [];
   const flusher = createJournalFlusher(rawPhp, persistDb, pendingPersistOps);
 
-  // Journal /persist — mutable app data (DB, moodledata, config). Skip ephemeral
-  // SQLite temp files: they are created and deleted within a single transaction
-  // and cause hydration failures if journaled.
+  // Journal /persist — mutable app data (DB, moodledata, config), minus SQLite
+  // temp files and derived caches (see isJournaledPersistPath).
   journalFSEvents(rawPhp, "/persist", (op) => {
-    const path = op.path || "";
-    if (/\.(sqlite-journal|sqlite-wal|sqlite-shm)$/u.test(path)) return;
-    if (isEphemeralPath(path)) return;
+    if (!isJournaledPersistPath(op.path)) return;
     pendingPersistOps.push(op);
     flusher.scheduleFlush();
   });
 
-  // Drop any cache ops a pre-fix session may have already journaled, so an old
-  // journal can't restore a stale compiled container on this reload.
-  const savedPersistOps = (await loadOps(persistDb)).filter(
-    (op) => !isEphemeralPath(op.path),
+  // Drop cache and SQLite temp-file ops a pre-fix session may have journaled, so
+  // an old journal can't restore a stale compiled container or hot journal.
+  const savedPersistOps = (await loadOps(persistDb)).filter((op) =>
+    isJournaledPersistPath(op.path),
   );
   replayResilient(rawPhp, savedPersistOps);
 
