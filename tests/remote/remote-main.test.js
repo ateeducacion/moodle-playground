@@ -709,6 +709,79 @@ describe("remote host shell integration", () => {
     assert.equal(harness.frame.window.location.href, "untouched");
   });
 
+  // Seen on Firefox CI (moodle-53 site administration): the frame keeps the
+  // page being left until the requested one commits. The watch took that old
+  // page as the result, so a slow load was then "recovered" back to it.
+  it("waits for the requested page and recovers to it, not the page being left", async () => {
+    const harness = createHarness();
+    await bootUntilWorkerReady(harness, { initialPath: "/my/" });
+    setFrameDocument(harness, { path: "/my/" });
+    harness.frameEl.dispatchEvent(new harness.win.Event("load"));
+    const adminHref = `${ORIGIN}/playground/s1/${RUNTIME_ID}/admin/search.php`;
+
+    harness.postShellCommand({
+      kind: "navigate-site",
+      path: "/admin/search.php",
+    });
+    harness.clock.tick(150);
+    assert.equal(harness.overlayHidden(), false);
+
+    // The requested page arrives but sits with an empty body past 4 s.
+    setFrameDocument(harness, {
+      path: "/admin/search.php",
+      readyState: "loading",
+      title: "Search",
+      body: "",
+    });
+    harness.clock.tick(4000);
+    assert.equal(harness.status(), "Recovering a stalled Moodle page load.");
+    assert.equal(harness.frameEl.src, adminHref);
+    assert.equal(harness.frame.window.location.href, adminHref);
+
+    // One recovery per navigation: a second stall is left to finish.
+    harness.frame.window.location.href = "untouched";
+    harness.clock.tick(4000);
+    assert.equal(harness.frame.window.location.href, "untouched");
+
+    setFrameDocument(harness, { path: "/admin/search.php" });
+    harness.clock.tick(150);
+    assert.equal(harness.overlayHidden(), true);
+    assert.deepEqual(
+      harness
+        .shellMessages()
+        .filter((m) => m.kind === "frame-ready")
+        .map((m) => m.path),
+      ["/my/", "/admin/search.php"],
+    );
+  });
+
+  it("settles on the current page when no new document arrives", async () => {
+    const harness = createHarness();
+    await bootUntilWorkerReady(harness, { initialPath: "/my/" });
+    setFrameDocument(harness, { path: "/my/" });
+    harness.frameEl.dispatchEvent(new harness.win.Event("load"));
+
+    // A download or a 204 never replaces the document.
+    harness.postShellCommand({ kind: "navigate-site", path: "/file.php" });
+    harness.clock.tick(3900);
+    assert.equal(harness.overlayHidden(), false);
+    harness.clock.tick(300);
+    assert.equal(harness.overlayHidden(), true);
+
+    // A cross-origin page cannot be read, so it is not held back as the
+    // page being left.
+    harness.frame.window = {
+      get document() {
+        throw new Error("SecurityError");
+      },
+    };
+    harness.postShellCommand({ kind: "navigate-site", path: "/course/" });
+    assert.equal(
+      harness.frameEl.src,
+      `${ORIGIN}/playground/s1/${RUNTIME_ID}/course/`,
+    );
+  });
+
   it("surfaces php-worker load errors", async () => {
     const harness = createHarness();
     await harness.boot();

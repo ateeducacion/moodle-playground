@@ -75,12 +75,15 @@ function createFakeJar() {
   return jar;
 }
 
-async function waitFor(predicate, message) {
-  for (let i = 0; i < 200; i++) {
-    if (predicate()) return;
+// The deadline is wall-clock time, not a count of event-loop turns: gzip runs
+// on the libuv threadpool, so on a busy machine encoding outlasts any fixed
+// number of turns.
+async function waitFor(predicate, message = "condition not met") {
+  const deadline = performance.now() + 5000;
+  while (!predicate()) {
+    if (performance.now() > deadline) assert.fail(message);
     await new Promise((resolve) => setImmediate(resolve));
   }
-  assert.fail(message || "condition not met");
 }
 
 beforeEach(() => {
