@@ -307,9 +307,6 @@ function createHarness({
         )
         .map((entry) => entry.data),
     status: () => win.document.querySelector("#remote-status").textContent,
-    // Fatal boot errors overwrite the status with the full error stack.
-    fatalStatus: () =>
-      win.document.querySelector("#remote-status").textContent.split("\n")[0],
     percent: () => win.document.querySelector("#progress-percent").textContent,
     overlayHidden: () =>
       win.document
@@ -383,13 +380,11 @@ describe("remote host boot", () => {
     const harness = createHarness({ configResponse: { ok: false } });
     await harness.boot();
 
-    assert.equal(
-      harness.fatalStatus(),
-      "Error: Unable to load playground config: 500",
-    );
+    // The overlay keeps the message; the stack only goes to the shell logs.
+    assert.equal(harness.status(), "Unable to load playground config: 500");
     assert.equal(harness.overlayHidden(), false);
     const error = harness.shellMessages().find((m) => m.kind === "error");
-    assert.match(error.detail, /Unable to load playground config: 500/u);
+    assert.match(error.detail, /Unable to load playground config: 500\n/u);
     assert.equal(harness.workers.length, 0);
   });
 
@@ -733,7 +728,9 @@ describe("remote host shell integration", () => {
     });
     await flush();
 
-    assert.equal(harness.fatalStatus(), "Error: WASM OOM");
+    // The page's own shell-channel listener also receives this error; it must
+    // not bring the stack back to the overlay either.
+    assert.equal(harness.status(), "WASM OOM");
     const error = harness.shellMessages().find((m) => m.kind === "error");
     assert.match(error.detail, /^Error: WASM OOM\n/u);
 
@@ -741,10 +738,7 @@ describe("remote host shell integration", () => {
     await second.boot();
     second.worker.emit("message", { data: { kind: "worker-startup-error" } });
     await flush();
-    assert.equal(
-      second.fatalStatus(),
-      "Error: php-worker failed during startup.",
-    );
+    assert.equal(second.status(), "php-worker failed during startup.");
   });
 
   it("times out when the php-worker never becomes ready", async () => {
@@ -753,8 +747,8 @@ describe("remote host shell integration", () => {
     harness.clock.tick(15000);
     await flush();
     assert.equal(
-      harness.fatalStatus(),
-      `Error: Timed out while waiting for php-worker readiness for ${RUNTIME_ID}.`,
+      harness.status(),
+      `Timed out while waiting for php-worker readiness for ${RUNTIME_ID}.`,
     );
   });
 });
@@ -889,8 +883,8 @@ describe("remote host service worker control", () => {
     harness.clock.tick(10000);
     await flush();
     assert.equal(
-      harness.fatalStatus(),
-      "Error: Timed out waiting for service worker control.",
+      harness.status(),
+      "Timed out waiting for service worker control.",
     );
   });
 

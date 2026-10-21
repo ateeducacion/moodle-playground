@@ -109,13 +109,19 @@ function setRemoteProgress(detail, progress) {
   }
 }
 
-function emit(scopeId, message) {
+// Mirror a shell message on the boot overlay. An error's detail may carry its
+// stack for the shell logs, so the overlay shows its short summary instead.
+function showOnOverlay(message) {
   if (message?.kind === "progress") {
     setRemoteProgress(message.detail, message.progress);
   }
   if (message?.kind === "error") {
-    setRemoteProgress(message.detail);
+    setRemoteProgress(message.summary || message.detail);
   }
+}
+
+function emit(scopeId, message) {
+  showOnOverlay(message);
 
   const channel = new BroadcastChannel(createShellChannel(scopeId, instanceId));
   channel.postMessage(message);
@@ -694,12 +700,7 @@ async function bootstrapRemote() {
   );
   shellChannel.addEventListener("message", (event) => {
     const msg = event.data;
-    if (msg?.kind === "progress") {
-      setRemoteProgress(msg.detail, msg.progress);
-    }
-    if (msg?.kind === "error") {
-      setRemoteProgress(msg.detail);
-    }
+    showOnOverlay(msg);
     if (msg?.kind === "ready") {
       setRemoteProgress(msg.detail, 1);
       // If bootstrap returns a readyPath (e.g. "/my/" after auto-login),
@@ -777,9 +778,9 @@ bootstrapTask.catch((error) => {
   const scopeId = url.searchParams.get("scope");
   const message = String(error?.message || error);
   setOverlayVisible(true);
-  setRemoteProgress(message);
   emit(scopeId, {
     kind: "error",
+    summary: message,
     // Firefox stacks omit the message, including the ownership-conflict advice.
     detail: error?.stack?.includes(message)
       ? error.stack
