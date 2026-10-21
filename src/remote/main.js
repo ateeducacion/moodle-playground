@@ -46,6 +46,9 @@ let frameWatchTimer = 0;
 let lastAnnouncedFrameHref = "";
 let frameRecoveryTimer = 0;
 let frameRecoveryAttempted = false;
+// The page the frame is navigating away from. It stays in the frame until the
+// requested one commits, so it must not be taken for the navigation's result.
+let outgoingFrameDocument = null;
 let dotsTimer = 0;
 let dotsCount = 0;
 
@@ -391,7 +394,11 @@ function finalizeFrameReady(scopeId, runtimeId) {
       return false;
     }
     frameDocument = frameWindow?.document || null;
-    if (!frameDocument?.body || isFrameDocumentStalled()) {
+    if (
+      !frameDocument?.body ||
+      frameDocument === outgoingFrameDocument ||
+      isFrameDocumentStalled()
+    ) {
       return false;
     }
     href = currentHref;
@@ -455,14 +462,18 @@ function scheduleFrameRecovery(scopeId, runtimeId) {
   clearFrameRecoveryTimer();
   frameRecoveryTimer = window.setTimeout(() => {
     frameRecoveryTimer = 0;
+    // No new document yet (a download, a 204, a slow page): stop waiting for
+    // one so the watch can settle on what the frame shows.
+    outgoingFrameDocument = null;
 
     if (frameRecoveryAttempted || !isFrameDocumentStalled()) {
       return;
     }
 
-    frameRecoveryAttempted = true;
     setRemoteProgress("Recovering a stalled Moodle page load.");
     navigateFrame(scopeId, runtimeId, activePath || "/", { force: true });
+    // navigateFrame re-arms recovery for a new navigation; this is a retry.
+    frameRecoveryAttempted = true;
   }, 4000);
 }
 
@@ -497,6 +508,11 @@ function navigateFrame(scopeId, runtimeId, path, { force = false } = {}) {
     return;
   }
 
+  try {
+    outgoingFrameDocument = frameEl.contentWindow?.document || null;
+  } catch {
+    outgoingFrameDocument = null; // Cross-origin: the watch can't read it.
+  }
   if (frameEl.src !== entryHref) {
     frameEl.src = entryHref;
   } else if (frameEl.contentWindow) {

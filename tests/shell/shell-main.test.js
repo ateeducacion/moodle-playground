@@ -62,12 +62,15 @@ function jsonResponse(body, init = {}) {
   });
 }
 
+// The deadline is wall-clock time, not a count of event-loop turns: blueprint
+// encoding gzips on the libuv threadpool, so on a busy machine it outlasts any
+// fixed number of turns.
 async function waitFor(predicate, message = "condition not met") {
-  for (let i = 0; i < 500; i++) {
-    if (predicate()) return;
+  const deadline = performance.now() + 5000;
+  while (!predicate()) {
+    if (performance.now() > deadline) assert.fail(message);
     await new Promise((resolve) => setImmediate(resolve));
   }
-  assert.fail(message);
 }
 
 async function flush(rounds = 10) {
