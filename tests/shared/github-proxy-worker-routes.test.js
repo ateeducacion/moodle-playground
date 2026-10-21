@@ -182,6 +182,88 @@ describe("github-proxy-worker ?repo= archive resolution", () => {
     assert.equal(response.headers.get("Content-Range"), "bytes 0-2/10");
   });
 
+  it("forwards Range on every archive mode and passes the 206 through (#388)", async () => {
+    const ranges = {};
+    const ranged =
+      (name, status = 206) =>
+      (init) => {
+        ranges[name] = init.headers.get("Range");
+        return bytes(status, { "Content-Range": "bytes 0-2/10" });
+      };
+    route({
+      "https://api.github.com/repos/o/r": json({ default_branch: "trunk" }),
+      "https://api.github.com/repos/o/r/pulls/7": json({
+        head: { sha: "f00" },
+      }),
+      "https://api.github.com/repos/o/r/releases/latest": json({
+        tag_name: "v3",
+      }),
+      "https://api.github.com/repos/o/gone": json({}, 404),
+      "https://github.com/o/r/archive/refs/heads/trunk.zip": ranged("default"),
+      "https://github.com/o/r/archive/refs/heads/dev.zip": ranged("branch"),
+      "https://github.com/o/r/archive/abc123.zip": ranged("commit"),
+      "https://github.com/o/r/archive/f00.zip": ranged("pr"),
+      "https://github.com/o/r/archive/refs/tags/v1.zip": ranged("tag"),
+      "https://github.com/o/r/archive/refs/tags/v3.zip": ranged("latest"),
+      "https://github.com/o/gone/archive/refs/heads/main.zip": ranged(
+        "main",
+        404,
+      ),
+      "https://github.com/o/gone/archive/refs/heads/master.zip":
+        ranged("master"),
+    });
+    for (const query of [
+      "o/r",
+      "o/r&branch=dev",
+      "o/r&commit=abc123",
+      "o/r&pr=7",
+      "o/r&release=v1",
+      "o/r&release=latest",
+      "o/gone",
+    ]) {
+      const response = await get(`?repo=${query}`, {
+        headers: { Range: "bytes=0-2" },
+      });
+      assert.equal(response.status, 206, query);
+      assert.equal(response.headers.get("Content-Range"), "bytes 0-2/10");
+    }
+    assert.deepEqual(ranges, {
+      default: "bytes=0-2",
+      branch: "bytes=0-2",
+      commit: "bytes=0-2",
+      pr: "bytes=0-2",
+      tag: "bytes=0-2",
+      latest: "bytes=0-2",
+      main: "bytes=0-2",
+      master: "bytes=0-2",
+    });
+  });
+
+  it("passes an upstream 416 and its Content-Range through instead of 502 (#388)", async () => {
+    const unsatisfiable = () =>
+      new Response(null, {
+        status: 416,
+        statusText: "Range Not Satisfiable",
+        headers: { "Content-Range": "bytes */10" },
+      });
+    route({
+      "https://github.com/o/r/archive/refs/heads/b.zip": unsatisfiable,
+      "https://gitlab.com/g/p/x.zip": unsatisfiable,
+    });
+    for (const query of [
+      "?repo=o/r&branch=b",
+      "?url=https://gitlab.com/g/p/x.zip",
+    ]) {
+      const response = await get(query, { headers: { Range: "bytes=20-" } });
+      assert.equal(response.status, 416, query);
+      assert.equal(response.headers.get("Content-Range"), "bytes */10");
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+      const body = await response.json();
+      assert.equal(body.error, "Upstream server returned an error.");
+      assert.equal(body.status, 416);
+    }
+  });
+
   it("labels a latest release without a tag name", async () => {
     route({
       "https://api.github.com/repos/o/r/releases/latest": json({ assets: [] }),
