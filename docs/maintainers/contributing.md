@@ -3,7 +3,7 @@
 The maintainer reference for building, testing, and extending Moodle Playground.
 
 !!! note "Requirements"
-    Node.js 18+, npm, Python 3, and Git. PHP 8.3 with `pdo_sqlite` is needed to build Moodle
+    Node.js 24+, npm, Python 3, and Git. PHP 8.3 with `pdo_sqlite` is needed to build Moodle
     bundles (`make bundle`, `make prepare-dev`, `make prepare-all`, `make up`) — the build
     generates the install snapshot — and to run `make up-local`. The worker-only path
     (`make prepare`) and `make serve` do not need PHP. Composer is only needed to build
