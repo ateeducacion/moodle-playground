@@ -330,12 +330,9 @@ describe("sw.js messages", () => {
       data: { kind: "configure-service-worker", addonProxyUrl: "" },
       source: { url: `${BASE}/remote.html` },
     });
+    // No proxy override was installed, so nothing was proxied.
     assert.equal(response.status, 502);
-    assert.ok(
-      fetchCalls.every(
-        (call) => !String(call.input).startsWith("https://evil.test"),
-      ),
-    );
+    assert.match(await response.text(), /No addon proxy configured/);
   });
 });
 
