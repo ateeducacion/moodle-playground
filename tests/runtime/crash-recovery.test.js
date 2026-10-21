@@ -146,20 +146,21 @@ describe("crash recovery request handler", () => {
     let crashOnBootstrap = false;
     let crashOnRetry = false;
 
+    // Like the worker: null when restarted, else why it was declined.
     function resetRuntime(reason) {
       if (reactiveRestartCount >= MAX_REACTIVE) {
         messages.push({
           kind: "error",
           detail: `restart limit reached: ${reason}`,
         });
-        return false;
+        return "Runtime restart limit reached.";
       }
       if (requestCount < MIN_REQUESTS_BEFORE_RESTART) {
         messages.push({
           kind: "error",
           detail: `crash after only ${requestCount} requests, not restarting: ${reason}`,
         });
-        return false;
+        return `Runtime crashed after only ${requestCount} request(s).`;
       }
       reactiveRestartCount += 1;
       requestCount = 0;
@@ -167,7 +168,7 @@ describe("crash recovery request handler", () => {
         kind: "progress",
         detail: `restarting: ${reason}`,
       });
-      return true;
+      return null;
     }
 
     async function getRuntimeState() {
@@ -220,14 +221,15 @@ describe("crash recovery request handler", () => {
           };
         }
 
-        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
+        const declined = resetRuntime(`fatal WASM error: ${error.message}`);
+        const didReset = declined === null;
 
         if (isRetry || !isSafeToReplay(serializedRequest) || !didReset) {
           const message = isRetry
             ? "Runtime crashed again on retry."
-            : !isSafeToReplay(serializedRequest)
-              ? "Non-idempotent request was not retried."
-              : "Runtime restart limit reached.";
+            : declined
+              ? declined
+              : "Non-idempotent request was not retried.";
           return { status: 503, body: message, retried: isRetry };
         }
 
@@ -464,8 +466,9 @@ describe("crash recovery request handler", () => {
     // resetRuntime returns false due to anti-loop guard, no retry
     assert.strictEqual(result.status, 503);
     assert.strictEqual(worker.reactiveRestartCount, 0); // Not incremented
-    // Message should mention the guard
+    // Message should mention the guard, not the restart limit
     assert.ok(worker.messages.some((m) => m.detail.includes("not restarting")));
+    assert.match(result.body, /crashed after only 4 request/);
   });
 
   it("restarts normally once MIN_REQUESTS_BEFORE_RESTART is reached", async () => {
