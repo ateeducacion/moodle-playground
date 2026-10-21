@@ -311,6 +311,29 @@ describe("sw.js messages", () => {
     ({ response } = await dispatchFetch(proxyRequest()));
     assert.equal(response.status, 502);
   });
+
+  it("ignores a remote.html outside the app base path (#379)", async () => {
+    fetchImpl = async () => new Response("proxied");
+    // Same origin, but the origin root, not /moodle-playground/remote.html.
+    listeners.message({
+      data: {
+        kind: "configure-service-worker",
+        addonProxyUrl: "https://evil.test/p",
+      },
+      source: { url: `${ORIGIN}/remote.html` },
+    });
+    const { response } = await dispatchFetch(
+      makeRequest(`${BASE}/playground/s1/r1/__playground_proxy__?url=x`),
+    );
+    // Reset the override in case the message was (wrongly) accepted.
+    listeners.message({
+      data: { kind: "configure-service-worker", addonProxyUrl: "" },
+      source: { url: `${BASE}/remote.html` },
+    });
+    // No proxy override was installed, so nothing was proxied.
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /No addon proxy configured/);
+  });
 });
 
 describe("sw.js fetch routing", () => {
