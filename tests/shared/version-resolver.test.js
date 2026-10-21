@@ -483,3 +483,22 @@ describe("MOODLE_BRANCHES data integrity", () => {
     }
   });
 });
+
+describe("parseRuntimeId and parseQueryParams fallbacks", () => {
+  it("accepts a branch name directly after the PHP part", () => {
+    assert.deepEqual(parseRuntimeId("php83-MOODLE_500_STABLE"), {
+      phpVersion: "8.3",
+      moodleBranch: "MOODLE_500_STABLE",
+    });
+  });
+
+  it("reads params from a location-like object and defaults to none", () => {
+    assert.equal(parseQueryParams({ search: "?php=8.2" }).php, "8.2");
+    assert.equal(
+      parseQueryParams({ searchParams: new URLSearchParams("moodle=5.0") })
+        .moodle,
+      "5.0",
+    );
+    assert.equal(parseQueryParams(undefined).php, null);
+  });
+});

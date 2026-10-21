@@ -250,3 +250,138 @@ describe("restoreCourse: handler", () => {
     assert.strictEqual(runCalls.length, 1);
   });
 });
+
+describe("restoreCourse: browser download edge cases", () => {
+  const handler = getStepHandler("restoreCourse");
+  const URL_ = "https://example.test/c.mbz";
+  const reasonFor = async (fetch) => {
+    const { php, runCalls } = createPhpMock();
+    const messages = [];
+    await handler(
+      { url: URL_ },
+      { php, fetch, publish: (m) => messages.push(m) },
+    );
+    assert.match(
+      runCalls[0],
+      /example\.test\/c\.mbz/,
+      "falls back to in-PHP download",
+    );
+    return messages.find((m) =>
+      m.startsWith("Fast backup download unavailable"),
+    );
+  };
+  const body = (value) => ({
+    getReader: () => {
+      const queue = [value];
+      return {
+        read: async () =>
+          queue.length ? { done: false, value: queue.shift() } : { done: true },
+      };
+    },
+  });
+
+  it("names the reason the fast path was skipped", async () => {
+    assert.match(
+      await reasonFor(async () => ({ ok: false, status: 403 })),
+      /\(HTTP 403\)/,
+    );
+    assert.match(await reasonFor(async () => null), /\(HTTP error\)/);
+    assert.match(
+      await reasonFor(async () => ({
+        ok: true,
+        body: body({ length: 51 * 1024 * 1024 }),
+      })),
+      /exceeds the browser size budget/,
+    );
+    assert.match(
+      await reasonFor(async () => ({
+        ok: true,
+        arrayBuffer: async () => ({ byteLength: 51 * 1024 * 1024 }),
+      })),
+      /exceeds the browser size budget/,
+    );
+    assert.match(
+      await reasonFor(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(10),
+      })),
+      /downloaded backup is too small/,
+    );
+  });
+
+  it("uses a buffered read without a streaming body", async () => {
+    const { php, writes, runCalls } = createPhpMock();
+    await handler(
+      { url: URL_ },
+      {
+        php,
+        fetch: async () => ({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(2000),
+        }),
+      },
+    );
+    assert.match(writes[0][0], /^\/tmp\/restore_dl_\d+\.mbz$/);
+    assert.ok(runCalls[0].includes(writes[0][0]));
+  });
+
+  it("downloads in PHP when no fetch implementation exists", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = undefined;
+    try {
+      const { php, writes, runCalls } = createPhpMock();
+      await handler({ url: URL_ }, { php });
+      assert.equal(writes.length, 0);
+      assert.match(runCalls[0], /example\.test\/c\.mbz/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("restoreCourse: result reporting", () => {
+  const handler = getStepHandler("restoreCourse");
+  const run = async (text) => {
+    const messages = [];
+    await handler(
+      { path: "/tmp/x.mbz" },
+      {
+        php: { run: async () => ({ text }) },
+        publish: (m) => messages.push(m),
+      },
+    );
+    return messages.slice(1);
+  };
+
+  it("publishes the course id and the per-phase timings", async () => {
+    assert.deepEqual(
+      await run('{"ok":true,"courseid":9,"timings":{"execute":12}}'),
+      [
+        "Course restored (id 9).",
+        '[restore-perf] {"execute":12} [/restore-perf]',
+      ],
+    );
+    assert.deepEqual(await run('{"ok":true,"timings":{bad}}'), [
+      "Course restored.",
+    ]);
+  });
+
+  it("publishes reported issues and crashes without failing the blueprint", async () => {
+    assert.deepEqual(await run('{"ok":false,"error":"x"}'), [
+      'Course restore reported issues: {"ok":false,"error":"x"}',
+    ]);
+    const messages = [];
+    await handler(
+      { path: "/tmp/x.mbz" },
+      {
+        php: {
+          run: async () => {
+            throw new Error("OOM");
+          },
+        },
+        publish: (m) => messages.push(m),
+      },
+    );
+    assert.equal(messages.at(-1), "Course restore crashed: OOM");
+  });
+});

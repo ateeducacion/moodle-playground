@@ -113,3 +113,36 @@ describe("generate-manifest.mjs snapshot fields", () => {
     assert.ok(!manifest.snapshot.localcache.path.startsWith("/"));
   });
 });
+
+describe("generate-manifest.mjs argument validation", () => {
+  const run = (args) =>
+    execFileSync(process.execPath, [SCRIPT, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  const stderrOf = (args) => {
+    try {
+      run(args);
+    } catch (error) {
+      return String(error.stderr);
+    }
+    assert.fail("generator should have failed");
+  };
+
+  it("ignores stray positional tokens but rejects a flag without a value", () => {
+    assert.match(
+      stderrOf(["stray", "--channel"]),
+      /Missing value for --channel/,
+    );
+    assert.match(
+      stderrOf(["--channel", "--manifest", "x"]),
+      /Missing value for --channel/,
+    );
+  });
+
+  it("names the first missing required argument", () => {
+    assert.match(
+      stderrOf(["--channel", "MOODLE_500_STABLE"]),
+      /Missing required argument --manifest/,
+    );
+  });
+});

@@ -5,6 +5,7 @@ import {
   phpAddModule,
   phpCreateCategory,
   phpCreateCourse,
+  phpCreateRoles,
   phpCreateUser,
   phpCreateUsers,
   phpEnrolUser,
@@ -623,5 +624,28 @@ describe("PHP helpers: phpRunCoreUpgrade", () => {
     // Honest reporting: a Throwable becomes ok:false rather than faked success.
     assert.ok(script.includes("'ok' => false"));
     assert.ok(script.includes("'ok' => true"));
+  });
+});
+
+describe("phpAddModule folder and phpCreateRoles extras", () => {
+  it("builds a folder module with escaped course and name", () => {
+    const code = phpAddModule({ module: "folder", course: "c'1", name: "F'n" });
+    assert.match(code, /\$moduleInfo->modulename = 'folder';/);
+    assert.match(code, /'shortname' => 'c\\'1'/);
+    assert.match(code, /\$moduleInfo->name = 'F\\'n';/);
+    assert.match(code, /\$moduleInfo->display = 0;/);
+  });
+
+  it("accepts numeric context levels and resets to the archetype on request", () => {
+    const code = phpCreateRoles([
+      {
+        shortname: "r1",
+        archetype: "teacher",
+        resetToArchetype: true,
+        contextlevels: [50, "module", "nonsense", 1.5],
+      },
+    ]);
+    assert.match(code, /reset_role_capabilities\(\$roleid\);/);
+    assert.match(code, /set_role_contextlevels\(\$roleid, \[50, 70\]\);/);
   });
 });
