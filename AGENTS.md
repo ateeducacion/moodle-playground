@@ -33,7 +33,7 @@ Generated assets live in `assets/moodle/`, `assets/manifests/`, `dist/`, and
 
 ## Build and verification
 
-Requirements: Node.js 18+, npm, Python 3, Git. Native `make up-local` also needs PHP
+Requirements: Node.js 24+, npm, Python 3, Git. Native `make up-local` also needs PHP
 8.3 with `pdo_sqlite`. Building Moodle 5.1+ needs Composer because upstream no longer
 commits `vendor/`. See [local development](docs/local-development.md) for setup.
 

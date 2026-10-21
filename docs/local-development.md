@@ -11,7 +11,7 @@ For the fastest path from clone to a running instance, start with the
 
 | Tool | Version | Needed for |
 |------|---------|------------|
-| Node.js | **18+** | Bundling the shell and PHP worker, running tests. |
+| Node.js | **24+** | Bundling the shell and PHP worker, running tests. |
 | npm | bundled with Node | Dependency management. |
 | Python 3 | any | Moodle build helpers and the docs site (Zensical). |
 | Git | any | Cloning the repo. |

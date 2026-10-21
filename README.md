@@ -39,7 +39,7 @@ with `?moodle=5.0&php=8.3` (for example) or the version picker.
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 24+
 - npm
 - Python 3 for Moodle patch/build helpers and docs
 - PHP 8.3 with `pdo_sqlite` (for `make up-local`)

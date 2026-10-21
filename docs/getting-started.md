@@ -33,7 +33,7 @@ and learn how to write your own in the [Blueprints overview](blueprints/index.md
 
 ## Run it locally in 3 commands
 
-You only need a local copy to develop or contribute. Install Node.js 18+, Git,
+You only need a local copy to develop or contribute. Install Node.js 24+, Git,
 and PHP 8.3 with `pdo_sqlite` (`make bundle` runs PHP to build the install
 snapshot), then:
 
