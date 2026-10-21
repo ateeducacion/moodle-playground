@@ -373,9 +373,12 @@ async function handleInternalProxyRequest(request, sourceUrl) {
 // Only the remote host page may reconfigure the worker. Moodle pages and any
 // HTML they render (SCORM, file resources) share this origin, so without this
 // check they could reroute every addon download through their own proxy.
+// Compare against the full path: stripAppBasePath() leaves paths outside a
+// subpath deployment unchanged, which would also trust the origin-root
+// /remote.html of another site on the same origin (#379).
 function isRemoteHostClient(source) {
   try {
-    return stripAppBasePath(new URL(source?.url).pathname) === "/remote.html";
+    return new URL(source?.url).pathname === withAppBasePath("/remote.html");
   } catch {
     return false;
   }
