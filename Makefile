@@ -24,7 +24,7 @@ check-php:
 	fi
 	@echo "Using PHP 8.3: $(PHP_BIN)"
 
-.PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test test-e2e test-e2e-chrome test-e2e-firefox lint format
+.PHONY: deps build-version build-worker bundle bundle-all bundle-all-pretty bundle-legacy prepare prepare-dev prepare-dev-pretty prepare-all serve up up-local clean reset check-php test coverage test-e2e test-e2e-chrome test-e2e-firefox lint format
 .PHONY: bundle-MOODLE_404_STABLE bundle-MOODLE_405_STABLE bundle-MOODLE_500_STABLE bundle-MOODLE_501_STABLE bundle-MOODLE_502_STABLE bundle-MOODLE_503_STABLE bundle-main
 
 deps:
@@ -106,6 +106,13 @@ up-local: deps build-version bundle
 # and several tests (and the modules they import) expect it to exist.
 test: build-version
 	node --test tests/**/*.test.js
+
+coverage: build-version
+	mkdir -p coverage
+	node --test --experimental-test-coverage \
+		--test-reporter=spec --test-reporter-destination=stdout \
+		--test-reporter=lcov --test-reporter-destination=coverage/lcov.info \
+		tests/**/*.test.js
 
 test-e2e:
 	npm run test:e2e

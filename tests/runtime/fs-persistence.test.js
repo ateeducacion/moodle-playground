@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collapseAndHydrate } from "../../src/runtime/fs-persistence.js";
+import {
+  collapseAndHydrate,
+  isJournaledPersistPath,
+} from "../../src/runtime/fs-persistence.js";
 
 // Regression guard for the journal-flush OOM: a heavy install rewrites the same
 // (multi-MB) SQLite DB hundreds of times within one debounce window. Hydrating
@@ -33,4 +36,17 @@ test("collapseAndHydrate reads each changed file once, not once per write", asyn
   assert.equal(writes.length, 1);
   // ...and the file is read exactly once (the OOM guard), not 500 times.
   assert.equal(reads.get(path), 1);
+});
+
+test("SQLite temp files of the .sq3.php database are not journaled (#372)", () => {
+  const db = "/persist/moodledata/moodle_abc_main.sq3.php";
+  assert.equal(isJournaledPersistPath(db), true);
+  for (const suffix of ["-journal", "-wal", "-shm"]) {
+    assert.equal(isJournaledPersistPath(`${db}${suffix}`), false, suffix);
+  }
+  assert.equal(isJournaledPersistPath("/persist/moodledata/cache/x"), false);
+  assert.equal(
+    isJournaledPersistPath("/persist/moodledata/filedir/ab/cd/abcd"),
+    true,
+  );
 });

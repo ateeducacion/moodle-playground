@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as zlib from "node:zlib";
 import {
+  createDecodedTarStream,
   extractTarStreamToPhp,
   StreamingTarParser,
   sanitizeTarPath,
@@ -239,5 +241,76 @@ describe("extractTarStreamToPhp", () => {
     assert.ok(writes.includes("/www/moodle/mod/quiz/version.php"));
     assert.equal(stats.dirCount, 1);
     assert.equal(stats.fileCount, 1);
+  });
+});
+
+async function readAll(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+describe("createDecodedTarStream", () => {
+  const tar = rawTar([{ name: "a.txt", data: "hello" }]);
+
+  it("decodes gzip natively", async () => {
+    const decoded = await readAll(
+      await createDecodedTarStream(zlib.gzipSync(tar), "gzip"),
+    );
+    assert.deepEqual(decoded, tar);
+  });
+
+  it("falls back to the bundled zstd decoder when the platform lacks one", {
+    skip: typeof zlib.zstdCompressSync !== "function",
+  }, async () => {
+    const compressed = new Uint8Array(zlib.zstdCompressSync(tar));
+    const decoded = await readAll(
+      await createDecodedTarStream(compressed, "zstd"),
+    );
+    assert.deepEqual(decoded, tar);
+  });
+
+  it("rejects a codec without any decoder", async () => {
+    await assert.rejects(
+      createDecodedTarStream(new Uint8Array(1), "lzma"),
+      /No streaming decoder available for codec "lzma"/,
+    );
+  });
+});
+
+describe("tar parsing edge cases", () => {
+  it("reads space-padded octal sizes and zero-length files", () => {
+    const tar = rawTar([{ name: "empty.txt" }, { name: "b.txt", data: "xy" }]);
+    // Rewrite b.txt's size field space-padded on both sides (old tar writers).
+    const header = tar.subarray(BLOCK, BLOCK * 2);
+    header.write("        2  \0", 124, 12, "ascii");
+    header.write("        ", 148, 8, "ascii");
+    let sum = 0;
+    for (let i = 0; i < BLOCK; i += 1) sum += header[i];
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    const { entries } = collect(tar);
+    assert.deepEqual(
+      entries.map((e) => [e.path, e.data?.length ?? 0]),
+      [
+        ["empty.txt", 0],
+        ["b.txt", 2],
+      ],
+    );
+  });
+});
+
+describe("extractTarStreamToPhp progress", () => {
+  it("reports progress every 1000 files", async () => {
+    const tar = rawTar(
+      Array.from({ length: 1000 }, (_, i) => ({ name: `f${i}`, data: "x" })),
+    );
+    const events = [];
+    await extractTarStreamToPhp(
+      new Blob([tar]).stream(),
+      { _php: { mkdirTree() {}, writeFile() {} } },
+      "/www/",
+      { onProgress: (e) => events.push(e) },
+    );
+    assert.deepEqual(events, [{ fileCount: 1000, bytes: 1000 }]);
   });
 });

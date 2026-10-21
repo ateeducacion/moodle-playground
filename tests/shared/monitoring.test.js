@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import {
   buildEnvelope,
   buildEvent,
+  captureException,
+  captureMessage,
   createMonitoringClient,
   initMonitoring,
   parseDsn,
@@ -225,5 +227,96 @@ describe("runtimeErrorExtra", () => {
     assert.deepStrictEqual(runtimeErrorExtra({ source: "service-worker" }), {
       source: "service-worker",
     });
+  });
+});
+
+describe("monitoring environment and request context", () => {
+  const descriptors = Object.fromEntries(
+    ["location", "navigator", "crypto"].map((k) => [
+      k,
+      Object.getOwnPropertyDescriptor(globalThis, k),
+    ]),
+  );
+  const set = (key, value) =>
+    Object.defineProperty(globalThis, key, { value, configurable: true });
+  afterEach(() => {
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  });
+
+  it("tags local hosts as development and attaches the page URL and user agent", () => {
+    for (const hostname of ["localhost", "127.0.0.1", "box.local"]) {
+      set("location", { hostname, href: `http://${hostname}/` });
+      set("navigator", { userAgent: "UA/1" });
+      const event = buildEvent({ message: "m" });
+      assert.equal(event.environment, "development", hostname);
+      assert.deepEqual(event.request, {
+        url: `http://${hostname}/`,
+        headers: { "User-Agent": "UA/1" },
+      });
+    }
+    set("location", { hostname: "app.test", href: "https://app.test/" });
+    set("navigator", {});
+    const event = buildEvent({ message: "m" });
+    assert.equal(event.environment, "production");
+    assert.equal(event.request.headers, undefined);
+  });
+
+  it("generates a 32-hex event id without crypto.randomUUID", () => {
+    set("crypto", {});
+    assert.match(buildEvent({ message: "m" }).event_id, /^[0-9a-f]{32}$/);
+  });
+
+  it("names an error without a name and caps parsed stack frames", () => {
+    const stack = Array.from(
+      { length: 60 },
+      (_, i) => `at f${i} (app.js:${i + 1}:1)`,
+    ).join("\n");
+    assert.equal(parseStackFrames(stack).length, 50);
+    const event = buildEvent({ error: { message: "plain" } });
+    assert.equal(event.exception.values[0].type, "Error");
+    assert.equal(event.exception.values[0].value, "plain");
+  });
+});
+
+describe("module-level capture helpers", () => {
+  it("routes through the initialized client and reports window error messages", () => {
+    const calls = [];
+    const handlers = new Map();
+    initMonitoring({
+      dsn: TEST_DSN,
+      fetchImpl: (_url, options) => {
+        calls.push(JSON.parse(options.body.split("\n")[2]));
+        return Promise.resolve();
+      },
+      scope: { addEventListener: (name, h) => handlers.set(name, h) },
+    });
+    captureException(new Error("direct"));
+    captureMessage("hello", "warning", { k: 1 });
+    handlers.get("error")({ message: "Script error." });
+    handlers.get("error")({});
+    handlers.get("unhandledrejection")(undefined);
+    assert.deepEqual(
+      calls.map((e) => e.exception?.values[0].value ?? e.message.formatted),
+      ["direct", "hello", "Script error.", "Unhandled rejection"],
+    );
+    assert.equal(calls[1].level, "warning");
+    assert.deepEqual(calls[2].extra, { source: "window.onerror" });
+  });
+
+  it("never throws when building the event fails", () => {
+    const client = createMonitoringClient({
+      dsn: TEST_DSN,
+      fetchImpl: () => {},
+    });
+    const hostile = {
+      toString() {
+        throw new Error("no string");
+      },
+    };
+    assert.doesNotThrow(() => client.captureException(hostile));
+    assert.doesNotThrow(() => client.captureMessage(hostile));
   });
 });

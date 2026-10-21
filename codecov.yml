@@ -1,0 +1,17 @@
+# Coverage from the unit tests (`make coverage`: node --test, lcov).
+# Codecov adds a status on every pull request that fails when the project drops
+# under 90% or the changed lines are under 90% covered.
+coverage:
+  status:
+    project:
+      default:
+        target: 90%
+    patch:
+      default:
+        target: 90%
+ignore:
+  - "tests/**"
+  - "src/generated/**"
+comment:
+  layout: 'condensed_header, diff, files'
+  require_changes: true
