@@ -125,12 +125,9 @@ let serviceWorkerReady = null;
 let activeBlueprint;
 let remoteFrameBooted = false;
 let uiLocked = true;
-const remoteReloadToken = 0;
 let pendingCleanBoot = false;
 let pendingPersistenceFlush = null;
 let latestPhpInfoHtml = "";
-// biome-ignore lint/correctness/noUnusedVariables: reserved for future phpinfo capture tracking
-let phpInfoCapturePromise = null;
 const CONTROL_RELOAD_KEY = `moodle-playground:${scopeId}:sw-controlled`;
 
 function applyRuntimeSelection(selection) {
@@ -331,9 +328,6 @@ async function updateFrame() {
   bindShellChannel();
   if (pendingCleanBoot) {
     url.searchParams.set("clean", "1");
-  }
-  if (remoteReloadToken > 0) {
-    url.searchParams.set("reload", String(remoteReloadToken));
   }
   remoteFrameBooted = false;
   // srcdoc wins over src, so drop any blocking message left by a previous
@@ -990,7 +984,6 @@ async function main() {
 
   bindServiceWorkerMessages();
   setPhpInfoContent("");
-  phpInfoCapturePromise = null;
   setUiLocked(true);
   await updateFrame();
 }
@@ -1091,7 +1084,6 @@ els.reset.addEventListener("click", async () => {
   remoteFrameBooted = false;
   serviceWorkerReady = null;
   setPhpInfoContent("");
-  phpInfoCapturePromise = null;
   void updateFrame();
 });
 
