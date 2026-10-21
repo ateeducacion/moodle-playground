@@ -13,6 +13,8 @@ import {
   rewriteHtmlAttributeUrl,
   rewriteHtmlDocument,
   shouldInterceptRequest,
+  stripAppBasePath,
+  withAppBasePath,
 } from "../../src/shared/sw-url-rewrite.js";
 
 // Reference (unoptimized) attribute pass: decode -> rewrite -> escapeHtml for
@@ -527,5 +529,87 @@ describe("shouldInterceptRequest", () => {
       shouldInterceptRequest(new URL("https://www.moodle.org/"), origin),
       true,
     );
+  });
+});
+
+describe("app base path helpers", () => {
+  it("strips the base path only from paths under it", () => {
+    assert.strictEqual(stripAppBasePath("", "/"), "/");
+    assert.strictEqual(stripAppBasePath("/mp", "/mp"), "/");
+    assert.strictEqual(stripAppBasePath("/mp/x", "/mp"), "/x");
+    assert.strictEqual(stripAppBasePath("/other/x", "/mp"), "/other/x");
+    assert.strictEqual(stripAppBasePath("", "/mp"), "/");
+  });
+
+  it("prefixes the base path and collapses duplicate slashes", () => {
+    assert.strictEqual(withAppBasePath("/x", "/"), "/x");
+    assert.strictEqual(withAppBasePath("x", "/mp"), "/mp/x");
+    assert.strictEqual(withAppBasePath("//x", "/mp/"), "/mp/x");
+  });
+});
+
+describe("rewriteHtmlAttributeUrl edge cases", () => {
+  const scope = {
+    origin: "https://ateeducacion.github.io",
+    scopeId: "main",
+    runtimeId: "php83-moodle50",
+    appBasePath: "/moodle-playground",
+  };
+
+  it("keeps empty, cross-origin, out-of-base and unparsable values", () => {
+    assert.strictEqual(rewriteHtmlAttributeUrl("", scope), "");
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("https://moodle.org/plugins", scope),
+      "https://moodle.org/plugins",
+    );
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/elsewhere/a.php", scope),
+      "/elsewhere/a.php",
+    );
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("http://[bad", scope),
+      "http://[bad",
+    );
+  });
+
+  it("keeps already-scoped and static host paths, including absolute same-origin URLs", () => {
+    const scoped = "/moodle-playground/playground/main/php83-moodle50/my/";
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl(`${scoped}?a=1#h`, scope),
+      `${scoped}?a=1#h`,
+    );
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl(
+        "https://ateeducacion.github.io/moodle-playground/assets/x.css",
+        scope,
+      ),
+      "/moodle-playground/assets/x.css",
+    );
+  });
+
+  it("computes the scoped base path when the scope does not carry one", () => {
+    assert.strictEqual(
+      rewriteHtmlAttributeUrl("/my/", {
+        origin: scope.origin,
+        scopeId: "s",
+        runtimeId: "r",
+      }),
+      "/playground/s/r/my/",
+    );
+  });
+});
+
+describe("markExternalAnchorsBlank edge cases", () => {
+  const origin = "https://app.test";
+  it("leaves anchors without href, with empty or unparsable href, and non-web schemes", () => {
+    for (const html of [
+      '<a name="top">',
+      '<a href="">',
+      '<a href="http://[bad">',
+      '<a href="mailto:a@b.c">',
+      '<a href="/local">',
+    ]) {
+      assert.strictEqual(markExternalAnchorsBlank(html, origin), html);
+    }
   });
 });
