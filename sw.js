@@ -424,6 +424,9 @@ self.addEventListener("fetch", (event) => {
     ? null
     : event.request.clone().arrayBuffer().catch(() => null);
   event.respondWith((async () => {
+    // Keep `return await` on the async helpers below: a bare `return` lets
+    // their rejection skip this catch, so the browser shows a network error
+    // instead of the error page (#380).
     try {
       const url = new URL(event.request.url);
       if (url.origin !== self.location.origin) {
@@ -456,10 +459,10 @@ self.addEventListener("fetch", (event) => {
         if (shouldHandleStaticRequest(event.request, url)) {
           const waitUntil = (promise) => event.waitUntil(promise);
           if (isSensitiveStaticPath(url.pathname)) {
-            return networkFirstStaticFetch(event.request, waitUntil);
+            return await networkFirstStaticFetch(event.request, waitUntil);
           }
 
-          return cacheFirstStaticFetch(event.request, waitUntil);
+          return await cacheFirstStaticFetch(event.request, waitUntil);
         }
 
         return fetch(event.request);
@@ -494,7 +497,7 @@ self.addEventListener("fetch", (event) => {
       const pathOnly = requestPath.split("?")[0];
 
       if (isInternalProxyPath(pathOnly)) {
-        return handleInternalProxyRequest(event.request, forwardedUrl);
+        return await handleInternalProxyRequest(event.request, forwardedUrl);
       }
 
       // Serve cached scoped static assets without hitting the PHP worker queue.
