@@ -5,13 +5,13 @@
 // Output: og-image.png at the repository root.
 
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUTPUT = resolve(__dirname, "..", "og-image.png");
+export const OUTPUT = resolve(__dirname, "..", "og-image.png");
 
-const HTML = `<!doctype html>
+export const HTML = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -120,15 +120,25 @@ const HTML = `<!doctype html>
 </body>
 </html>`;
 
-const browser = await chromium.launch();
-const context = await browser.newContext({
-  viewport: { width: 1200, height: 630 },
-  deviceScaleFactor: 1,
-});
-const page = await context.newPage();
-await page.setContent(HTML, { waitUntil: "networkidle" });
-// Extra wait for web font to render.
-await page.waitForTimeout(500);
-await page.screenshot({ path: OUTPUT, type: "png", omitBackground: false });
-await browser.close();
-console.log(`Wrote ${OUTPUT}`);
+// Render HTML in a 1200x630 page and save the PNG screenshot to `output`.
+export async function generateOgImage({
+  browserType = chromium,
+  output = OUTPUT,
+} = {}) {
+  const browser = await browserType.launch();
+  const context = await browser.newContext({
+    viewport: { width: 1200, height: 630 },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  await page.setContent(HTML, { waitUntil: "networkidle" });
+  // Extra wait for web font to render.
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: output, type: "png", omitBackground: false });
+  await browser.close();
+  console.log(`Wrote ${output}`);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await generateOgImage();
+}

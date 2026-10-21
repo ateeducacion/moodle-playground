@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   renderBuildVersionModule,
   resolveBuildMetadata,
@@ -40,18 +40,35 @@ const git = {
   dirty: () => Boolean(tryGit(["status", "--porcelain"])),
 };
 
-const metadata = resolveBuildMetadata({ env: process.env, git });
+// Write the generated module and JSON metadata (paths overridable for tests).
+export function writeBuildMetadata(
+  metadata,
+  { jsPath = jsOutputPath, jsonPath = jsonOutputPath } = {},
+) {
+  mkdirSync(dirname(jsPath), { recursive: true });
+  mkdirSync(dirname(jsonPath), { recursive: true });
+  writeFileSync(jsPath, renderBuildVersionModule(metadata), "utf8");
+  writeFileSync(jsonPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+}
 
-if (process.argv.includes("--print-version")) {
-  process.stdout.write(`${metadata.buildVersion}\n`);
-} else {
-  mkdirSync(dirname(jsOutputPath), { recursive: true });
-  mkdirSync(dirname(jsonOutputPath), { recursive: true });
-  writeFileSync(jsOutputPath, renderBuildVersionModule(metadata), "utf8");
-  writeFileSync(
-    jsonOutputPath,
-    `${JSON.stringify(metadata, null, 2)}\n`,
-    "utf8",
-  );
-  console.log(`Wrote build metadata ${metadata.buildVersion}`);
+// CLI entry point (streams and output paths overridable for tests).
+export function main({
+  argv = process.argv,
+  env = process.env,
+  stdout = process.stdout,
+  log = console.log,
+  paths,
+} = {}) {
+  const metadata = resolveBuildMetadata({ env, git });
+
+  if (argv.includes("--print-version")) {
+    stdout.write(`${metadata.buildVersion}\n`);
+  } else {
+    writeBuildMetadata(metadata, paths);
+    log(`Wrote build metadata ${metadata.buildVersion}`);
+  }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }

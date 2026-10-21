@@ -24,7 +24,7 @@ function loadUserscript() {
     console,
   };
   vm.runInNewContext(source, context, {
-    filename: "moodle-playground-pr-button.user.js",
+    filename: SCRIPT_PATH,
   });
   if (!api) {
     throw new Error(

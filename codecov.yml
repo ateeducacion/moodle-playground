@@ -1,4 +1,5 @@
-# Coverage from the unit tests (`make coverage`: node --test, lcov).
+# Coverage from the unit tests (`make coverage`: c8 --all over node --test, lcov).
+# Every source file counts, including ones no test imports.
 # Codecov adds a status on every pull request that fails when the project drops
 # under 90% or the changed lines are under 90% covered.
 coverage:
