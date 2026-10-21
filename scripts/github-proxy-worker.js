@@ -140,13 +140,14 @@ async function handleGitHubProxy(params, env, request) {
 
   // Full release ZIP
   if (params.has("release")) {
-    return handleReleaseZip(repo, params.get("release"), env);
+    return handleReleaseZip(repo, params.get("release"), env, request);
   }
 
   // Specific commit
   if (params.has("commit")) {
     return proxyGitHubZip(
       `${GITHUB_BASE}/${repo}/archive/${params.get("commit")}.zip`,
+      { request },
     );
   }
 
@@ -155,7 +156,7 @@ async function handleGitHubProxy(params, env, request) {
     if (!/^\d+$/u.test(params.get("pr"))) {
       return jsonResponse({ error: "Invalid pr. Use a PR number." }, 400);
     }
-    return handlePullRequest(repo, params.get("pr"), env);
+    return handlePullRequest(repo, params.get("pr"), env, request);
   }
 
   // Branch (or default branch)
@@ -164,6 +165,7 @@ async function handleGitHubProxy(params, env, request) {
   if (branch) {
     return proxyGitHubZip(
       `${GITHUB_BASE}/${repo}/archive/refs/heads/${branch}.zip`,
+      { request },
     );
   }
 
@@ -173,26 +175,30 @@ async function handleGitHubProxy(params, env, request) {
   if (defaultBranch) {
     return proxyGitHubZip(
       `${GITHUB_BASE}/${repo}/archive/refs/heads/${defaultBranch}.zip`,
+      { request },
     );
   }
 
   // The API could not resolve the default branch (rate-limited, or the
   // GITHUB_TOKEN is blocked for this repo by an org fine-grained-PAT policy).
   // Fall back to the conventional branch names instead of failing outright.
-  return proxyFirstAvailableZip([
-    `${GITHUB_BASE}/${repo}/archive/refs/heads/main.zip`,
-    `${GITHUB_BASE}/${repo}/archive/refs/heads/master.zip`,
-  ]);
+  return proxyFirstAvailableZip(
+    [
+      `${GITHUB_BASE}/${repo}/archive/refs/heads/main.zip`,
+      `${GITHUB_BASE}/${repo}/archive/refs/heads/master.zip`,
+    ],
+    request,
+  );
 }
 
 // Proxies the first candidate archive URL that resolves successfully, returning
 // the last failing response if none do. Used as a no-API fallback for
 // default-branch resolution.
-async function proxyFirstAvailableZip(urls) {
+async function proxyFirstAvailableZip(urls, request) {
   let lastResponse = null;
 
   for (const url of urls) {
-    const response = await proxyGitHubZip(url);
+    const response = await proxyGitHubZip(url, { request });
 
     if (response.status < 400) {
       return response;
@@ -314,7 +320,7 @@ async function proxyRawFile(repo, ref, rawPath) {
 // Pull request resolution
 // ---------------------------------------------------------------------------
 
-async function handlePullRequest(repo, prNumber, env) {
+async function handlePullRequest(repo, prNumber, env, request) {
   const apiUrl = `${GITHUB_API}/repos/${repo}/pulls/${prNumber}`;
   const data = await githubApiRequest(apiUrl, env);
 
@@ -325,17 +331,20 @@ async function handlePullRequest(repo, prNumber, env) {
     );
   }
 
-  return proxyGitHubZip(`${GITHUB_BASE}/${repo}/archive/${data.head.sha}.zip`);
+  return proxyGitHubZip(`${GITHUB_BASE}/${repo}/archive/${data.head.sha}.zip`, {
+    request,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Release ZIP resolution (source archive)
 // ---------------------------------------------------------------------------
 
-async function handleReleaseZip(repo, release, env) {
+async function handleReleaseZip(repo, release, env, request) {
   if (release !== "latest") {
     return proxyGitHubZip(
       `${GITHUB_BASE}/${repo}/archive/refs/tags/${release}.zip`,
+      { request },
     );
   }
 
@@ -358,6 +367,7 @@ async function handleReleaseZip(repo, release, env) {
 
   return proxyGitHubZip(
     `${GITHUB_BASE}/${repo}/archive/refs/tags/${data.tag_name}.zip`,
+    { request },
   );
 }
 
@@ -815,14 +825,15 @@ function jsonResponse(data, status) {
 }
 
 // Maps an upstream failure onto a client-visible status. A 404 (deleted branch,
-// renamed repo, stale blueprint URL), a 403/429 (rate limit) and a 401 are the
-// upstream's own verdict, not a proxy outage, so they are passed through instead
-// of being flattened into 502 — reporting them as "bad gateway" made ordinary
-// "not found" errors look like the proxy itself was down.
-const PASSTHROUGH_UPSTREAM_STATUSES = new Set([401, 403, 404, 410, 429]);
+// renamed repo, stale blueprint URL), a 403/429 (rate limit), a 401 and a 416
+// (the forwarded Range is out of bounds) are the upstream's own verdict, not a
+// proxy outage, so they are passed through instead of being flattened into
+// 502 — reporting them as "bad gateway" made ordinary "not found" errors look
+// like the proxy itself was down.
+const PASSTHROUGH_UPSTREAM_STATUSES = new Set([401, 403, 404, 410, 416, 429]);
 
 function upstreamErrorResponse(upstream, extra = {}) {
-  return jsonResponse(
+  const response = jsonResponse(
     {
       error: "Upstream server returned an error.",
       status: upstream.status,
@@ -831,6 +842,15 @@ function upstreamErrorResponse(upstream, extra = {}) {
     },
     PASSTHROUGH_UPSTREAM_STATUSES.has(upstream.status) ? upstream.status : 502,
   );
+
+  // A 416 carries the resource size ("bytes */size"), so the client can retry
+  // with a valid range (#388).
+  const contentRange = upstream.headers.get("Content-Range");
+  if (contentRange) {
+    response.headers.set("Content-Range", contentRange);
+  }
+
+  return response;
 }
 
 // Maps a blocked redirect into a 400 response. A redirect into an
