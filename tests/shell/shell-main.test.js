@@ -89,6 +89,7 @@ async function bootShell({
   manifest = { release: "5.3.1+ (Build: 20261001)" },
   blueprint = DEFAULT_BLUEPRINT,
   waitForFrame = true,
+  clipboard = "granted",
 } = {}) {
   const win = new Window({
     url,
@@ -159,6 +160,12 @@ async function bootShell({
       ...(swContainer ? { serviceWorker: swContainer } : {}),
       clipboard: {
         writeText: async (text) => {
+          if (clipboard === "denied") {
+            throw new DOMException(
+              "Write permission denied.",
+              "NotAllowedError",
+            );
+          }
           state.clipboard.push(text);
         },
       },
@@ -799,16 +806,47 @@ describe("shell panels and toolbar", () => {
     const runtimeLabel = shell.$("#runtime-id-value");
     const runtimeId = runtimeLabel.textContent;
     shell.$("#runtime-id-chip").click();
+    // The label changes once the clipboard write has settled.
+    await waitFor(() => runtimeLabel.textContent === "✓ copied");
     assert.equal(shell.clipboard.at(-1), runtimeId);
-    assert.equal(runtimeLabel.textContent, "✓ copied");
     t.mock.timers.tick(1400);
     assert.equal(runtimeLabel.textContent, runtimeId);
 
     shell.$("#build-id-chip").click();
+    await waitFor(() => shell.$("#build-id-value").textContent === "✓ copied");
     assert.equal(shell.clipboard.at(-1), BUILD_VERSION);
-    assert.equal(shell.$("#build-id-value").textContent, "✓ copied");
     t.mock.timers.tick(1400);
     assert.equal(shell.$("#build-id-value").textContent, BUILD_VERSION);
+  });
+
+  it("shows a denied clipboard write as a failed copy, without reporting it", async (t) => {
+    const shell = await bootShell({ clipboard: "denied" });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const runtimeLabel = shell.$("#runtime-id-value");
+    const runtimeId = runtimeLabel.textContent;
+    shell.$("#runtime-id-chip").click();
+    await waitFor(() => runtimeLabel.textContent === "✗ copy failed");
+    t.mock.timers.tick(1400);
+    assert.equal(runtimeLabel.textContent, runtimeId);
+
+    const buildLabel = shell.$("#build-id-value");
+    shell.$("#build-id-chip").click();
+    await waitFor(() => buildLabel.textContent === "✗ copy failed");
+    t.mock.timers.tick(1400);
+    assert.equal(buildLabel.textContent, BUILD_VERSION);
+
+    const copy = shell.$("#copy-logs-button");
+    const originalHtml = copy.innerHTML;
+    copy.click();
+    await waitFor(() => copy.textContent === "✗");
+    t.mock.timers.tick(1200);
+    assert.equal(copy.innerHTML, originalHtml);
+
+    // A denied permission is the user's setting, not a bug: nothing reaches
+    // Sentry (an unhandled rejection would, and also fails this test file).
+    await flush();
+    assert.deepEqual(shell.clipboard, []);
+    assert.deepEqual(shell.sentry, []);
   });
 });
 

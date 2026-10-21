@@ -156,6 +156,18 @@ function isInternalRuntimePath(path) {
   return typeof path === "string" && /^\/__[^/]+\.php(?:[?#].*)?$/u.test(path);
 }
 
+// A denied permission or an insecure origin (no Clipboard API) makes the copy
+// fail. That is the user's environment, not a bug: the control shows it, and
+// no unhandled rejection reaches monitoring.
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const MAX_LOG_ENTRIES = 500;
 
 function appendLog(message, isError = false) {
@@ -948,14 +960,14 @@ async function main() {
     els.configApply.addEventListener("click", applyConfigAndReset);
   }
   if (els.runtimeIdChip) {
-    els.runtimeIdChip.addEventListener("click", () => {
-      navigator.clipboard?.writeText(currentRuntimeId || "");
+    els.runtimeIdChip.addEventListener("click", async () => {
+      const copied = await copyToClipboard(currentRuntimeId || "");
       const label = els.runtimeIdValue;
       if (!label) {
         return;
       }
       const original = label.textContent;
-      label.textContent = "✓ copied";
+      label.textContent = copied ? "✓ copied" : "✗ copy failed";
       setTimeout(() => {
         label.textContent = original;
       }, 1400);
@@ -963,13 +975,13 @@ async function main() {
   }
 
   if (els.buildIdChip) {
-    els.buildIdChip.addEventListener("click", () => {
-      navigator.clipboard?.writeText(BUILD_VERSION);
+    els.buildIdChip.addEventListener("click", async () => {
+      const copied = await copyToClipboard(BUILD_VERSION);
       const label = els.buildIdValue;
       if (!label) {
         return;
       }
-      label.textContent = "✓ copied";
+      label.textContent = copied ? "✓ copied" : "✗ copy failed";
       setTimeout(() => {
         label.textContent = BUILD_VERSION;
       }, 1400);
@@ -1015,16 +1027,14 @@ els.blueprintTab.addEventListener("click", () => setActivePanel("blueprint"));
 els.clearLogs.addEventListener("click", () => {
   els.logPanel.textContent = "";
 });
-els.copyLogs.addEventListener("click", () => {
-  const text = els.logPanel.textContent || "";
-  navigator.clipboard.writeText(text).then(() => {
-    // Icon-only button: swap the SVG for a checkmark, then restore it.
-    const original = els.copyLogs.innerHTML;
-    els.copyLogs.textContent = "✓";
-    setTimeout(() => {
-      els.copyLogs.innerHTML = original;
-    }, 1200);
-  });
+els.copyLogs.addEventListener("click", async () => {
+  const copied = await copyToClipboard(els.logPanel.textContent || "");
+  // Icon-only button: swap the SVG for a mark, then restore it.
+  const original = els.copyLogs.innerHTML;
+  els.copyLogs.textContent = copied ? "✓" : "✗";
+  setTimeout(() => {
+    els.copyLogs.innerHTML = original;
+  }, 1200);
 });
 els.refreshPhpInfoButton.addEventListener("click", requestPhpInfoCapture);
 
