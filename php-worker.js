@@ -448,21 +448,20 @@ function buildLoadingResponse(message, status = 503) {
   );
 }
 
+// Returns null when the runtime was reset, or why the restart was declined.
 function resetRuntime(reason) {
+  let declined = null;
   if (reactiveRestartCount >= MAX_REACTIVE_RESTARTS) {
-    postShell({
-      kind: "error",
-      detail: `[runtime] restart limit reached (${reactiveRestartCount}/${MAX_REACTIVE_RESTARTS}), not restarting. Reason: ${reason}`,
-    });
-    return false;
+    declined = `Runtime restart limit reached (${reactiveRestartCount}/${MAX_REACTIVE_RESTARTS}).`;
+  } else if (requestCount < MIN_REQUESTS_BEFORE_RESTART) {
+    declined = `Runtime crashed after only ${requestCount} request(s) (minimum ${MIN_REQUESTS_BEFORE_RESTART} before an automatic restart), likely a fundamental bug.`;
   }
-
-  if (requestCount < MIN_REQUESTS_BEFORE_RESTART) {
+  if (declined) {
     postShell({
       kind: "error",
-      detail: `[runtime] crash after only ${requestCount} requests (minimum ${MIN_REQUESTS_BEFORE_RESTART}), likely a fundamental bug — not restarting. Reason: ${reason}`,
+      detail: `[runtime] ${declined} Not restarting. Reason: ${reason}`,
     });
-    return false;
+    return declined;
   }
 
   reactiveRestartCount += 1;
@@ -480,7 +479,7 @@ function resetRuntime(reason) {
     progress: 0.01,
   });
 
-  return true;
+  return null;
 }
 
 async function getRuntimeState() {
@@ -488,7 +487,7 @@ async function getRuntimeState() {
     return runtimeStatePromise;
   }
 
-  runtimeStatePromise = (async () => {
+  const boot = (async () => {
     const bootStart = performance.now();
 
     const t0 = performance.now();
@@ -621,14 +620,6 @@ async function getRuntimeState() {
         void publishPhpInfo(runtime, "bootstrap-error");
       }
 
-      // Clear the cached runtimeStatePromise so the next caller of
-      // getRuntimeState() creates a fresh runtime instead of re-throwing
-      // this cached rejection.  The actual restart-count bookkeeping and
-      // retry decision live in the bridge listener (installBridgeListener),
-      // not here, to avoid double-counting restarts.
-      runtimeStatePromise = null;
-      readyPhp = null;
-
       throw error;
     }
     const bootstrapMs = Math.round(performance.now() - t2);
@@ -687,7 +678,17 @@ async function getRuntimeState() {
     return { php };
   })();
 
-  return runtimeStatePromise;
+  // Any failed step (config, PHP refresh, bootstrap, snapshot restore) must not
+  // stay cached: the next caller boots a fresh runtime instead of re-throwing.
+  // Restart bookkeeping lives in the bridge listener, to avoid double-counting.
+  runtimeStatePromise = boot;
+  boot.catch(() => {
+    if (runtimeStatePromise === boot) {
+      runtimeStatePromise = null;
+      readyPhp = null;
+    }
+  });
+  return boot;
 }
 
 /**
@@ -824,7 +825,7 @@ function installBridgeListener() {
         // clears runtimeStatePromise, but defer the actual hydration until
         // we know a restart will happen. Hydration pulls the full DB, all
         // uploaded files, and tracked plugin dirs into the JS heap — doing
-        // it when resetRuntime() returns false (e.g. the
+        // it when resetRuntime() declines (e.g. the
         // MIN_REQUESTS_BEFORE_RESTART guard fires on a first-boot OOM) would
         // pin that large snapshot for the tab's life on an already
         // memory-pressured worker, and leave hasPendingRestore stuck true.
@@ -836,18 +837,19 @@ function installBridgeListener() {
           phpToHydrate = null;
         }
 
-        const didReset = resetRuntime(`fatal WASM error: ${error.message}`);
+        const declined = resetRuntime(`fatal WASM error: ${error.message}`);
+        const didReset = declined === null;
         const canReplay = isSafeToReplay(data.request);
 
         // Only hydrate the snapshot when a restart will actually happen.
-        // When resetRuntime() returns false (e.g. the
+        // When resetRuntime() declines (e.g. the
         // MIN_REQUESTS_BEFORE_RESTART guard fires on a first-boot OOM), no
         // fresh runtime ever boots, so snapshot.restore() never runs and the
         // hydrated buffers would stay pinned for the tab's life on an
         // already memory-pressured worker (with hasPendingRestore stuck
         // true). In that case discard any leftover snapshot instead.
         //
-        // When resetRuntime() returns true, the next getRuntimeState() boot
+        // When resetRuntime() resets, the next getRuntimeState() boot
         // will consume the snapshot — either via the immediate replay below
         // (idempotent requests) or on the next user-triggered request
         // (non-idempotent requests that aren't replayed here).
@@ -878,15 +880,15 @@ function installBridgeListener() {
         }
 
         // If we already retried this request, or the request is not
-        // idempotent, or we hit the restart limit — give up.
+        // idempotent, or the restart was declined — give up.
         if (isRetry || !canReplay || !didReset) {
           const detail = formatErrorDetail(error);
           const status = didReset || isRetry ? 503 : 500;
           const message = isRetry
             ? `Runtime crashed again on retry. Manual reload required.\n\n${detail}`
-            : !canReplay
-              ? `Runtime restarting after crash. Non-idempotent request was not retried.\n\n${detail}`
-              : `Runtime restart limit reached.\n\n${detail}`;
+            : declined
+              ? `${declined}\n\n${detail}`
+              : `Runtime restarting after crash. Non-idempotent request was not retried.\n\n${detail}`;
           await respondError(data.id, message, status);
           if (didReset && !isRetry && !canReplay) {
             // Unlock the toolbar via ready without replaying the POST (ADR-0035).
