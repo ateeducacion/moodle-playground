@@ -109,7 +109,7 @@ test: build-version
 
 coverage: build-version
 	mkdir -p coverage
-	npx c8 --all --src . --include='*.js' --include='src/**' --include='lib/**' --include='scripts/**' \
+	npx c8 --all --src . --include='*.js' --include='*.mjs' --include='src/**' --include='lib/**' --include='scripts/**' \
 		--exclude='src/generated/**' --exclude='**/*.config.*' --exclude='sw.bundle.js' \
 		--reporter=lcovonly --reporter=text-summary --report-dir=coverage \
 		node --test tests/**/*.test.js
