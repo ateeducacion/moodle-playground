@@ -8,6 +8,8 @@ export const state = {
   archiveCalls: [],
   cacheResets: 0,
   bootstrapError: null,
+  // One-shot: the next php.refresh() (before bootstrapMoodle()) throws it.
+  refreshError: null,
   cacheResetError: null,
   phpinfoError: null,
   manifest: {
@@ -60,6 +62,9 @@ export function createPhpRuntime(runtimeConfig, options) {
     writes: [],
     _php: createRawPhp(),
     async refresh() {
+      const error = state.refreshError;
+      state.refreshError = null;
+      if (error) throw error;
       runtime.refreshed = true;
     },
     async request(request) {

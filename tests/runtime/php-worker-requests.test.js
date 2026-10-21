@@ -421,7 +421,7 @@ describe("php-worker request bridge", () => {
     assert.match(response.text, /Runtime crashed again on retry/);
     const log = details(shellSince(start));
     assert.ok(log.some((d) => d.includes("no PHP instance available")));
-    assert.ok(log.some((d) => d.includes("crash after only 0 requests")));
+    assert.ok(log.some((d) => d.includes("crashed after only 0 request(s)")));
     state.bootstrapError = null;
   });
 
@@ -430,8 +430,16 @@ describe("php-worker request bridge", () => {
     failOnce((r) => r.url.endsWith("/early.php"), new Error(FATAL));
     const response = await send("/early.php");
     assert.equal(response.status, 500);
-    assert.match(response.text, /Runtime restart limit reached/);
-    assert.ok(shell.at(-1).detail.includes("crash after only"));
+    assert.doesNotMatch(response.text, /restart limit reached/);
+    assert.match(response.text, /Runtime crashed after only 2 request\(s\)/);
+    assert.ok(shell.at(-1).detail.includes("crashed after only"));
+
+    // A declined restart is not reported as "restarting" for a POST either.
+    failOnce((r) => r.method === "POST", new Error(FATAL));
+    const post = await send("/early.php", { method: "POST" });
+    assert.equal(post.status, 500);
+    assert.doesNotMatch(post.text, /Runtime restarting after crash/);
+    assert.match(post.text, /Runtime crashed after only 3 request\(s\)/);
     state.handler = null;
   });
 
@@ -483,6 +491,7 @@ describe("php-worker request bridge", () => {
     failOnce((r) => r.url.endsWith("/again.php"), new Error(FATAL));
     const response = await send("/again.php");
     assert.equal(response.status, 500);
+    assert.match(response.text, /Runtime restart limit reached \(20\/20\)/);
     assert.ok(
       details(shell).some((d) => d.includes("restart limit reached (20/20)")),
     );
@@ -590,5 +599,22 @@ describe("php-worker request bridge", () => {
       state.runtimes.at(-1).runtimeConfig.corsProxyUrl,
       "https://github-proxy.exelearning.dev/?url=",
     );
+  });
+
+  it("boots again after a step before bootstrapMoodle() fails (#373)", async () => {
+    configure({
+      kind: "configure-blueprint",
+      runtimeParams: { scopeId: "s1" },
+    });
+    state.refreshError = new Error("refresh failed");
+    const bootsBefore = state.bootstrapCalls.length;
+    const failed = await send("/index.php");
+    assert.equal(failed.status, 500);
+    assert.match(failed.text, /refresh failed/);
+    assert.equal(state.bootstrapCalls.length, bootsBefore);
+
+    // The rejected boot is not cached: the next request boots a new runtime.
+    assert.equal((await send("/index.php")).status, 200);
+    assert.equal(state.bootstrapCalls.length, bootsBefore + 1);
   });
 });
