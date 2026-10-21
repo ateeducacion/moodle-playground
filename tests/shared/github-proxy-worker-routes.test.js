@@ -89,7 +89,7 @@ describe("github-proxy-worker ?repo= archive resolution", () => {
     for (const query of ["branch=dev", "commit=abc123", "release=v1"]) {
       assert.equal((await get(`?repo=o/r&${query}`)).status, 200);
     }
-    assert.ok(calls.every((c) => !c.url.includes("api.github.com")));
+    assert.ok(calls.every((c) => new URL(c.url).hostname !== "api.github.com"));
   });
 
   it("resolves a pull request head SHA and fails clearly when the API cannot", async () => {
