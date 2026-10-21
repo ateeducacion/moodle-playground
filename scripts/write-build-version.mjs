@@ -51,13 +51,24 @@ export function writeBuildMetadata(
   writeFileSync(jsonPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const metadata = resolveBuildMetadata({ env: process.env, git });
+// CLI entry point (streams and output paths overridable for tests).
+export function main({
+  argv = process.argv,
+  env = process.env,
+  stdout = process.stdout,
+  log = console.log,
+  paths,
+} = {}) {
+  const metadata = resolveBuildMetadata({ env, git });
 
-  if (process.argv.includes("--print-version")) {
-    process.stdout.write(`${metadata.buildVersion}\n`);
+  if (argv.includes("--print-version")) {
+    stdout.write(`${metadata.buildVersion}\n`);
   } else {
-    writeBuildMetadata(metadata);
-    console.log(`Wrote build metadata ${metadata.buildVersion}`);
+    writeBuildMetadata(metadata, paths);
+    log(`Wrote build metadata ${metadata.buildVersion}`);
   }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }

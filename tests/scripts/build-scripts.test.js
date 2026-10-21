@@ -85,9 +85,112 @@ describe("write-build-version.mjs", () => {
     const mod = await import(`${new URL(`file://${jsPath}`).href}`);
     assert.equal(mod.BUILD_VERSION, metadata.buildVersion);
   });
+
+  it("runs the CLI in write mode against the given output paths", async () => {
+    const { main } = await import("../../scripts/write-build-version.mjs");
+    const dir = tempDir();
+    const paths = {
+      jsPath: join(dir, "gen", "build-version.js"),
+      jsonPath: join(dir, "assets", "build-version.json"),
+    };
+    const version = "20260816T065012Z-9e39f37d";
+    const logs = [];
+    main({
+      argv: [],
+      env: { BUILD_VERSION: version },
+      log: (line) => logs.push(line),
+      paths,
+    });
+    assert.deepEqual(logs, [`Wrote build metadata ${version}`]);
+    const json = JSON.parse(readFileSync(paths.jsonPath, "utf8"));
+    assert.equal(json.buildVersion, version);
+    assert.ok(readFileSync(paths.jsPath, "utf8").includes(version));
+  });
+
+  it("prints the version without writing anything with --print-version", async () => {
+    const { main } = await import("../../scripts/write-build-version.mjs");
+    const dir = tempDir();
+    const paths = {
+      jsPath: join(dir, "build-version.js"),
+      jsonPath: join(dir, "build-version.json"),
+    };
+    const out = [];
+    main({
+      argv: ["--print-version"],
+      env: { BUILD_VERSION: "20260816T065012Z-9e39f37d" },
+      stdout: { write: (chunk) => out.push(chunk) },
+      paths,
+    });
+    assert.deepEqual(out, ["20260816T065012Z-9e39f37d\n"]);
+    assert.equal(existsSync(paths.jsPath), false);
+    assert.equal(existsSync(paths.jsonPath), false);
+  });
+
+  it("falls back to the nogit SHA when git cannot run", () => {
+    const env = { ...process.env, PATH: tempDir() };
+    delete env.BUILD_VERSION;
+    delete env.BUILD_SHA;
+    const result = spawnSync(
+      process.execPath,
+      [script("write-build-version.mjs"), "--print-version"],
+      { encoding: "utf8", env },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout.trim(), /-nogit$/);
+  });
 });
 
 describe("generate-og-image.mjs", () => {
+  it("screenshots to og-image.png when run from the command line", () => {
+    // Swap playwright for a fake browser so the CLI neither launches Chromium
+    // nor writes the real og-image.png.
+    const dir = tempDir();
+    const fake = join(dir, "fake-playwright.mjs");
+    writeFileSync(
+      fake,
+      `const page = {
+  setContent: async () => {},
+  waitForTimeout: async () => {},
+  screenshot: async ({ path }) => console.log("SCREENSHOT " + path),
+};
+export const chromium = {
+  launch: async () => ({
+    newContext: async () => ({ newPage: async () => page }),
+    close: async () => console.log("CLOSED"),
+  }),
+};
+`,
+    );
+    const preload = join(dir, "preload.mjs");
+    writeFileSync(
+      preload,
+      `import { registerHooks } from "node:module";
+import { pathToFileURL } from "node:url";
+const fakeUrl = pathToFileURL(${JSON.stringify(fake)}).href;
+registerHooks({
+  resolve: (specifier, context, next) =>
+    specifier === "playwright"
+      ? { url: fakeUrl, shortCircuit: true }
+      : next(specifier, context),
+});
+`,
+    );
+    const output = fileURLToPath(
+      new URL("../../og-image.png", import.meta.url),
+    );
+    const result = spawnSync(
+      process.execPath,
+      ["--import", preload, script("generate-og-image.mjs")],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n"), [
+      `SCREENSHOT ${output}`,
+      "CLOSED",
+      `Wrote ${output}`,
+    ]);
+  });
+
   it("renders the template at 1200x630 and screenshots it to the output path", async () => {
     const { generateOgImage, HTML, OUTPUT } = await import(
       "../../scripts/generate-og-image.mjs"
