@@ -668,6 +668,21 @@ describe("remote host shell integration", () => {
     );
   });
 
+  it("does not recover a frame that has no page yet", async () => {
+    const harness = createHarness();
+    await bootUntilWorkerReady(harness, { initialPath: "/my/" });
+
+    // No frame window yet, then a frame still on about:blank.
+    harness.clock.tick(4000);
+    setFrameDocument(harness, {});
+    harness.postShellCommand({ kind: "navigate-site", path: "/admin/" });
+    harness.clock.tick(4000);
+
+    assert.equal(harness.status(), "Loading Moodle…");
+    assert.equal(harness.frame.window.location.href, "about:blank");
+    assert.equal(harness.overlayHidden(), false);
+  });
+
   it("re-navigates once when the Moodle page load stalls", async () => {
     const harness = createHarness();
     await bootUntilWorkerReady(harness, { initialPath: "/my/" });

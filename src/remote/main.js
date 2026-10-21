@@ -685,14 +685,6 @@ async function bootstrapRemote() {
       });
     });
   }
-  // Tracks whether the iframe has been navigated yet. The initial
-  // navigation triggers bootstrap (the worker boots on the first PHP
-  // request), so the worker's "ready" shell message — which carries the
-  // authoritative post-bootstrap path — can only arrive AFTER this first
-  // navigation. The "ready" handler therefore corrects the path only when
-  // bootstrap discovers a genuinely different one, avoiding a redundant
-  // second navigation when the initial path was already correct.
-  let frameNavigated = false;
   // Listen to the shell channel so we can pick up bootstrap progress
   // messages from the worker and display them on the loading overlay.
   const shellChannel = new BroadcastChannel(
@@ -715,7 +707,6 @@ async function bootstrapRemote() {
           force: true,
         });
       }
-      frameNavigated = true;
     }
   });
 
@@ -761,14 +752,9 @@ async function bootstrapRemote() {
       ? requestedPath
       : workerReadyMessage?.initialPath || config.landingPath || requestedPath;
   activePath = initialPath;
-  // The initial navigation is what triggers bootstrap, so the worker's
-  // "ready" message (carrying the authoritative post-bootstrap path) can
-  // only arrive afterwards — `frameNavigated` is therefore normally false
-  // here and the initial navigation runs. The guard is defensive: if
-  // "ready" somehow already fired and navigated, skip a redundant nav.
-  if (!frameNavigated) {
-    navigateFrame(scopeId, selection.runtimeId, activePath);
-  }
+  // This first navigation triggers bootstrap: the worker boots on the first
+  // PHP request, so its "ready" message (handled above) always comes later.
+  navigateFrame(scopeId, selection.runtimeId, activePath);
   setRemoteProgress("Loading Moodle…", 0.98);
 }
 
