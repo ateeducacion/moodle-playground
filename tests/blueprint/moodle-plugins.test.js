@@ -879,3 +879,109 @@ describe("proxy helpers", () => {
     );
   });
 });
+
+describe("plugin upgrade reporting", () => {
+  const install = (run, publish) =>
+    getStepHandler("installMoodlePlugin")(
+      {
+        pluginType: "local",
+        pluginName: "flat",
+        url: "https://example.invalid/p.zip",
+      },
+      {
+        restoreOnly: true,
+        publish,
+        php: { _php: { mkdirTree() {}, writeFile() {} }, run },
+      },
+    );
+
+  it("publishes and rethrows an upgrade crash", async () => {
+    const messages = [];
+    await assert.rejects(
+      serving(zipSync({ "version.php": strToU8("<?php") }), () =>
+        install(
+          async () => {
+            throw new Error("exit(1)");
+          },
+          (m) => messages.push(m),
+        ),
+      ),
+      /exit\(1\)/,
+    );
+    assert.ok(messages.includes("Plugin upgrade crashed: exit(1)"));
+  });
+
+  it("publishes PHP errors and an ok:false payload before failing", async () => {
+    const messages = [];
+    await assert.rejects(
+      serving(pluginZip(1), () =>
+        install(
+          async () => ({
+            text: '{"ok":false,"error":"x"}',
+            errors: "Warning: y",
+          }),
+          (m) => messages.push(m),
+        ),
+      ),
+      /registration did not complete/,
+    );
+    assert.ok(messages.includes("Plugin upgrade errors: Warning: y"));
+    assert.ok(
+      messages.some((m) => m.startsWith('Plugin upgrade failed: {"ok":false')),
+    );
+  });
+});
+
+describe("plugin URL helpers", () => {
+  it("parses GitHub archive URLs in all supported shapes", () => {
+    const { parseGitHubUrl } = __testables;
+    assert.deepEqual(
+      parseGitHubUrl("https://github.com/o/r/archive/refs/heads/feat/x.zip"),
+      {
+        owner: "o",
+        repo: "r",
+        ref: "feat/x",
+      },
+    );
+    assert.deepEqual(
+      parseGitHubUrl("https://github.com/o/r/archive/refs/tags/v1.zip"),
+      {
+        owner: "o",
+        repo: "r",
+        ref: "v1",
+      },
+    );
+    assert.deepEqual(
+      parseGitHubUrl("https://github.com/o/r/archive/main.zip"),
+      {
+        owner: "o",
+        repo: "r",
+        ref: "main",
+      },
+    );
+    assert.equal(parseGitHubUrl("https://github.com/o/r"), null);
+    assert.equal(
+      parseGitHubUrl("https://gitlab.com/o/r/archive/main.zip"),
+      null,
+    );
+    assert.equal(parseGitHubUrl("not a url"), null);
+  });
+
+  it("finds a shared root folder only when every entry has it", () => {
+    const { findCommonPrefix } = __testables;
+    assert.equal(findCommonPrefix([]), "");
+    assert.equal(findCommonPrefix(["version.php"]), "");
+    assert.equal(findCommonPrefix(["a/x", "a/y"]), "a/");
+    assert.equal(findCommonPrefix(["a/x", "b/y"]), "");
+  });
+
+  it("keeps the original URL for an invalid proxy base or URL", () => {
+    const zip = "https://github.com/o/r/archive/main.zip";
+    assert.equal(
+      __testables.resolvePluginZipDownloadUrl(zip, { addonProxyUrl: "::bad" }),
+      zip,
+    );
+    assert.equal(__testables.shouldProxyZipUrl("::bad"), false);
+    assert.equal(__testables.resolveAddonProxyUrl({ addonProxyUrl: "  " }), "");
+  });
+});
