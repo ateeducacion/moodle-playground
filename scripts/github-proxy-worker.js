@@ -55,7 +55,7 @@ export default {
 
     // GitHub proxy mode
     if (params.has("repo")) {
-      return handleGitHubProxy(params, env);
+      return handleGitHubProxy(params, env, request);
     }
 
     // If the request accepts HTML (browser), serve the landing page.
@@ -95,7 +95,7 @@ export default {
 // GitHub proxy mode
 // ---------------------------------------------------------------------------
 
-async function handleGitHubProxy(params, env) {
+async function handleGitHubProxy(params, env, request) {
   const repo = params.get("repo");
 
   // repo is interpolated into authenticated GitHub API paths, so accept only
@@ -133,7 +133,7 @@ async function handleGitHubProxy(params, env) {
       params.get("release"),
       params.get("asset"),
       env,
-      null,
+      request,
       params.get("asset-pattern"),
     );
   }
@@ -632,7 +632,9 @@ async function proxyGitHubZip(
       isGitHubDirectProxyUrl,
     );
 
-    if (!upstream.ok) {
+    // A 3xx left here is a 304 or a redirect without Location: the client's
+    // answer, not an upstream failure, so pass it through (#378).
+    if (upstream.status >= 400) {
       return upstreamErrorResponse(upstream, { upstream_url: url });
     }
 
@@ -736,7 +738,9 @@ async function handleGenericProxy(targetUrl, request) {
       isAuthorizedRedirect,
     );
 
-    if (!upstream.ok) {
+    // 304 (the forwarded conditional headers) and a Location-less 3xx pass
+    // through unchanged (#378).
+    if (upstream.status >= 400) {
       return upstreamErrorResponse(upstream);
     }
 
