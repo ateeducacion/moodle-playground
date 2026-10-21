@@ -232,10 +232,12 @@ describe("sw.js messages", () => {
         : Response.json({});
     };
     const url = `${BASE}/playground/sM/rM/__playground_proxy__?url=y`;
-    // The un-awaited proxy promise escapes the handler's try/catch, so the
-    // failure rejects respondWith() instead of rendering an error page.
-    await assert.rejects(
-      dispatchFetch(makeRequest(url)),
+    // A failed proxy request renders the error page instead of rejecting
+    // respondWith() (#380).
+    const failed = await dispatchFetch(makeRequest(url));
+    assert.equal(failed.response.status, 500);
+    assert.match(
+      await failed.response.text(),
       /Unable to load playground config: 500/,
     );
 
@@ -415,16 +417,17 @@ describe("sw.js fetch routing", () => {
     assert.equal(await response.text(), "fresh-2");
   });
 
-  it("rejects respondWith when an uncached sensitive file is unreachable", async () => {
+  it("renders the error page when an uncached static file is unreachable", async () => {
     fetchImpl = async () => {
       throw new TypeError("offline");
     };
-    // The returned (not awaited) static fetch bypasses the handler's catch,
-    // so the browser sees a network error rather than the HTML error page.
-    await assert.rejects(
-      dispatchFetch(makeRequest(`${BASE}/index.html`)),
-      /offline/,
-    );
+    // Network-first (sensitive) and cache-first static fetches both end in
+    // the HTML error page, not a browser network error (#380).
+    for (const path of ["/index.html", "/dist/php-worker.bundle.js"]) {
+      const { response } = await dispatchFetch(makeRequest(`${BASE}${path}`));
+      assert.equal(response.status, 500, path);
+      assert.match(await response.text(), /offline/, path);
+    }
   });
 
   it("renders unexpected handler failures as an escaped error page", async () => {
