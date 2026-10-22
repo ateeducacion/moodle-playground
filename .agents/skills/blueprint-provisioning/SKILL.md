@@ -144,6 +144,10 @@ Substitution is recursive (works in nested objects and arrays) but not in keys.
 }
 ```
 
+The built-in `{{MOODLE_DIRROOT}}` resolves to the booted runtime's `webRoot`
+(`/www/moodle`, or `/www/moodle/public` on Moodle 5.1+) and cannot be overridden
+by blueprint constants. See [the reference](../../../docs/blueprints/reference.md#moodle_dirroot).
+
 ## Testing
 
 Blueprint tests live in `tests/blueprint/` and cover:

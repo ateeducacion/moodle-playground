@@ -82,6 +82,34 @@ from the `repo` / `owner` / `branch` (alias `ref`) URL parameters and merged
 *over* the blueprint's own `constants`. This lets one committed blueprint target
 the branch it is previewed for. See [URL parameters](../url-parameters.md).
 
+### `{{MOODLE_DIRROOT}}`
+
+`{{MOODLE_DIRROOT}}` is a built-in constant set to the web root of the Moodle
+version that actually booted, so a URL override such as `?moodle=5.2` wins over
+the blueprint's `preferredVersions`:
+
+| Moodle version | `{{MOODLE_DIRROOT}}` |
+| --- | --- |
+| 4.4 – 5.0 | `/www/moodle` |
+| 5.1 and later | `/www/moodle/public` |
+
+Use it for files that belong next to installed plugin code, which Moodle 5.1+
+serves from `public/`:
+
+```json
+{
+  "step": "unzip",
+  "destination": "{{MOODLE_DIRROOT}}/mod/exescorm/dist",
+  "data": "@editorArchive"
+}
+```
+
+It works wherever other constants do and is reserved: a blueprint constant named
+`MOODLE_DIRROOT` is ignored. Literal `/www/moodle/...` paths are not rewritten.
+The source root `/www/moodle` (where `config.php` lives) and the public
+`dirroot` differ on Moodle 5.1+, so keep literal paths for files outside
+`public/`.
+
 ## PHP constants
 
 `phpConstants` defines PHP constants in the booted Moodle's `config.php`, before

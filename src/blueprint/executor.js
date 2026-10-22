@@ -29,8 +29,12 @@ export async function executeBlueprint(blueprint, context) {
   const { publish = () => {} } = context;
   const now = typeof context.now === "function" ? context.now : defaultNow;
 
-  // Substitute constants into the entire blueprint
-  const constants = blueprint.constants || {};
+  // Substitute constants into the entire blueprint. MOODLE_DIRROOT is the
+  // selected runtime's web root (public/ on Moodle 5.1+) and is reserved, so a
+  // blueprint constant cannot point steps at the wrong tree. See
+  // docs/architecture/adr/ADR-0047-moodle-dirroot-blueprint-constant.md.
+  const constants = { ...blueprint.constants };
+  if (context.webRoot) constants.MOODLE_DIRROOT = context.webRoot;
   const resolvedBlueprint = substituteConstants(blueprint, constants);
   const steps = resolvedBlueprint.steps;
 
