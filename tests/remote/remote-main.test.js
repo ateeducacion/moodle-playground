@@ -755,6 +755,45 @@ describe("remote host shell integration", () => {
     );
   });
 
+  it("loads the boot page again after an in-site click (#396)", async () => {
+    const harness = createHarness();
+    await bootUntilWorkerReady(harness, { initialPath: "/my/" });
+    const myHref = `${ORIGIN}/playground/s1/${RUNTIME_ID}/my/`;
+    assert.equal(harness.frameEl.src, myHref);
+
+    // The shell repeats the boot navigation on "ready" while /my/ is still
+    // loading: it is not requested twice.
+    harness.frame.window = { location: { href: "about:blank" } };
+    harness.postShellCommand({ kind: "navigate-site", path: "/my/" });
+    assert.equal(harness.frame.window.location.href, "about:blank");
+
+    setFrameDocument(harness, { path: "/my/" });
+    harness.frameEl.dispatchEvent(new harness.win.Event("load"));
+
+    // An in-site click leaves the src attribute on /my/.
+    setFrameDocument(harness, { path: "/course/index.php" });
+    harness.frameEl.dispatchEvent(new harness.win.Event("load"));
+    assert.equal(harness.frameEl.src, myHref);
+    assert.equal(harness.overlayHidden(), true);
+
+    // Back (or Home, or typing the address) to /my/ loads it again.
+    harness.postShellCommand({ kind: "navigate-site", path: "/my/" });
+    assert.equal(harness.frame.window.location.href, myHref);
+    assert.equal(harness.overlayHidden(), false);
+
+    // A page the remote host can't read is navigated, not assumed current.
+    harness.frame.window = {
+      get location() {
+        throw new Error("SecurityError");
+      },
+    };
+    harness.postShellCommand({ kind: "navigate-site", path: "/admin/" });
+    assert.equal(
+      harness.frameEl.src,
+      `${ORIGIN}/playground/s1/${RUNTIME_ID}/admin/`,
+    );
+  });
+
   it("settles on the current page when no new document arrives", async () => {
     const harness = createHarness();
     await bootUntilWorkerReady(harness, { initialPath: "/my/" });

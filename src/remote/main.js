@@ -49,6 +49,10 @@ let frameRecoveryAttempted = false;
 // The page the frame is navigating away from. It stays in the frame until the
 // requested one commits, so it must not be taken for the navigation's result.
 let outgoingFrameDocument = null;
+// The URL navigateFrame last sent the frame to, until the frame settles on a
+// page. The iframe's src attribute keeps that URL after in-site clicks, so it
+// can't tell which page the frame shows.
+let pendingFrameHref = "";
 let dotsTimer = 0;
 let dotsCount = 0;
 
@@ -408,6 +412,7 @@ function finalizeFrameReady(scopeId, runtimeId) {
   }
 
   activePath = path;
+  pendingFrameHref = "";
   setOverlayVisible(false);
 
   if (href !== lastAnnouncedFrameHref) {
@@ -491,22 +496,33 @@ function startFrameWatch(scopeId, runtimeId) {
   }, 150);
 }
 
+function currentFrameHref() {
+  try {
+    return frameEl.contentWindow?.location?.href || "";
+  } catch {
+    return ""; // Cross-origin: navigate rather than guess.
+  }
+}
+
 function navigateFrame(scopeId, runtimeId, path, { force = false } = {}) {
   const entryUrl = buildEntryUrl(scopeId, runtimeId, path);
   const entryHref = entryUrl.toString();
 
+  // Skip a request for the page the frame is already loading or showing (the
+  // shell repeats the boot navigation on "ready"), so it isn't loaded twice.
+  if (!force && (pendingFrameHref || currentFrameHref()) === entryHref) {
+    return;
+  }
+
   clearFrameRecoveryTimer();
   frameRecoveryAttempted = false;
   activePath = path;
+  pendingFrameHref = entryHref;
   if (force) {
     lastAnnouncedFrameHref = "";
   }
   setOverlayVisible(true);
   startFrameWatch(scopeId, runtimeId);
-
-  if (!force && frameEl.src === entryHref) {
-    return;
-  }
 
   try {
     outgoingFrameDocument = frameEl.contentWindow?.document || null;
