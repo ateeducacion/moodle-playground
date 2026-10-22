@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { strToU8, zipSync } from "fflate";
 import { executeBlueprint } from "../../src/blueprint/executor.js";
 import { registerStep } from "../../src/blueprint/steps/index.js";
+import { MOODLE_BRANCHES } from "../../src/shared/version-resolver.js";
 
 // Minimal mock PHP runtime
 function createMockPhp() {
@@ -89,6 +91,95 @@ describe("executeBlueprint", () => {
     );
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.landingPage, "/my/");
+  });
+
+  describe("{{MOODLE_DIRROOT}} (#394)", () => {
+    const editorZip = Buffer.from(
+      zipSync({ "index.html": strToU8("<html></html>") }),
+    ).toString("base64");
+    const unzipInto = async (webRoot, constants, checkpoint) => {
+      const files = new Map();
+      const result = await executeBlueprint(
+        {
+          constants,
+          resources: { editorArchive: { base64: editorZip } },
+          steps: [
+            {
+              step: "unzip",
+              destination: "{{MOODLE_DIRROOT}}/mod/exescorm/dist",
+              data: "@editorArchive",
+            },
+          ],
+        },
+        {
+          php: {
+            _php: {
+              mkdirTree: () => {},
+              writeFile: (path, data) => files.set(path, data),
+            },
+          },
+          webRoot,
+          checkpoint,
+        },
+      );
+      assert.equal(result.success, true, result.error);
+      return [...files.keys()];
+    };
+
+    for (const { version, webRoot } of MOODLE_BRANCHES) {
+      // Moodle 5.1 moved the web-served code under public/; dev tracks main.
+      const expected =
+        version === "dev" || Number(version) >= 5.1
+          ? "/www/moodle/public"
+          : "/www/moodle";
+      it(`resolves to ${expected} on Moodle ${version}`, async () => {
+        assert.equal(webRoot, expected);
+        assert.deepEqual(await unzipInto(webRoot), [
+          `${expected}/mod/exescorm/dist/index.html`,
+        ]);
+      });
+    }
+
+    it("cannot be shadowed by a blueprint constant", async () => {
+      assert.deepEqual(
+        await unzipInto("/www/moodle/public", { MOODLE_DIRROOT: "/tmp" }),
+        ["/www/moodle/public/mod/exescorm/dist/index.html"],
+      );
+    });
+
+    it("replays into the resolved directory on a checkpoint reload", async () => {
+      const checkpoint = {
+        fingerprint: "fixture",
+        resuming: true,
+        completed: new Set([0]),
+        save: () => {},
+      };
+      assert.deepEqual(
+        await unzipInto("/www/moodle/public", undefined, checkpoint),
+        ["/www/moodle/public/mod/exescorm/dist/index.html"],
+      );
+    });
+
+    it("resolves inside nested values next to blueprint constants", async () => {
+      const seen = [];
+      registerStep("__test_capture_step", async (step) => {
+        seen.push(step.options);
+      });
+      const result = await executeBlueprint(
+        {
+          constants: { PLUGIN: "exescorm" },
+          steps: [
+            {
+              step: "__test_capture_step",
+              options: { paths: ["{{MOODLE_DIRROOT}}/mod/{{PLUGIN}}"] },
+            },
+          ],
+        },
+        { webRoot: "/www/moodle" },
+      );
+      assert.equal(result.success, true);
+      assert.deepEqual(seen, [{ paths: ["/www/moodle/mod/exescorm"] }]);
+    });
   });
 
   it("reports failed step index and name", async () => {

@@ -60,6 +60,7 @@ folder and keep their original lightweight format (see
 | [ADR-0044](ADR-0044-opcache-file-cache-memory-limit.md) | Raise PHP memory_limit to 512M while the OPcache file cache is live | Proposed | 2026-10-18 |
 | [ADR-0045](ADR-0045-sw-skip-cross-origin-requests.md) | Leave cross-origin requests to the browser instead of passing them through the Service Worker | Proposed | 2026-10-19 |
 | [ADR-0046](ADR-0046-opcache-on-by-default.md) | Turn the OPcache file cache on by default | Proposed | 2026-10-19 |
+| [ADR-0047](ADR-0047-moodle-dirroot-blueprint-constant.md) | Expose the runtime web root to blueprints as `{{MOODLE_DIRROOT}}` | Proposed | 2026-10-22 |
 
 PR #341 review follow-up: ADR-0033 clarifies production JS after purges,
 ADR-0034 qualifies warm-cache evidence and header visibility, and ADR-0035 covers
