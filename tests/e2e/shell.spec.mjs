@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures.mjs";
 import {
   buildBlueprintParam,
+  findMoodleFrame,
   specTimeoutMs,
   waitForShellReady,
 } from "./helpers.mjs";
@@ -111,6 +112,40 @@ test("does not journal Moodle's derived caches (guards CompiledContainer regress
     journal.offenderCount,
     `journaled cache paths: ${JSON.stringify(journal.offenders)} (op keys: ${JSON.stringify(journal.sampleKeys)})`,
   ).toBe(0);
+});
+
+test("keeps an address being typed when the site frame navigates", async ({
+  page,
+  playground,
+}) => {
+  await playground.open({ waitForMoodle: true });
+  const moodle = page.frameLocator("#site-frame").frameLocator("#remote-frame");
+
+  // A page finishing its load in the frame reports its path to the shell.
+  // That must not replace what the user is typing: the toolbar unlocks on the
+  // worker's "ready", before the landing page has loaded, so typing can
+  // overlap that load.
+  await page.locator("#address-input").fill("/admin/search.php");
+  await moodle
+    .locator("body")
+    .evaluate(() =>
+      location.assign(location.href.replace(/\/my\/.*$/u, "/course/index.php")),
+    );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.keys(sessionStorage)
+          .filter((key) => key.endsWith(":state"))
+          .map((key) => JSON.parse(sessionStorage.getItem(key)).path),
+      ),
+    )
+    .toContain("/course/index.php");
+  await expect(page.locator("#address-input")).toHaveValue("/admin/search.php");
+
+  await page.locator("#address-input").press("Enter");
+  await expect
+    .poll(() => findMoodleFrame(page)?.url() || "")
+    .toContain("/admin/search.php");
 });
 
 test("side panel opens and shows tabs", async ({ page, playground }) => {

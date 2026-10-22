@@ -115,6 +115,8 @@ let currentDebugParam = null;
 let currentProfileParam = null;
 let currentOpcacheParam = null;
 let currentPath = "/";
+// Set while the user types in the address bar, cleared on submit or blur.
+let addressEdited = false;
 // In-shell navigation history for the toolbar Back button. The iframe's own
 // session history is not usable here (navigations happen across nested frames
 // and service-worker scopes), so the shell tracks visited paths itself.
@@ -341,6 +343,15 @@ async function updateFrame() {
     blueprintSourceKey(window.location.href),
   );
   pendingCleanBoot = false;
+}
+
+// Show a path the site frame reported, unless the user is typing an address:
+// the toolbar unlocks on the worker's "ready", before the landing page has
+// loaded, and that load must not replace what the user typed.
+function showFramePath(path) {
+  if (!addressEdited) {
+    els.address.value = path;
+  }
 }
 
 function postToRemote(message) {
@@ -581,7 +592,7 @@ function bindShellChannel() {
             postToRemote({ kind: "navigate-site", path: currentPath });
           }
         }
-        els.address.value = currentPath;
+        showFramePath(currentPath);
         saveState({ lastReadyAt: new Date().toISOString() });
         break;
       case "frame-ready": {
@@ -600,7 +611,7 @@ function bindShellChannel() {
             recordBackEntry(currentPath, nextPath);
           }
           currentPath = nextPath;
-          els.address.value = currentPath;
+          showFramePath(currentPath);
           saveState();
         }
         break;
@@ -611,7 +622,7 @@ function bindShellChannel() {
           : message.path || "/";
         recordBackEntry(currentPath, nextPath);
         currentPath = nextPath;
-        els.address.value = currentPath;
+        showFramePath(currentPath);
         saveState();
         break;
       }
@@ -1031,11 +1042,18 @@ els.copyLogs.addEventListener("click", async () => {
 });
 els.refreshPhpInfoButton.addEventListener("click", requestPhpInfoCapture);
 
+els.address.addEventListener("input", () => {
+  addressEdited = true;
+});
+els.address.addEventListener("blur", () => {
+  addressEdited = false;
+});
 els.addressForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (uiLocked) {
     return;
   }
+  addressEdited = false;
   navigateWithinRuntime(els.address.value || "/");
 });
 
