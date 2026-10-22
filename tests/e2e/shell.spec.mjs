@@ -148,6 +148,45 @@ test("keeps an address being typed when the site frame navigates", async ({
     .toContain("/admin/search.php");
 });
 
+test("Home and Back load the boot page again after an in-site click", async ({
+  page,
+  playground,
+}) => {
+  await playground.open({ waitForMoodle: true });
+  const moodle = page.frameLocator("#site-frame").frameLocator("#remote-frame");
+  const framePath = () => {
+    try {
+      return new URL(findMoodleFrame(page)?.url()).pathname;
+    } catch {
+      return "";
+    }
+  };
+  const clickToCourseIndex = async () => {
+    await moodle
+      .locator("body")
+      .evaluate(() =>
+        location.assign(
+          location.href.replace(/\/(my\/.*)?$/u, "/course/index.php"),
+        ),
+      );
+    await expect.poll(framePath).toMatch(/\/course\/index\.php$/u);
+    await expect(page.locator("#address-input")).toHaveValue(
+      "/course/index.php",
+    );
+  };
+
+  // The frame's boot URL must not be taken for the page it shows now: after
+  // an in-site click, Home and Back to that URL have to load it again.
+  await clickToCourseIndex();
+  await page.locator("#home-button").click();
+  await expect.poll(framePath).toMatch(/\/(my\/)?$/u);
+
+  await clickToCourseIndex();
+  await page.locator("#back-button").click();
+  await expect.poll(framePath).toMatch(/\/my\/$/u);
+  await expect(page.locator("#address-input")).toHaveValue("/my/");
+});
+
 test("side panel opens and shows tabs", async ({ page, playground }) => {
   await playground.open();
 
