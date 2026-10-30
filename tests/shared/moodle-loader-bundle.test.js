@@ -18,10 +18,12 @@ function installMocks() {
   const store = new Map();
   const responses = new Map();
   const fetched = [];
-  globalThis.fetch = async (url) => {
+  const inits = [];
+  globalThis.fetch = async (url, init) => {
     fetched.push(String(url));
+    inits.push(init);
     const entry = responses.get(String(url));
-    if (typeof entry === "function") return entry();
+    if (typeof entry === "function") return entry(init);
     if (entry === undefined)
       return new Response("nope", { status: 404, statusText: "Not Found" });
     return new Response(entry, { status: 200 });
@@ -42,7 +44,7 @@ function installMocks() {
   };
   globalThis.caches = { open: async () => cache };
   globalThis.self = { location: { href: "https://app.test/sub/" } };
-  return { store, responses, fetched, cache };
+  return { store, responses, fetched, cache, inits };
 }
 
 let mocks;
@@ -236,10 +238,48 @@ describe("fetchBundleWithCache (single bundle)", () => {
       /Bundle checksum mismatch/,
     );
   });
+
+  it("refetches past the HTTP cache when the downloaded bytes mismatch", async () => {
+    const stale = new Uint8Array(randomBytes(32));
+    const fresh = new Uint8Array(randomBytes(32));
+    mocks.responses.set(
+      url,
+      (init) =>
+        new Response(init?.cache === "reload" ? fresh : stale, { status: 200 }),
+    );
+
+    const bytes = await fetchBundleWithCache({
+      bundle: { url, sha256: sha256Hex(fresh) },
+    });
+    assert.deepEqual(bytes, fresh);
+    assert.equal(mocks.fetched.length, 2, "one retry");
+    assert.equal(mocks.inits[1]?.cache, "reload");
+    assert.deepEqual(mocks.store.get(url), fresh);
+  });
 });
 
 describe("fetchBundleWithCache (parts edge cases)", () => {
   const partUrl = "https://app.test/core.part-000";
+
+  it("refetches a part past the HTTP cache when its bytes mismatch", async () => {
+    const stale = new Uint8Array(randomBytes(16));
+    const fresh = new Uint8Array(randomBytes(16));
+    mocks.responses.set(
+      partUrl,
+      (init) =>
+        new Response(init?.cache === "reload" ? fresh : stale, { status: 200 }),
+    );
+
+    const bytes = await fetchBundleWithCache({
+      bundle: {
+        sha256: sha256Hex(fresh),
+        parts: [{ url: partUrl, size: 16, sha256: sha256Hex(fresh) }],
+      },
+    });
+    assert.deepEqual(bytes, fresh);
+    assert.equal(mocks.fetched.length, 2, "one retry");
+    assert.equal(mocks.inits[1]?.cache, "reload");
+  });
 
   it("refetches a cached part with a bad checksum and tolerates cache write failures", async () => {
     const data = new Uint8Array(randomBytes(16));
