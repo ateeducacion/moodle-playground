@@ -11,12 +11,15 @@ function installMocks() {
   const store = new Map();
   let fetchCount = 0;
   const responses = new Map();
+  const inits = [];
 
   globalThis.__fetchCount = () => fetchCount;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init) => {
     fetchCount += 1;
+    inits.push(init);
     const entry = responses.get(String(url));
     if (entry === undefined) return new Response("not found", { status: 404 });
+    if (typeof entry === "function") return entry(init);
     if (typeof entry === "string") {
       return new Response(entry, {
         status: 200,
@@ -42,7 +45,7 @@ function installMocks() {
   // normalizeManifest resolves relative paths against self.location.href.
   globalThis.self = { location: { href: "https://example.test/" } };
 
-  return { responses, store };
+  return { responses, store, inits };
 }
 
 function teardownMocks() {
@@ -173,6 +176,42 @@ describe("fetchAssetWithCache", () => {
         fetchAssetWithCache(url, { sha256: sha256Hex(makeAsset(4 * 1024)) }),
       /checksum mismatch/i,
     );
+  });
+
+  it("refetches past the HTTP cache when the fresh bytes fail verification", async () => {
+    const url = "https://example.test/localcache.zip";
+    const stale = makeAsset(8 * 1024);
+    const fresh = makeAsset(8 * 1024);
+    // A deploy rebuilt the asset at the same URL: the HTTP cache still holds
+    // the previous build while the manifest already advertises the new sha256.
+    mocks.responses.set(
+      url,
+      (init) =>
+        new Response(init?.cache === "reload" ? fresh : stale, { status: 200 }),
+    );
+
+    const got = await fetchAssetWithCache(url, { sha256: sha256Hex(fresh) });
+    assert.deepEqual(got, fresh);
+    assert.equal(globalThis.__fetchCount(), 2, "one retry");
+    assert.equal(
+      mocks.inits[1]?.cache,
+      "reload",
+      "retry bypasses the HTTP cache",
+    );
+    assert.deepEqual(mocks.store.get(url), fresh, "fresh bytes cached");
+  });
+
+  it("stays fail-loud when the revalidated bytes still mismatch", async () => {
+    const url = "https://example.test/localcache.zip";
+    mocks.responses.set(url, makeAsset(4 * 1024));
+
+    await assert.rejects(
+      () =>
+        fetchAssetWithCache(url, { sha256: sha256Hex(makeAsset(4 * 1024)) }),
+      /checksum mismatch/i,
+    );
+    assert.equal(globalThis.__fetchCount(), 2, "retried once, then gave up");
+    assert.equal(mocks.store.size, 0, "a bad artifact is never cached");
   });
 });
 
