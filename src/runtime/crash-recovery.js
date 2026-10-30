@@ -79,6 +79,30 @@ export function isFatalWasmError(error) {
 }
 
 /**
+ * Size of the runtime's WASM linear memory in bytes, or null when it cannot
+ * be read.
+ *
+ * An abort that exits 255 writes nothing to stdout, stderr or error_log, so
+ * the runtime's own state is the only evidence left. Linear memory never
+ * shrinks between requests, so this value — paired with how many requests the
+ * runtime has served — says whether the heap was climbing toward its ceiling
+ * when the abort happened. See issue #405.
+ *
+ * @param {{ binary?: unknown }} php - A wrapped PHP instance.
+ * @returns {Promise<number|null>} Heap size in bytes, or null.
+ */
+export async function readRuntimeHeapBytes(php) {
+  try {
+    const module = await php?.binary;
+    const bytes = module?.HEAPU8?.byteLength;
+    return typeof bytes === "number" ? bytes : null;
+  } catch {
+    // Reading the heap of an already-corrupted runtime can itself throw.
+    return null;
+  }
+}
+
+/**
  * Determine whether a serialized request is safe to replay automatically
  * after a runtime crash.  Only idempotent HTTP methods are replayed to
  * avoid unintentional side-effects (e.g. double form submissions).
