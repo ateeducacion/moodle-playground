@@ -1,7 +1,7 @@
 import { loadPlaygroundConfig } from "./src/shared/config.js";
 import { createPhpBridgeChannel, createShellChannel, formatErrorDetail, formatErrorHtml } from "./src/shared/protocol.js";
 import { bootstrapMoodle, resetRecoveredMoodleCaches, startArchiveResolution } from "./src/runtime/bootstrap.js";
-import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, createSnapshotManager, requestPathname } from "./src/runtime/crash-recovery.js";
+import { isFatalWasmError, isEmscriptenNetworkError, isSafeToReplay, createSnapshotManager, readRuntimeHeapBytes, requestPathname } from "./src/runtime/crash-recovery.js";
 import { isOpcacheEnabled, PHP_ERROR_LOG_PATH } from "./src/runtime/config-template.js";
 import { createPhpRuntime, createProvisioningRuntime } from "./src/runtime/php-loader.js";
 import { escapePhp } from "./src/blueprint/php/helpers.js";
@@ -728,6 +728,24 @@ async function detailWithPhpErrorLog(error) {
   return `${detail}\n\n=== PHP error_log ===\n${text.slice(-2000)}`;
 }
 
+// Evidence for an abort that writes nothing of its own (#405): the runtime's
+// WASM heap size and how many requests it has served. Linear memory never
+// shrinks between requests, so a heap near its ceiling after many requests
+// points at accumulation rather than at one expensive request. Never throws —
+// this runs on the error path.
+async function runtimeDiagnostics() {
+  let php = null;
+  try {
+    php = (await runtimeStatePromise)?.php ?? null;
+  } catch {
+    php = null;
+  }
+  return {
+    requests: requestCount,
+    heapBytes: await readRuntimeHeapBytes(php),
+  };
+}
+
 function installBridgeListener() {
   bridgeChannel.addEventListener("message", (event) => {
     const data = event.data;
@@ -814,9 +832,16 @@ function installBridgeListener() {
 
         if (!isFatalWasmError(error)) {
           // Non-fatal error: return 500 without runtime rotation.
+          // PHP.run() exiting 255 lands here, which is why the runtime
+          // diagnostics are attached on this branch (#405).
           const detail = await detailWithPhpErrorLog(error);
           await respondError(data.id, detail, 500);
-          postShell({ kind: "error", detail, path: requestPathname(data.request) });
+          postShell({
+            kind: "error",
+            detail,
+            path: requestPathname(data.request),
+            ...(await runtimeDiagnostics()),
+          });
           return;
         }
 

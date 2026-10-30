@@ -4,6 +4,7 @@ import {
   createSnapshotManager,
   isFatalWasmError,
   isSafeToReplay,
+  readRuntimeHeapBytes,
   requestPathname,
 } from "../../src/runtime/crash-recovery.js";
 import { formatErrorDetail } from "../../src/shared/protocol.js";
@@ -571,5 +572,33 @@ describe("requestPathname", () => {
   it("falls back to / for a missing or unparsable URL", () => {
     assert.strictEqual(requestPathname(undefined), "/");
     assert.strictEqual(requestPathname({ url: "http://[" }), "/");
+  });
+});
+
+describe("readRuntimeHeapBytes", () => {
+  it("reads the WASM linear memory size off the Emscripten module", async () => {
+    const php = { binary: { HEAPU8: new Uint8Array(64 * 1024) } };
+    assert.strictEqual(await readRuntimeHeapBytes(php), 64 * 1024);
+  });
+
+  it("awaits a module that is still a promise", async () => {
+    const php = {
+      binary: Promise.resolve({ HEAPU8: new Uint8Array(1024) }),
+    };
+    assert.strictEqual(await readRuntimeHeapBytes(php), 1024);
+  });
+
+  it("returns null instead of throwing when the heap is unreachable", async () => {
+    assert.strictEqual(await readRuntimeHeapBytes(null), null);
+    assert.strictEqual(await readRuntimeHeapBytes({}), null);
+    assert.strictEqual(await readRuntimeHeapBytes({ binary: {} }), null);
+    assert.strictEqual(
+      await readRuntimeHeapBytes({
+        get binary() {
+          throw new Error("corrupted linear memory");
+        },
+      }),
+      null,
+    );
   });
 });

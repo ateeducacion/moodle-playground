@@ -228,6 +228,37 @@ describe("runtimeErrorExtra", () => {
       source: "service-worker",
     });
   });
+
+  it("forwards the runtime heap size and request count (#405)", () => {
+    assert.deepStrictEqual(
+      runtimeErrorExtra({
+        detail: "PHP.run() failed with exit code 255.",
+        path: "/r.php/core/esm/1793302377/@moodle/lms/core/config",
+        requests: 47,
+        heapBytes: 1073741824,
+      }),
+      {
+        source: "runtime",
+        path: "/r.php/core/esm/1793302377/@moodle/lms/core/config",
+        requests: 47,
+        heapBytes: 1073741824,
+      },
+    );
+  });
+
+  it("omits the heap fields when the worker could not read them", () => {
+    assert.deepStrictEqual(
+      runtimeErrorExtra({ detail: "x", requests: null, heapBytes: null }),
+      { source: "runtime" },
+    );
+  });
+
+  it("keeps a zero request count, which is not the same as missing", () => {
+    assert.deepStrictEqual(runtimeErrorExtra({ detail: "x", requests: 0 }), {
+      source: "runtime",
+      requests: 0,
+    });
+  });
 });
 
 describe("monitoring environment and request context", () => {

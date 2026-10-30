@@ -291,13 +291,23 @@ export function initMonitoring(options = {}) {
 
 /**
  * Extra data for a runtime "error" message from the remote frame: its source
- * (the frame may classify its own failures) and, for a failed request, the
- * page path, so an exit 255 with empty stdout/stderr still says where it broke.
+ * (the frame may classify its own failures), the page path for a failed
+ * request, and the runtime's heap size and request count, so an exit 255 with
+ * empty stdout/stderr still says where it broke and how loaded the runtime was.
  */
 export function runtimeErrorExtra(message) {
   const extra = { source: message?.source || "runtime" };
   if (message?.path) {
     extra.path = message.path;
+  }
+  // An exit-255 abort reports empty stdout/stderr, so the runtime's heap size
+  // and request count are the only evidence it leaves (#405). Kept out of the
+  // message itself: that string is the Sentry grouping key, and a number that
+  // changes per event would split one issue into hundreds.
+  for (const key of ["requests", "heapBytes"]) {
+    if (Number.isFinite(message?.[key])) {
+      extra[key] = message[key];
+    }
   }
   return extra;
 }
