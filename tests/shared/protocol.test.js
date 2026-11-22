@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createInstanceId,
   createPhpBridgeChannel,
+  createRandomId,
   createShellChannel,
+  createWorkerRequestId,
   formatErrorDetail,
   formatErrorHtml,
   PHP_BRIDGE_CHANNEL_PREFIX,
@@ -102,5 +105,55 @@ describe("formatErrorHtml", () => {
       formatErrorHtml(error),
       '<!doctype html><meta charset="utf-8"><pre>Error: &lt;img src=x onerror="alert(1)"> &amp; more</pre>',
     );
+  });
+});
+
+describe("random id creation", () => {
+  const originalCrypto = globalThis.crypto;
+
+  function setCrypto(val) {
+    Object.defineProperty(globalThis, "crypto", {
+      value: val,
+      configurable: true,
+    });
+  }
+
+  it("uses randomUUID when available", () => {
+    try {
+      setCrypto({ randomUUID: () => "test-uuid-1234" });
+      assert.strictEqual(createRandomId(), "test-uuid-1234");
+      assert.strictEqual(createInstanceId(), "test-uuid-1234");
+      assert.strictEqual(createWorkerRequestId(), "test-uuid-1234");
+    } finally {
+      setCrypto(originalCrypto);
+    }
+  });
+
+  it("falls back to getRandomValues when randomUUID is unavailable", () => {
+    try {
+      setCrypto({
+        getRandomValues: (arr) => {
+          arr.fill(0x12345678);
+          return arr;
+        },
+      });
+      const id = createInstanceId();
+      assert.strictEqual(id, "12345678-12345678-12345678-12345678");
+    } finally {
+      setCrypto(originalCrypto);
+    }
+  });
+
+  it("falls back to a monotonic counter when crypto is undefined", () => {
+    try {
+      setCrypto(undefined);
+      const id1 = createInstanceId();
+      const id2 = createInstanceId();
+      assert.ok(typeof id1 === "string" && id1.length > 0);
+      assert.ok(typeof id2 === "string" && id2.length > 0);
+      assert.notStrictEqual(id1, id2);
+    } finally {
+      setCrypto(originalCrypto);
+    }
   });
 });

@@ -10,8 +10,34 @@ export function createPhpBridgeChannel(scopeId) {
   return `${PHP_BRIDGE_CHANNEL_PREFIX}:${scopeId}`;
 }
 
+let randomIdCounter = 0;
+
+export function createRandomId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const words =
+    globalThis.crypto?.getRandomValues?.(new Uint32Array(4)) || null;
+  if (words) {
+    return Array.from(words, (w) => w.toString(16).padStart(8, "0")).join("-");
+  }
+
+  randomIdCounter += 1;
+  const timestamp = Date.now().toString(36);
+  const monotonic = Math.floor(globalThis.performance?.now?.() || 0).toString(
+    36,
+  );
+  const rand = Math.floor(Math.random() * 0xffffffff).toString(36);
+  return `${timestamp}-${monotonic}-${randomIdCounter.toString(36)}-${rand}`;
+}
+
 export function createWorkerRequestId() {
-  return globalThis.crypto.randomUUID();
+  return createRandomId();
+}
+
+export function createInstanceId() {
+  return createRandomId();
 }
 
 /**
