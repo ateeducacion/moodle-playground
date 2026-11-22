@@ -25,6 +25,7 @@ import {
 } from "../shared/monitoring.js";
 import { blueprintSourceKey, resolveRemoteUrl } from "../shared/paths.js";
 import {
+  createInstanceId,
   createShellChannel,
   formatErrorDetail,
   SNAPSHOT_VERSION,
@@ -324,7 +325,7 @@ async function updateFrame() {
     profile: currentProfileParam,
     opcache: currentOpcacheParam,
   });
-  instanceId = crypto.randomUUID();
+  instanceId = createInstanceId();
   url.searchParams.set("instance", instanceId);
   channel?.close();
   bindShellChannel();

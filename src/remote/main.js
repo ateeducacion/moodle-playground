@@ -1,7 +1,7 @@
 import { loadBlueprint } from "../blueprint/index.js";
 import { loadPlaygroundConfig } from "../shared/config.js";
 import { buildScopedSitePath } from "../shared/paths.js";
-import { createShellChannel } from "../shared/protocol.js";
+import { createInstanceId, createShellChannel } from "../shared/protocol.js";
 import { acquireScopeOwnership } from "../shared/scope-ownership.js";
 import {
   isServiceWorkerUnsupportedError,
@@ -25,7 +25,7 @@ const CONTROL_RELOAD_KEY_PREFIX = "moodle-playground:remote-sw-controlled";
 let phpWorker;
 const instanceId =
   new URL(window.location.href).searchParams.get("instance") ||
-  crypto.randomUUID();
+  createInstanceId();
 let releaseScope;
 let disposed = false;
 let bootstrapTask;
